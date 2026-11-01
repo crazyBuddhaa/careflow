@@ -2,6 +2,12 @@ import type { NextConfig } from 'next';
 import path from 'path';
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: [
+    '**.run.app',
+    '**.vercel.app',
+    '**.google.com',
+    '**.googleusercontent.com',
+  ],
   transpilePackages: [
     '@careflow/shared',
     '@careflow/validation',
