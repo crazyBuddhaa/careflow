@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Deployment & Infrastructure
+.vercel/
+supabase/.branches/
+supabase/.temp/
+
+# System & Logs
+.DS_Store
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment Variables
+.env*
+!.env.example
+

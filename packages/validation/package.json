@@ -1,0 +1,18 @@
+{
+  "name": "@careflow/validation",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@careflow/shared": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@careflow/widget",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CareFlow Embeddable Customer Support Widget SDK scaffold",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@careflow/shared": "workspace:*",
+    "@careflow/validation": "workspace:*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

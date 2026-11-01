@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "paths": {
+      "@careflow/shared": ["./packages/shared/src/index.ts"],
+      "@careflow/shared/*": ["./packages/shared/src/*"],
+      "@careflow/validation": ["./packages/validation/src/index.ts"],
+      "@careflow/validation/*": ["./packages/validation/src/*"],
+      "@careflow/database": ["./packages/database/src/index.ts"],
+      "@careflow/database/*": ["./packages/database/src/*"],
+      "@careflow/support-engine": ["./packages/support-engine/src/index.ts"],
+      "@careflow/support-engine/*": ["./packages/support-engine/src/*"],
+      "@/*": ["./apps/web/src/*"]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "apps/web/next-env.d.ts",
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "packages/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "dist", "apps/web/.next"]
+}
