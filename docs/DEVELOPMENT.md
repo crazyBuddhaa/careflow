@@ -14,7 +14,7 @@
 Clone the repository from GitHub and install all workspace dependencies from the monorepo root:
 
 ```bash
-git clone https://github.com/<your-org>/careflow.git
+git clone https://github.com/crazyBuddhaa/careflow.git
 cd careflow
 pnpm install
 ```
