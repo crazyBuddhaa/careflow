@@ -101,7 +101,7 @@ CareFlow is pre-configured for **Cloudflare Workers** (`@opennextjs/cloudflare` 
 2. Bind the D1 database to the `careflow` Worker with variable name **`DB`**:
    - **Option 1 (Cloudflare Dashboard — zero code edit):** Go to **Workers & Pages → careflow → Settings → Bindings → Add → D1 database**, set Variable name to `DB`, and select `careflow-db`.
    - **Option 2 (`wrangler.jsonc`):** Uncomment the `d1_databases` block in `/wrangler.jsonc` and paste your `database_id`.
-3. *(Optional)* Run SQL migrations explicitly (`cloudflare/d1/migrations/0001_business_knowledge_management.sql`):
+3. *(Optional)* Run SQL migrations explicitly (`cloudflare/d1/migrations/0001_business_knowledge_management.sql` and `0002_portal_settings_and_operations.sql`):
    ```bash
    npx wrangler d1 migrations apply careflow-db --remote
    ```
@@ -113,7 +113,9 @@ In **Workers & Pages → careflow → Settings → Variables and Secrets** (or v
 - `CAREFLOW_ADMIN_PASSCODE` — strong workspace administrator passcode
 
 ### D. Post-Deploy Verification
-- Visit `https://<your-worker>.workers.dev/` for the central CareFlow website.
-- Visit `https://<your-worker>.workers.dev/portal/ultimatetechapp` for the business support portal.
-- Visit `https://<your-worker>.workers.dev/admin` to sign in and manage business knowledge in Cloudflare D1.
+- Visit `https://<your-worker>.workers.dev/` for the central CareFlow platform website.
+- Visit `https://<your-worker>.workers.dev/portals` for the public business support portal directory.
+- Visit `https://<your-worker>.workers.dev/portal/ultimatetechapp` and `/portal/northstar-commerce` for tenant-isolated business support portals.
+- Visit `https://<your-worker>.workers.dev/onboarding` to provision a new business workspace and support portal.
+- Visit `https://<your-worker>.workers.dev/login` and `/admin` to sign in and manage business profile, branding, knowledge base, FAQs, chatbot rules, conversations, customers, agents, and analytics.
 - Visit `https://<your-worker>.workers.dev/api/health` to verify runtime health.

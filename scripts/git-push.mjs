@@ -107,13 +107,16 @@ async function main() {
     process.exit(1);
   }
 
+  const rawArgs = process.argv.slice(2);
+  const allowEmpty = rawArgs.includes('--empty') || rawArgs.includes('--allow-empty');
+  const messageArgs = rawArgs.filter((arg) => arg !== '--empty' && arg !== '--allow-empty');
   const commitMessage =
-    process.argv.slice(2).join(' ').trim() ||
-    'feat: complete central platform, business portals, admin dashboard, and Worker runtime fixes';
+    messageArgs.join(' ').trim() ||
+    'chore: sync CareFlow workspace changes and trigger deployment';
 
   const { user, repoFullName, branch } = await resolveGitHubTarget(token);
   const remoteUrl = `https://github.com/${repoFullName}.git`;
-  const basicAuth = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+  const basicAuth = Buffer.from(`${user.login}:${token}`, 'utf8').toString('base64');
   const authArgs = ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basicAuth}`];
 
   console.log(`[careflow] Syncing with ${repoFullName} (branch: ${branch})...`);
@@ -122,9 +125,8 @@ async function main() {
     runGit(['init', '-b', branch]);
   }
 
-  const authorName = user.name || user.login || 'CareFlow Maintainer';
-  const authorEmail =
-    user.email || `${user.id}+${user.login}@users.noreply.github.com`;
+  const authorName = user.name || user.login || 'CareFlow Architect';
+  const authorEmail = user.email || 'asuracorps@gmail.com';
   runGit(['config', 'user.name', authorName]);
   runGit(['config', 'user.email', authorEmail]);
 
@@ -155,17 +157,17 @@ async function main() {
   runGit(['add', '-A']);
 
   const statusOutput = runGit(['status', '--porcelain']);
-  if (!statusOutput) {
+  if (!statusOutput && !allowEmpty) {
     console.log(`[careflow] Working tree matches ${repoFullName}@${branch} — nothing new to commit.`);
     return;
   }
 
-  console.log(`[careflow] Staging ${statusOutput.split('\n').length} changed file(s)...`);
-  runGit(['commit', '-m', commitMessage]);
+  const commitArgs = ['commit', ...(allowEmpty ? ['--allow-empty'] : []), '-m', commitMessage];
+  runGit(commitArgs);
   runGit([...authArgs, 'push', '-u', 'origin', branch]);
 
   const latestSha = runGit(['rev-parse', '--short', 'HEAD']);
-  console.log(`[careflow] Pushed commit ${latestSha} -> ${repoFullName} (${branch}).`);
+  console.log(`[careflow] Pushed separate commit ${latestSha} -> ${repoFullName} (${branch}).`);
 }
 
 main().catch((err) => {
