@@ -2,7 +2,7 @@
 
 @theme {
   --font-display: var(--font-jakarta), sans-serif;
-  --font-sans: var(--font-public-sans), sans-serif;
+  --font-sans: var(--font-jakarta), var(--font-public-sans), sans-serif;
   --font-mono: var(--font-jetbrains-mono), monospace;
 }
 
@@ -10,7 +10,7 @@
   html {
     scroll-behavior: smooth;
     font-family: var(--font-sans);
-    background-color: #fafaf9;
+    background-color: #f8fafc;
     color: #0f172a;
     -webkit-font-smoothing: antialiased;
   }

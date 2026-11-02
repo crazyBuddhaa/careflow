@@ -4,7 +4,7 @@ import './globals.css';
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
-  weight: ['600', '700'],
+  weight: ['400', '600', '700'],
   variable: '--font-jakarta',
   display: 'swap',
 });
@@ -24,13 +24,13 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CareFlow — Smarter Support. Better Experiences.',
+  title: 'CareFlow — Customer Support Center',
   description:
-    'Smarter Support. Better Experiences. A modular customer support platform built for UltimateTechApp.',
+    'Get help with deposits, learn how to use products, follow guided support, or connect with a human representative.',
   openGraph: {
-    title: 'CareFlow — Smarter Support. Better Experiences.',
+    title: 'CareFlow — Customer Support Center',
     description:
-      'Smarter Support. Better Experiences. A modular customer support platform built for UltimateTechApp.',
+      'Get help with deposits, learn how to use products, follow guided support, or connect with a human representative.',
     type: 'website',
   },
 };
@@ -45,7 +45,7 @@ export default function RootLayout({
       lang="en"
       className={`${plusJakartaSans.variable} ${publicSans.variable} ${jetbrainsMono.variable}`}
     >
-      <body className="min-h-screen bg-stone-50 text-slate-900 selection:bg-blue-700 selection:text-white">
+      <body className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-600 selection:text-white">
         {children}
       </body>
     </html>
