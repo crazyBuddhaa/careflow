@@ -16,6 +16,7 @@ export interface RegisteredWorkspaceSummary {
 interface SignedSessionPayload {
   userId: string;
   email: string;
+  userName?: string;
   organizationId: string;
   organizationName: string;
   organizationSlug: string;
@@ -136,6 +137,7 @@ export async function resolveServerAdminSession(): Promise<{
   identity: AuthSessionIdentity | null;
   organizationName?: string;
   organizationSlug?: string;
+  userName?: string;
 }> {
   const cookieStore = await cookies();
   const rawToken = cookieStore.get(ADMIN_SESSION_COOKIE_NAME)?.value;
@@ -154,6 +156,7 @@ export async function resolveServerAdminSession(): Promise<{
     },
     organizationName: verified.organizationName,
     organizationSlug: verified.organizationSlug,
+    userName: verified.userName,
   };
 }
 

@@ -728,7 +728,7 @@ export function buildDefaultPortalConfigForNewBusiness(params: {
     slug,
     verifiedHostnames: [`${slug}.careflow.com`, `${slug}.localhost`],
     contactEmail,
-    supportHours: 'Monday – Friday · 09:00 – 18:00 UTC',
+    supportHours: '',
     branding: {
       displayName: businessName,
       logoText: `${businessName} Support`,

@@ -279,15 +279,46 @@ export function SupportPortalLanding({
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+      {/* Draft / Private Preview Banner for Unpublished Portals */}
+      {portalConfig.onboardingStatus && portalConfig.onboardingStatus !== 'published' && (
+        <div className="bg-amber-950 text-amber-100 border-b border-amber-800/70 px-6 py-2.5 text-xs">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-amber-400" />
+              <span className="font-bold uppercase tracking-wider text-amber-300">
+                Private Preview Mode
+              </span>
+              <span className="text-amber-100/90">
+                — This support portal is currently in draft status ({portalConfig.onboardingStatus.replace(/_/g, ' ')}) and has not been published yet.
+              </span>
+            </div>
+            <Link
+              href="/admin"
+              className="font-bold text-amber-300 hover:text-white underline underline-offset-4 whitespace-nowrap"
+            >
+              Return to Onboarding Dashboard &rarr;
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* 1. Navigation — Strict 3-Zone Top Bar Contract */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
-          {/* Zone 1: Business Portal Brand Wordmark */}
+          {/* Zone 1: Business Portal Brand Logo & Wordmark */}
           <a
             href="#top"
-            className="text-xl font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
+            className="flex items-center gap-2.5 text-xl font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
-            {branding.displayName}
+            {branding.logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={branding.logoUrl}
+                alt={`${branding.displayName} logo`}
+                className="h-8 w-8 rounded-lg object-contain border border-slate-200/70 bg-white p-0.5"
+              />
+            )}
+            <span>{branding.displayName}</span>
           </a>
 
           {/* Zone 2: Concise single-line navigation links */}
@@ -336,6 +367,7 @@ export function SupportPortalLanding({
             <button
               type="button"
               onClick={() => scrollToAssistantAndStart()}
+              style={branding.primaryColor ? { backgroundColor: branding.primaryColor } : undefined}
               className={`py-2.5 px-5 text-sm font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer ${theme.primaryBtn}`}
             >
               Get Help
@@ -418,7 +450,10 @@ export function SupportPortalLanding({
                 transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 className="lg:col-span-6"
               >
-                <p className={`text-xs font-semibold ${theme.eyebrow}`}>
+                <p
+                  style={branding.secondaryColor ? { color: branding.secondaryColor } : undefined}
+                  className={`text-xs font-semibold ${theme.eyebrow}`}
+                >
                   {branding.portalSubtitle}
                 </p>
 
@@ -437,6 +472,7 @@ export function SupportPortalLanding({
                       handleResetConversation();
                       scrollToAssistantAndStart();
                     }}
+                    style={branding.primaryColor ? { backgroundColor: branding.primaryColor } : undefined}
                     className={`inline-flex items-center gap-2 py-3 px-6 text-sm font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer ${theme.primaryBtn}`}
                   >
                     <MessageSquareText className="w-4 h-4" aria-hidden="true" />
@@ -1009,9 +1045,6 @@ export function SupportPortalLanding({
             <a href="#help-topics" className="hover:text-slate-900 transition-colors">
               Help Topics
             </a>
-            <Link href="/portals" className="hover:text-slate-900 transition-colors">
-              Switch Portal
-            </Link>
             <button
               type="button"
               onClick={() => openEscalationForm()}

@@ -4,6 +4,7 @@ import {
   MessageSenderType,
   SupportChannel,
   UserRole,
+  type BusinessOnboardingStatus,
 } from './types';
 
 export type PortalIconKey = 'wallet' | 'compass' | 'user-check' | 'help-circle';
@@ -52,6 +53,8 @@ export interface PortalBrandingConfig {
   displayName: string;
   logoText: string;
   logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
   accentTheme: PortalAccentTheme;
   portalSubtitle: string;
 }
@@ -123,6 +126,7 @@ export interface PortalEscalationSettings {
 export interface BusinessPortalConfig {
   organizationId: string;
   slug: string;
+  onboardingStatus?: BusinessOnboardingStatus;
   verifiedHostnames: string[];
   contactEmail?: string;
   supportHours?: string;
@@ -246,6 +250,7 @@ export interface PortalAssistantResponseDto {
 }
 
 export type AdminModuleSectionKey =
+  | 'onboarding-guide'
   | 'business-profile'
   | 'branding'
   | 'knowledge-overview'
@@ -258,3 +263,31 @@ export type AdminModuleSectionKey =
   | 'conversations'
   | 'customers'
   | 'analytics';
+
+export interface OnboardingStepItemStatus {
+  step: number;
+  id: string;
+  title: string;
+  description: string;
+  completed: boolean;
+  isOptional: boolean;
+  summary: string;
+}
+
+export interface OnboardingProgressReport {
+  organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  country?: string;
+  industry?: string;
+  website?: string;
+  status: 'incomplete' | 'in_progress' | 'ready_to_publish' | 'published' | 'suspended';
+  currentStep: number;
+  completedStepsCount: number;
+  totalStepsCount: number;
+  completionPercentage: number;
+  canPublish: boolean;
+  missingRequirements: string[];
+  steps: OnboardingStepItemStatus[];
+  lastSavedAt: string;
+}

@@ -24,6 +24,7 @@ export enum UserRole {
   Agent = 'agent',
   Supervisor = 'supervisor',
   Admin = 'admin',
+  Owner = 'owner',
 }
 
 export enum MessageSenderType {
@@ -32,10 +33,42 @@ export enum MessageSenderType {
   Agent = 'agent',
 }
 
+export type BusinessOnboardingStatus =
+  | 'incomplete'
+  | 'in_progress'
+  | 'ready_to_publish'
+  | 'published'
+  | 'suspended';
+
+export interface CareFlowUserRecord {
+  id: string;
+  email: string;
+  fullName: string;
+  emailVerified: boolean;
+  createdAt: string;
+}
+
+export interface UserWorkspaceMembership {
+  organizationId: string;
+  organizationSlug: string;
+  organizationName: string;
+  role: UserRole;
+  country: string;
+  industry: string;
+  website?: string;
+  onboardingStatus: BusinessOnboardingStatus;
+  onboardingStep: number;
+}
+
 export interface Organization {
   id: string;
   slug: string;
   name: string;
+  country?: string;
+  industry?: string;
+  website?: string;
+  onboardingStatus?: BusinessOnboardingStatus;
+  onboardingStep?: number;
   createdAt: string;
 }
 
@@ -135,24 +168,6 @@ export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 export interface HealthCheckReport {
   service: string;
   version: string;
-  client: string;
   status: 'operational' | 'degraded';
-  environment: string;
-  architecture: {
-    hosting: 'vercel-ready';
-    backend: 'nextjs-route-handlers';
-    database: 'supabase-postgresql';
-    realtime: 'supabase-realtime-prepared';
-    channels: SupportChannel[];
-  };
-  supabase: {
-    publicClientConfigured: boolean;
-    serverRoleConfigured: boolean;
-  };
-  modules: Array<{
-    key: string;
-    name: string;
-    stage: 'scaffolded' | 'ready';
-  }>;
   timestamp: string;
 }

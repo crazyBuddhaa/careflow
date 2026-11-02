@@ -10,187 +10,261 @@ import {
   UserCheck,
   Globe,
   ShieldCheck,
-  Layers,
+  MessageSquareText,
+  BarChart3,
+  CheckCircle2,
+  ChevronDown,
   Menu,
   X,
 } from 'lucide-react';
 import { CAREFLOW_NAME } from '@careflow/shared';
 
-type PlatformLayerTab = 'knowledge' | 'troubleshooting' | 'escalation' | 'channels';
+type DemoIndustryId = 'fintech' | 'ecommerce' | 'software';
 
-interface LayerPreview {
-  id: PlatformLayerTab;
-  tabLabel: string;
-  eyebrow: string;
-  title: string;
-  description: string;
-  mechanismLabel: string;
-  mechanismSteps: string[];
-  highlights: string[];
+interface DemoScenarioPrompt {
+  id: string;
+  customerQuestion: string;
+  resolutionStage: string;
+  matchedSource: string;
+  assistantReply: string;
+  specialistSummary: string;
+  outcomeNote: string;
 }
 
-const PLATFORM_LAYERS: LayerPreview[] = [
+interface DemoIndustryScenario {
+  id: DemoIndustryId;
+  label: string;
+  companyExample: string;
+  portalDomain: string;
+  summary: string;
+  prompts: DemoScenarioPrompt[];
+}
+
+const DEMO_SCENARIOS: DemoIndustryScenario[] = [
   {
-    id: 'knowledge',
-    tabLabel: 'Knowledge Assistance',
-    eyebrow: '01 · Knowledge-Based Customer Assistance',
-    title: 'Answer customer questions from verified business knowledge',
-    description:
-      'Each business publishes its own structured help articles, FAQs, and supported topics so customers receive consistent answers grounded strictly in that organization’s documentation.',
-    mechanismLabel: 'Customer Question → Scoped Retrieval → Grounded Citation',
-    mechanismSteps: [
-      'Customer types a natural-language question or browses portal topics',
-      'CareFlow checks restricted-topic boundaries configured by the business',
-      'Approved FAQs and published articles return an answer with source context',
-    ],
-    highlights: [
-      'Independent knowledge base, categories, and FAQs per business',
-      'Strict topic boundaries so unrelated questions are declined cleanly',
-      'Shared source of truth across self-service portals and human support',
+    id: 'fintech',
+    label: 'Fintech & Payments',
+    companyExample: 'Aurelia Pay',
+    portalDomain: 'aureliapay.careflow.com',
+    summary: 'Resolve payment confirmation, payout schedules, and account verification without queue bottlenecks.',
+    prompts: [
+      {
+        id: 'fin-1',
+        customerQuestion: 'I sent a bank transfer 10 minutes ago—why hasn’t my balance updated?',
+        resolutionStage: 'Guided Troubleshooting + Verified FAQ',
+        matchedSource: 'Verifying Transfer References & Settlement Windows',
+        assistantReply:
+          'Standard bank transfers settle within 15 minutes when your payment reference matches your Aurelia Pay account ID. Please check your receipt reference—if it has been over 15 minutes or the reference was omitted, we can pass your receipt straight to our payments desk.',
+        specialistSummary: 'Resolved automatically in self-service · No ticket needed unless reference mismatched.',
+        outcomeNote: 'Deflects routine transfer status checks while flagging genuine mismatches fast.',
+      },
+      {
+        id: 'fin-2',
+        customerQuestion: 'I forgot to include my reference code on transfer #TXN-4082. Can someone help?',
+        resolutionStage: 'Context-Ready Human Handoff',
+        matchedSource: 'Missing Reference Escalation Rule',
+        assistantReply:
+          'I have prepared your request for a Payment Reconciliation Specialist with reference #TXN-4082 attached. Confirm your contact email below and our team will credit your account once verified.',
+        specialistSummary:
+          'Topic: Deposit Reconciliation · Ref: #TXN-4082 · Prior check: Missing transfer reference confirmed.',
+        outcomeNote: 'Specialists receive the exact transaction reference on the very first message.',
+      },
+      {
+        id: 'fin-3',
+        customerQuestion: 'Which currency or stock should I invest my balance in this month?',
+        resolutionStage: 'Policy Scope Protection',
+        matchedSource: 'Out-of-Scope Rule · Financial & Investment Advice',
+        assistantReply:
+          'I can help with Aurelia Pay transfers, card controls, payouts, and account verification, but I cannot provide investment or financial advice. Would you like help with an account or payment question instead?',
+        specialistSummary: 'Polite boundary response · Zero invented policies or compliance risk.',
+        outcomeNote: 'Keeps every automated answer strictly inside your approved business scope.',
+      },
     ],
   },
   {
-    id: 'troubleshooting',
-    tabLabel: 'Guided Troubleshooting',
-    eyebrow: '02 · Automated Troubleshooting',
-    title: 'Walk customers through clear step-by-step problem resolution',
-    description:
-      'Before an enquiry reaches a support queue, CareFlow guides customers through structured diagnostic steps for recurring issues like payment checks, account setup, or order tracking.',
-    mechanismLabel: 'Issue Selection → Step-by-Step Prompts → Self-Service Resolution',
-    mechanismSteps: [
-      'Customer selects a quick help category or triggers a diagnostic phrase',
-      'Interactive decision steps verify common checks in plain language',
-      'Routine issues resolve immediately without waiting in an agent queue',
-    ],
-    highlights: [
-      'Configurable decision paths tailored to each business’s products',
-      'Captures customer answers and context as they progress',
-      'Resolves routine enquiries without waiting for an available agent',
+    id: 'ecommerce',
+    label: 'E-Commerce & Retail',
+    companyExample: 'Northstar Goods',
+    portalDomain: 'northstar.careflow.com',
+    summary: 'Turn "Where is my order?", size exchanges, and invoice requests into effortless self-service.',
+    prompts: [
+      {
+        id: 'eco-1',
+        customerQuestion: 'How do I exchange a jacket I received yesterday for a medium?',
+        resolutionStage: 'Published Help Article',
+        matchedSource: '30-Day Prepaid Exchanges & Returns Guide',
+        assistantReply:
+          'Unworn items in original packaging qualify for a free size exchange within 30 days of delivery. Open your Order Summary, select Start Exchange, and print your prepaid courier label—your replacement ships as soon as the parcel is scanned.',
+        specialistSummary: 'Answered immediately from published return policy · Zero wait time for customer.',
+        outcomeNote: 'Gives shoppers instant confidence to complete exchanges without emailing support.',
+      },
+      {
+        id: 'eco-2',
+        customerQuestion: 'Order #NS-9184 arrived with a damaged Ceramic Vase inside.',
+        resolutionStage: 'Context-Ready Human Handoff',
+        matchedSource: 'Damaged Parcel Fulfillment Rule',
+        assistantReply:
+          'I am sorry your item arrived damaged. I have routed Order #NS-9184 to our Fulfillment Specialists so we can arrange an immediate replacement—no need to repeat your order details.',
+        specialistSummary:
+          'Topic: Damaged Shipment · Order: #NS-9184 · Item: Ceramic Vase · Priority queue: Fulfillment Desk.',
+        outcomeNote: 'Routes urgent fulfillment issues straight to the right specialist with order context.',
+      },
+      {
+        id: 'eco-3',
+        customerQuestion: 'Where can I download a VAT invoice for my company purchase?',
+        resolutionStage: 'Verified FAQ',
+        matchedSource: 'Downloading PDF Order & VAT Invoices',
+        assistantReply:
+          'Every completed order includes a downloadable PDF VAT invoice inside Account → Order History. If you need a company tax ID amended on an existing invoice, our billing desk can update it for you.',
+        specialistSummary: 'Instant self-service resolution from approved billing FAQ.',
+        outcomeNote: 'Eliminates repetitive invoice copy requests from your daily support inbox.',
+      },
     ],
   },
   {
-    id: 'escalation',
-    tabLabel: 'Human Handoff',
-    eyebrow: '03 · Human-Agent Escalation',
-    title: 'Pass unresolved enquiries to human specialists with context intact',
-    description:
-      'When guided steps do not solve an issue, CareFlow prepares the conversation for a human representative—carrying forward the selected category, customer reference, and troubleshooting path.',
-    mechanismLabel: 'Unresolved Path → Context Attached → Specialist Queue',
-    mechanismSteps: [
-      'Customer requests human help after completing guided checks',
-      'Conversation transcript and topic category attach automatically',
-      'Support specialists reply from their isolated Business Admin inbox',
-    ],
-    highlights: [
-      'Customers do not have to repeat basic issue details',
-      'Configurable escalation rules and support instructions per business',
-      'Clear separation between automated guidance and human representation',
-    ],
-  },
-  {
-    id: 'channels',
-    tabLabel: 'Multi-Channel Architecture',
-    eyebrow: '04 · Multi-Channel Support',
-    title: 'Connect dedicated web portals, embeddable widgets, and messaging',
-    description:
-      'Every business receives its own branded support portal alongside shared conversation contracts prepared for website widgets and messaging channels such as Telegram.',
-    mechanismLabel: 'Verified Hostname → Tenant Isolation → Unified Inbox',
-    mechanismSteps: [
-      'Hostname routing maps businessname.careflow.com to the right portal',
-      'Portal branding, categories, and chatbot tone load from tenant storage',
-      'Web portal, widget, and messaging threads stay strictly isolated per business',
-    ],
-    highlights: [
-      'Dedicated subdomain or custom-domain portal architecture per business',
-      'Unified conversation and message structure across intake channels',
-      'Strict tenant isolation between independent businesses',
+    id: 'software',
+    label: 'Software & Digital Services',
+    companyExample: 'Veloce Cloud',
+    portalDomain: 'veloce.careflow.com',
+    summary: 'Guide users through product setup, team permissions, and billing questions around the clock.',
+    prompts: [
+      {
+        id: 'saas-1',
+        customerQuestion: 'Why is the "Publish Project" button disabled in my workspace?',
+        resolutionStage: 'Guided Troubleshooting Flow',
+        matchedSource: 'Project Publishing Checklist',
+        assistantReply:
+          'Let’s check two quick items: (1) Confirm your workspace role is Editor or Admin, and (2) Verify a custom domain or staging target is selected in Project Settings. Completing both unlocks Publish Project immediately.',
+        specialistSummary: 'Step-by-step product diagnostic completed in seconds.',
+        outcomeNote: 'Walks users through product configuration checks before a ticket is ever filed.',
+      },
+      {
+        id: 'saas-2',
+        customerQuestion: 'We need to migrate 45 seats to annual invoicing with a purchase order.',
+        resolutionStage: 'Context-Ready Human Handoff',
+        matchedSource: 'Enterprise Billing & Annual Plan Handoff',
+        assistantReply:
+          'Our Account Billing team handles annual purchase orders for 25+ seats. I have attached your 45-seat migration request so a billing specialist can send your annual quote right away.',
+        specialistSummary:
+          'Topic: Annual PO Upgrade · Volume: 45 seats · Routed to: Account & Billing Specialists.',
+        outcomeNote: 'Captures high-value expansion requests cleanly with seat count attached.',
+      },
+      {
+        id: 'saas-3',
+        customerQuestion: 'How do I remove a former contractor and revoke their active session?',
+        resolutionStage: 'Published Help Article',
+        matchedSource: 'Managing Team Members & Session Access',
+        assistantReply:
+          'Open Settings → Team Members, select the user, and click Revoke Access. Their active sessions end immediately while their historical project activity remains intact for your audit log.',
+        specialistSummary: 'Answered directly from verified security documentation.',
+        outcomeNote: 'Delivers clear, accurate security steps when customers need fast reassurance.',
+      },
     ],
   },
 ];
 
-const RESPONSE_PRIORITY_TIERS = [
+const CORE_FEATURES = [
   {
-    order: '01',
-    name: 'Programmed Business Rules & FAQs',
-    detail: 'Approved answers and explicit topic boundaries configured by the business.',
-  },
-  {
-    order: '02',
-    name: 'Published Knowledge Base Retrieval',
-    detail: 'Structured articles and step-by-step guides scoped strictly to that workspace.',
-  },
-  {
-    order: '03',
-    name: 'Guided Troubleshooting Procedures',
-    detail: 'Interactive diagnostic checklists for recurring payment, order, or product issues.',
-  },
-  {
-    order: '04',
-    name: 'Optional External AI Fallback',
-    detail: 'Configurable provider fallback (off by default) with strict confidence and daily caps.',
-  },
-  {
-    order: '05',
-    name: 'Human-Agent Escalation',
-    detail: 'Direct handoff to the business’s support queue with full conversation context.',
-  },
-];
-
-const HOW_PLATFORM_WORKS = [
-  {
-    step: '01',
-    title: 'Configure your business workspace',
+    title: 'Branded Customer Support Portals',
     description:
-      'Define your branding, welcome message, help categories, published articles, FAQs, and topic boundaries inside your isolated administration dashboard.',
+      'Launch a polished support center on your own CareFlow subdomain with your company name, accent theme, welcome headline, and support hours.',
+    icon: Globe,
   },
   {
-    step: '02',
-    title: 'Launch your dedicated support portal',
+    title: 'Verified Knowledge Base & FAQs',
     description:
-      'Provide customers with a clean, branded support destination (such as businessname.careflow.com) where they can browse topics or start guided assistance.',
-  },
-  {
-    step: '03',
-    title: 'Resolve automatically or hand off cleanly',
-    description:
-      'Let structured knowledge and troubleshooting handle common questions while routing complex enquiries directly to your human support specialists.',
-  },
-];
-
-const BUSINESS_BENEFITS = [
-  {
-    title: 'Fewer repetitive enquiries',
-    description:
-      'Guided troubleshooting and clear FAQs address recurring customer questions before they enter your team’s queue.',
-    icon: GitBranch,
-  },
-  {
-    title: 'Strict business boundaries',
-    description:
-      'Each organization controls its own supported topics, communication style, and published procedures without cross-business data mixing.',
-    icon: ShieldCheck,
-  },
-  {
-    title: 'Organized product knowledge',
-    description:
-      'Centralize articles, categories, and step-by-step instructions so customers always see accurate guidance.',
+      'Organize help articles and canonical Q&As by topic category. Publish updates once and keep both your portal and assistant in sync.',
     icon: BookOpen,
   },
   {
-    title: 'Prepared for multi-channel growth',
+    title: 'Step-by-Step Troubleshooting',
     description:
-      'Built on a modular Cloudflare-ready architecture connecting branded customer portals, web widgets, and messaging integrations.',
-    icon: Layers,
+      'Build clear diagnostic flows for recurring payment, order, or product issues so customers solve routine problems on the spot.',
+    icon: GitBranch,
+  },
+  {
+    title: 'Strict Topic & Voice Guardrails',
+    description:
+      'Choose what your assistant answers, what it politely declines, and how it speaks—so it never guesses or invents company policies.',
+    icon: ShieldCheck,
+  },
+  {
+    title: 'Context-Rich Specialist Inbox',
+    description:
+      'When a customer requests human help, your team receives their topic, reference ID, and conversation transcript in one unified queue.',
+    icon: MessageSquareText,
+  },
+  {
+    title: 'Specialist Routing & Live Metrics',
+    description:
+      'Assign specialists by expertise, manage real-time availability, and track top enquiry categories and resolution performance.',
+    icon: BarChart3,
+  },
+];
+
+const LAUNCH_STEPS = [
+  {
+    step: '01',
+    title: 'Customize your brand & portal',
+    description:
+      'Set your company name, CareFlow subdomain, visual theme, welcome message, and assistant tone in a guided setup flow.',
+  },
+  {
+    step: '02',
+    title: 'Add your top answers & checklists',
+    description:
+      'Publish the FAQs, help guides, and step-by-step troubleshooting procedures your customers ask about every day.',
+  },
+  {
+    step: '03',
+    title: 'Share your portal & resolve faster',
+    description:
+      'Customers get instant, accurate answers 24/7—and your team handles complex requests from one organized CareFlow inbox.',
+  },
+];
+
+const BUYER_FAQS = [
+  {
+    id: 'faq-1',
+    question: 'How quickly can we launch a CareFlow portal for our customers?',
+    answer:
+      'You can create your workspace and launch a live, branded customer support portal in minutes. CareFlow sets up your starter categories, welcome experience, and assistant immediately so you can refine articles and FAQs at your own pace.',
+  },
+  {
+    id: 'faq-2',
+    question: 'Will the assistant ever make up policies, prices, or promises?',
+    answer:
+      'No. CareFlow prioritizes your approved FAQs, published help articles, and step-by-step procedures first, and enforces your out-of-scope topic rules so unrelated or sensitive questions are declined cleanly rather than guessed.',
+  },
+  {
+    id: 'faq-3',
+    question: 'What happens when a customer needs a real person on our team?',
+    answer:
+      'At any point, customers can request human support. CareFlow captures their name, email, order or transaction reference, selected category, and recent conversation steps—placing the complete thread directly into your workspace inbox.',
+  },
+  {
+    id: 'faq-4',
+    question: 'Can we update our branding, articles, and assistant rules anytime?',
+    answer:
+      'Yes. Sign in to your CareFlow workspace anytime to publish or unpublish articles, update FAQs, adjust troubleshooting steps, refine assistant tone, and reply to customer conversations with zero engineering work.',
   },
 ];
 
 export function CentralPlatformHome() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeLayer, setActiveLayer] = useState<PlatformLayerTab>('knowledge');
-  const [heroImgFailed, setHeroImgFailed] = useState(false);
+  const [selectedIndustry, setSelectedIndustry] = useState<DemoIndustryId>('fintech');
+  const [selectedPromptIndex, setSelectedPromptIndex] = useState(0);
+  const [openFaqId, setOpenFaqId] = useState<string | null>(BUYER_FAQS[0].id);
 
-  const selectedLayer =
-    PLATFORM_LAYERS.find((layer) => layer.id === activeLayer) ?? PLATFORM_LAYERS[0];
+  const activeScenario =
+    DEMO_SCENARIOS.find((item) => item.id === selectedIndustry) ?? DEMO_SCENARIOS[0];
+  const activePrompt =
+    activeScenario.prompts[selectedPromptIndex] ?? activeScenario.prompts[0];
+
+  function handleSelectIndustry(nextId: DemoIndustryId) {
+    setSelectedIndustry(nextId);
+    setSelectedPromptIndex(0);
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
@@ -205,40 +279,40 @@ export function CentralPlatformHome() {
             {CAREFLOW_NAME}
           </Link>
 
-          {/* Zone 2: 5 concise single-line navigation links */}
+          {/* Zone 2: Concise single-line navigation links */}
           <nav
-            aria-label="CareFlow Platform Navigation"
+            aria-label="CareFlow Navigation"
             className="hidden md:flex items-center gap-7 text-sm font-semibold text-slate-600"
           >
             <a
-              href="#capabilities"
+              href="#what-we-do"
               className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
             >
-              Platform
+              What We Do
             </a>
             <a
-              href="#how-it-works"
+              href="#interactive-demo"
               className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
             >
-              How It Works
+              Live Demo
             </a>
-            <Link
-              href="/portals"
+            <a
+              href="#features"
               className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
             >
-              Live Portals
-            </Link>
-            <Link
-              href="/admin"
+              Features
+            </a>
+            <a
+              href="#faq"
               className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
             >
-              Business Admin
-            </Link>
+              FAQ
+            </a>
             <Link
               href="/login"
               className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
             >
-              Log In
+              Sign In
             </Link>
           </nav>
 
@@ -248,7 +322,7 @@ export function CentralPlatformHome() {
               href="/onboarding"
               className="py-2.5 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
             >
-              Onboard Business
+              Start Your Portal
             </Link>
 
             <button
@@ -269,137 +343,148 @@ export function CentralPlatformHome() {
 
         {mobileMenuOpen && (
           <nav
-            aria-label="Mobile Platform Navigation"
+            aria-label="Mobile Navigation"
             className="md:hidden border-t border-slate-100 bg-white px-6 py-4 space-y-3 text-sm font-semibold text-slate-700"
           >
             <a
-              href="#capabilities"
+              href="#what-we-do"
               onClick={() => setMobileMenuOpen(false)}
               className="block py-2 hover:text-slate-900"
             >
-              Platform
+              What We Do
             </a>
             <a
-              href="#how-it-works"
+              href="#interactive-demo"
               onClick={() => setMobileMenuOpen(false)}
               className="block py-2 hover:text-slate-900"
             >
-              How It Works
+              Live Demo
             </a>
-            <Link
-              href="/portals"
+            <a
+              href="#features"
               onClick={() => setMobileMenuOpen(false)}
               className="block py-2 hover:text-slate-900"
             >
-              Live Portals
-            </Link>
-            <Link
-              href="/admin"
+              Features
+            </a>
+            <a
+              href="#faq"
               onClick={() => setMobileMenuOpen(false)}
               className="block py-2 hover:text-slate-900"
             >
-              Business Admin
-            </Link>
+              FAQ
+            </a>
             <Link
               href="/login"
               onClick={() => setMobileMenuOpen(false)}
               className="block py-2 hover:text-slate-900"
             >
-              Log In
+              Sign In
             </Link>
           </nav>
         )}
       </header>
 
       <main className="flex-1">
-        {/* Hero Section — Central CareFlow Platform */}
+        {/* 1. Hero Section — Clear Pitch & Visual Outcome */}
         <section className="bg-gradient-to-b from-white via-slate-50/70 to-slate-50 border-b border-slate-200/80">
           <div className="max-w-7xl mx-auto px-6 pt-12 pb-16 lg:pt-20 lg:pb-24">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-stretch">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                className="lg:col-span-6 flex flex-col justify-center"
+                className="lg:col-span-6"
               >
                 <p className="text-xs font-semibold text-teal-700">
-                  Multi-Business Customer Support Platform
+                  Customer Support Portals &amp; Guided Resolution for Modern Businesses
                 </p>
 
-                <h1 className="mt-4 text-4xl sm:text-5xl lg:text-[3.5rem] font-bold tracking-tight text-slate-900 leading-[1.08] text-balance">
-                  Better customer support starts with better conversations.
+                <h1 className="mt-4 text-4xl sm:text-5xl lg:text-[3.4rem] font-bold tracking-tight text-slate-900 leading-[1.08] text-balance">
+                  Turn repetitive customer questions into instant, trusted answers.
                 </h1>
 
                 <p className="mt-6 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl">
-                  CareFlow helps businesses deliver faster, smarter customer support through
-                  intelligent assistance, organized knowledge and seamless human handoff.
+                  {CAREFLOW_NAME} gives your business a branded customer support portal, an
+                  assistant grounded strictly in your approved knowledge, and a specialist inbox
+                  that receives full context whenever human care is needed.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center gap-4">
                   <Link
                     href="/onboarding"
-                    className="inline-flex items-center gap-2 py-3 px-6 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                    className="inline-flex items-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                   >
-                    <span>Onboard Your Business</span>
+                    <span>Launch Your Portal</span>
                     <ArrowRight className="w-4 h-4" aria-hidden="true" />
                   </Link>
 
-                  <Link
-                    href="/admin"
-                    className="inline-flex items-center gap-2 py-3 px-6 text-sm font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                  <a
+                    href="#interactive-demo"
+                    className="inline-flex items-center gap-2 py-3.5 px-6 text-sm font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                   >
-                    <span>Open Business Admin</span>
-                  </Link>
+                    <span>Try Interactive Demo</span>
+                  </a>
                 </div>
 
-                <div className="mt-8 pt-6 border-t border-slate-200/80 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span>Dedicated portal architecture:</span>
-                    <span className="font-mono font-semibold text-slate-700">
-                      businessname.careflow.com
-                    </span>
+                <div className="mt-8 pt-6 border-t border-slate-200/80 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-600">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>Launch your branded portal in minutes</span>
                   </div>
-                  <Link
-                    href="/portals"
-                    className="font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
-                  >
-                    Explore Active Portals &rarr;
-                  </Link>
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>Answers sourced only from your rules</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>Seamless handoff to your team</span>
+                  </div>
                 </div>
               </motion.div>
 
-              {/* Right Column: Visual Studio Asset + Resilient Fallback */}
+              {/* Right Column: Editorial Hero Photography + Live Resolution Card */}
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
-                className="lg:col-span-6 flex"
+                className="lg:col-span-6"
               >
-                <div className="relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 min-h-[320px] lg:min-h-[430px] flex flex-col justify-end">
-                  {!heroImgFailed ? (
+                <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-slate-900 shadow-sm">
+                  <div className="aspect-[4/3] w-full overflow-hidden">
                     <img
-                      src="/images/hero-support-architecture.jpg"
-                      alt="Modern customer support operations workspace"
+                      src="/images/careflow-hero.jpg"
+                      alt="Customer support director welcoming customers in a sunlit CareFlow studio"
                       referrerPolicy="no-referrer"
-                      onError={() => setHeroImgFailed(true)}
-                      className="absolute inset-0 w-full h-full object-cover"
+                      className="w-full h-full object-cover"
                     />
-                  ) : (
-                    <div
-                      aria-hidden="true"
-                      className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-teal-950"
-                    />
-                  )}
-                  <div className="relative z-10 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-6 sm:p-8 text-white">
-                    <p className="text-xs text-teal-300 font-semibold">
-                      Dedicated Portals · Isolated Workspaces · Human Handoff
-                    </p>
-                    <p className="mt-1.5 text-base sm:text-lg font-bold tracking-tight">
-                      One platform. Independent support portals and admin workspaces for every business.
-                    </p>
-                    <p className="mt-1 text-xs text-slate-200 font-mono">
-                      careflow.com · businessname.careflow.com · /admin
-                    </p>
+                  </div>
+
+                  <div className="bg-gradient-to-t from-slate-950 via-slate-950/90 to-slate-900/75 p-6 sm:p-7 text-white border-t border-white/10">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-teal-300 font-semibold">
+                      <span>How {CAREFLOW_NAME} Works in Every Conversation</span>
+                      <span className="font-mono text-slate-300">24/7 Self-Service + Human Care</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="rounded-xl bg-white/10 p-3 border border-white/10">
+                        <p className="font-mono text-teal-300">01 · Ask</p>
+                        <p className="mt-1 text-slate-100 font-semibold">
+                          Customer asks about an order, payment, or account
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-white/10 p-3 border border-white/10">
+                        <p className="font-mono text-teal-300">02 · Guide</p>
+                        <p className="mt-1 text-slate-100 font-semibold">
+                          {CAREFLOW_NAME} answers from your verified FAQs &amp; steps
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-white/10 p-3 border border-white/10">
+                        <p className="font-mono text-teal-300">03 · Care</p>
+                        <p className="mt-1 text-slate-100 font-semibold">
+                          Complex cases reach your team with full context attached
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -407,263 +492,440 @@ export function CentralPlatformHome() {
           </div>
         </section>
 
-        {/* Section 1: What CareFlow Does + Interactive Capability Inspector */}
-        <section id="capabilities" className="py-16 lg:py-24 scroll-mt-16">
+        {/* 2. Clear Explanation of What CareFlow Does (Visual Editorial Pillars) */}
+        <section id="what-we-do" className="py-16 lg:py-24 scroll-mt-16">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold text-teal-700">What {CAREFLOW_NAME} Does</p>
+              <h2 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 text-balance">
+                Stop losing customer trust to slow inboxes and guesswork chatbots.
+              </h2>
+              <p className="mt-4 text-base sm:text-lg text-slate-600 leading-relaxed">
+                Most support teams face an impossible choice: drown in the same repetitive emails
+                every day, or deploy a generic bot that frustrates customers with vague answers.{' '}
+                {CAREFLOW_NAME} solves both—combining instant self-service accuracy with effortless
+                human handoff.
+              </p>
+            </div>
+
+            <div className="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Visual Story 1: Customer Self-Service Clarity */}
+              <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden flex flex-col">
+                <div className="aspect-[16/9] w-full overflow-hidden bg-slate-100">
+                  <img
+                    src="/images/careflow-customer-clarity.jpg"
+                    alt="Customer getting clear, immediate support answers"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="p-7 sm:p-8 flex-1 flex flex-col justify-between space-y-5">
+                  <div>
+                    <p className="text-xs font-semibold text-blue-600">
+                      For Your Customers · Instant Clarity
+                    </p>
+                    <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
+                      One branded destination where customers find real answers immediately
+                    </h3>
+                    <p className="mt-3 text-sm sm:text-base text-slate-600 leading-relaxed">
+                      Give your customers a clean, welcoming support portal tailored to your brand.
+                      They can browse help topics, search your published guides, or walk through
+                      interactive troubleshooting steps at any hour—without waiting in a queue.
+                    </p>
+                  </div>
+
+                  <ul className="pt-4 border-t border-slate-100 space-y-2.5 text-sm text-slate-700">
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0" aria-hidden="true" />
+                      <span>Dedicated support address styled to your company</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0" aria-hidden="true" />
+                      <span>Natural-language Q&amp;A grounded in your approved articles</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0" aria-hidden="true" />
+                      <span>Guided checklists that solve everyday issues on the spot</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Visual Story 2: Empowered Specialist Team */}
+              <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden flex flex-col">
+                <div className="aspect-[16/9] w-full overflow-hidden bg-slate-100">
+                  <img
+                    src="/images/careflow-team-care.jpg"
+                    alt="Support specialists collaborating with complete customer context"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="p-7 sm:p-8 flex-1 flex flex-col justify-between space-y-5">
+                  <div>
+                    <p className="text-xs font-semibold text-teal-700">
+                      For Your Team · Focused Human Care
+                    </p>
+                    <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
+                      Your specialists step in only when needed—with every detail ready
+                    </h3>
+                    <p className="mt-3 text-sm sm:text-base text-slate-600 leading-relaxed">
+                      Because {CAREFLOW_NAME} resolves routine enquiries upfront, your team spends
+                      its energy on high-impact conversations. Every escalated request arrives with
+                      the customer&apos;s category, reference number, and prior steps already attached.
+                    </p>
+                  </div>
+
+                  <ul className="pt-4 border-t border-slate-100 space-y-2.5 text-sm text-slate-700">
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0" aria-hidden="true" />
+                      <span>Zero back-and-forth asking customers to repeat their issue</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0" aria-hidden="true" />
+                      <span>Update an FAQ once to prevent tomorrow’s repeat tickets</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0" aria-hidden="true" />
+                      <span>Clear visibility into top customer topics and team workload</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 3. Interactive Live Product Demo ("See CareFlow in Action") */}
+        <section
+          id="interactive-demo"
+          className="py-16 lg:py-24 bg-white border-y border-slate-200/80 scroll-mt-16"
+        >
           <div className="max-w-7xl mx-auto px-6">
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
               <div className="max-w-2xl">
-                <p className="text-xs font-semibold text-teal-700">What CareFlow Does</p>
-                <h2 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 text-balance">
-                  Structured customer assistance built around your business rules
+                <p className="text-xs font-semibold text-teal-700">Interactive Product Walkthrough</p>
+                <h2 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 text-balance">
+                  See how {CAREFLOW_NAME} handles real customer questions
                 </h2>
                 <p className="mt-3 text-base text-slate-600 leading-relaxed">
-                  Explore how CareFlow combines published knowledge, guided troubleshooting, human
-                  escalation, and multi-channel portals.
+                  Select an industry below and click any customer question to see how{' '}
+                  {CAREFLOW_NAME} answers from verified knowledge, protects your policy scope, and
+                  prepares human handoffs.
                 </p>
               </div>
 
-              {/* Interactive Segmented Capability Selector */}
+              {/* Industry Switcher */}
               <div
                 role="tablist"
-                aria-label="CareFlow platform capabilities"
-                className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-200/70 rounded-xl self-start"
+                aria-label="Select business industry example"
+                className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl self-start"
               >
-                {PLATFORM_LAYERS.map((layer) => {
-                  const isActive = layer.id === activeLayer;
+                {DEMO_SCENARIOS.map((scenario) => {
+                  const isSelected = scenario.id === selectedIndustry;
                   return (
                     <button
-                      key={layer.id}
+                      key={scenario.id}
                       role="tab"
                       type="button"
-                      aria-selected={isActive}
-                      onClick={() => setActiveLayer(layer.id)}
-                      className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                        isActive
+                      aria-selected={isSelected}
+                      onClick={() => handleSelectIndustry(scenario.id)}
+                      className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                        isSelected
                           ? 'bg-white text-slate-900 shadow-xs'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      {layer.tabLabel}
+                      {scenario.label}
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Selected Capability Detail Surface */}
-            <div className="mt-10 grid grid-cols-1 lg:grid-cols-12 gap-8 rounded-2xl border border-slate-200 bg-white p-7 sm:p-10">
-              <div className="lg:col-span-7 flex flex-col justify-between gap-6">
+            <div className="mt-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+              {/* Left: Sample Customer Prompts */}
+              <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-6 sm:p-7 flex flex-col justify-between space-y-6">
                 <div>
-                  <p className="text-xs font-semibold text-blue-600 font-mono">
-                    {selectedLayer.eyebrow}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-900">
+                      Sample Portal: {activeScenario.companyExample}
+                    </span>
+                    <span className="font-mono text-xs text-blue-600">
+                      {activeScenario.portalDomain}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600 leading-relaxed">
+                    {activeScenario.summary}
                   </p>
-                  <h3 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 text-balance">
-                    {selectedLayer.title}
-                  </h3>
-                  <p className="mt-4 text-base text-slate-600 leading-relaxed">
-                    {selectedLayer.description}
+
+                  <p className="mt-6 text-xs font-semibold text-slate-500">
+                    Click a customer message to test:
                   </p>
+                  <div className="mt-3 space-y-2.5">
+                    {activeScenario.prompts.map((item, idx) => {
+                      const active = idx === selectedPromptIndex;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setSelectedPromptIndex(idx)}
+                          className={`w-full text-left p-4 rounded-xl border transition-colors cursor-pointer ${
+                            active
+                              ? 'border-blue-600 bg-white text-slate-900 shadow-xs'
+                              : 'border-slate-200 bg-white/70 hover:bg-white text-slate-700'
+                          }`}
+                        >
+                          <p className="text-xs font-mono text-slate-400">
+                            Scenario 0{idx + 1} · {item.resolutionStage}
+                          </p>
+                          <p className="mt-1 text-sm font-semibold leading-snug">
+                            &ldquo;{item.customerQuestion}&rdquo;
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                <div className="pt-5 border-t border-slate-100">
-                  <p className="text-xs font-semibold text-slate-500 font-mono">
-                    {selectedLayer.mechanismLabel}
+                <div className="pt-4 border-t border-slate-200/80 flex items-center justify-between gap-3 text-xs">
+                  <span className="text-slate-600">Want this for your own products?</span>
+                  <Link
+                    href="/onboarding"
+                    className="inline-flex items-center gap-1 font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                  >
+                    <span>Build Your Portal</span>
+                    <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Right: Live Resolution Inspector */}
+              <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 flex flex-col justify-between space-y-6">
+                <div className="space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">
+                        {activeScenario.companyExample} Support Assistant
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Powered by {CAREFLOW_NAME} · Grounded in {activeScenario.companyExample} policies
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-teal-700">
+                      {activePrompt.resolutionStage}
+                    </span>
+                  </div>
+
+                  {/* Customer Message Bubble */}
+                  <div className="flex flex-col items-end">
+                    <p className="text-[11px] text-slate-400 mb-1">Customer</p>
+                    <div className="max-w-[88%] rounded-2xl rounded-tr-sm bg-blue-600 text-white px-4 py-3 text-sm leading-relaxed">
+                      {activePrompt.customerQuestion}
+                    </div>
+                  </div>
+
+                  {/* CareFlow Assistant Reply Bubble */}
+                  <div className="flex flex-col items-start">
+                    <p className="text-[11px] text-slate-400 mb-1">
+                      {CAREFLOW_NAME} · Source: {activePrompt.matchedSource}
+                    </p>
+                    <div className="max-w-[92%] rounded-2xl rounded-tl-sm bg-slate-100 text-slate-900 px-5 py-4 text-sm leading-relaxed">
+                      {activePrompt.assistantReply}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Behind-the-Scenes Value Callout */}
+                <div className="rounded-xl border border-teal-200/80 bg-teal-50/50 p-4 space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-teal-900">
+                    <UserCheck className="w-4 h-4 text-teal-700 shrink-0" aria-hidden="true" />
+                    <span>What your team sees in {CAREFLOW_NAME}</span>
+                  </div>
+                  <p className="text-xs font-mono text-slate-800">
+                    {activePrompt.specialistSummary}
                   </p>
-                  <ol className="mt-3 space-y-2 text-sm text-slate-700">
-                    {selectedLayer.mechanismSteps.map((step, idx) => (
-                      <li key={step} className="flex items-start gap-2.5">
-                        <span className="font-mono tabular-nums text-xs font-semibold text-blue-600 mt-0.5">
-                          0{idx + 1}.
+                  <p className="text-xs text-slate-600">{activePrompt.outcomeNote}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 4. Helpful Features Built for Growing Businesses */}
+        <section id="features" className="py-16 lg:py-24 scroll-mt-16">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="max-w-2xl">
+              <p className="text-xs font-semibold text-teal-700">Platform Features</p>
+              <h2 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 text-balance">
+                Everything you need to run fast, reliable customer support
+              </h2>
+              <p className="mt-3 text-base text-slate-600 leading-relaxed">
+                Every {CAREFLOW_NAME} workspace includes the tools to publish knowledge, guide
+                customers automatically, and manage specialist conversations in one place.
+              </p>
+            </div>
+
+            <div className="mt-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {CORE_FEATURES.map((feature) => {
+                const Icon = feature.icon;
+                return (
+                  <div
+                    key={feature.title}
+                    className="rounded-2xl border border-slate-200 bg-white p-7 flex flex-col justify-between space-y-4"
+                  >
+                    <div className="space-y-4">
+                      <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center">
+                        <Icon className="w-5 h-5" aria-hidden="true" />
+                      </div>
+                      <h3 className="text-lg font-bold tracking-tight text-slate-900">
+                        {feature.title}
+                      </h3>
+                      <p className="text-sm text-slate-600 leading-relaxed">
+                        {feature.description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Side-by-Side Comparison + 3-Step Setup */}
+            <div className="mt-12 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+              <div className="lg:col-span-6 rounded-2xl border border-slate-200 bg-white p-7 sm:p-8 space-y-6">
+                <div>
+                  <p className="text-xs font-semibold text-blue-600">Why Businesses Switch</p>
+                  <h3 className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900">
+                    The {CAREFLOW_NAME} difference
+                  </h3>
+                </div>
+
+                <div className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
+                  <div className="py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400">Traditional Support</p>
+                      <p className="mt-1 text-slate-600">
+                        Customers wait hours in email queues for simple policy or status answers.
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-teal-700">With {CAREFLOW_NAME}</p>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        Instant answers 24/7 from your verified FAQs and guided checklists.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400">Generic Chatbots</p>
+                      <p className="mt-1 text-slate-600">
+                        Unpredictable replies that guess policies or trap frustrated customers.
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-teal-700">With {CAREFLOW_NAME}</p>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        Strict topic rules and one-click handoff to a real specialist anytime.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400">Disconnected Tools</p>
+                      <p className="mt-1 text-slate-600">
+                        Customers repeat their order number and issue all over again to agents.
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-teal-700">With {CAREFLOW_NAME}</p>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        Every reference and troubleshooting step arrives attached in your inbox.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-span-6 rounded-2xl border border-slate-200 bg-white p-7 sm:p-8 flex flex-col justify-between space-y-6">
+                <div>
+                  <p className="text-xs font-semibold text-teal-700">Simple Setup</p>
+                  <h3 className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900">
+                    Go live in three straightforward steps
+                  </h3>
+
+                  <ol className="mt-6 space-y-5">
+                    {LAUNCH_STEPS.map((item) => (
+                      <li key={item.step} className="flex items-start gap-4">
+                        <span className="font-mono tabular-nums text-xs font-bold text-blue-600 bg-blue-50 rounded-lg px-2.5 py-1.5 shrink-0">
+                          {item.step}
                         </span>
-                        <span>{step}</span>
+                        <div>
+                          <h4 className="text-base font-bold text-slate-900">{item.title}</h4>
+                          <p className="mt-1 text-sm text-slate-600 leading-relaxed">
+                            {item.description}
+                          </p>
+                        </div>
                       </li>
                     ))}
                   </ol>
                 </div>
-              </div>
 
-              <div className="lg:col-span-5 lg:border-l lg:border-slate-200 lg:pl-8 flex flex-col justify-center">
-                <p className="text-xs font-semibold text-slate-500">Key architectural capabilities</p>
-                <ul className="mt-4 space-y-3.5 text-sm text-slate-700">
-                  {selectedLayer.highlights.map((point) => (
-                    <li key={point} className="leading-relaxed">
-                      <span className="font-semibold text-teal-700 mr-2" aria-hidden="true">
-                        ·
-                      </span>
-                      {point}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            {/* Asymmetric Bento Architecture Grid: Portal Separation + 5-Tier Chatbot Priority */}
-            <div className="mt-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
-              <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-7 sm:p-8 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <Globe className="w-5 h-5 text-blue-600 shrink-0" aria-hidden="true" />
-                    <h3 className="text-lg font-bold tracking-tight text-slate-900">
-                      Three Distinct Surfaces, Strictly Isolated by Organization
-                    </h3>
-                  </div>
-                  <p className="mt-3 text-sm text-slate-600 leading-relaxed">
-                    CareFlow separates platform onboarding from customer-facing support portals and
-                    internal workspace administration so businesses never share knowledge bases or
-                    conversations.
-                  </p>
-
-                  <div className="mt-6 divide-y divide-slate-100 border-t border-slate-100 text-sm">
-                    <div className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-slate-900">Central CareFlow Platform</p>
-                        <p className="text-xs text-slate-500">
-                          Platform overview, business onboarding, and workspace sign-in
-                        </p>
-                      </div>
-                      <span className="font-mono text-xs text-slate-600 shrink-0">
-                        careflow.com
-                      </span>
-                    </div>
-                    <div className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-slate-900">Business Support Portals</p>
-                        <p className="text-xs text-slate-500">
-                          Branded help center, natural-language &amp; guided assistant, and escalation
-                        </p>
-                      </div>
-                      <span className="font-mono text-xs text-blue-600 shrink-0">
-                        businessname.careflow.com
-                      </span>
-                    </div>
-                    <div className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-slate-900">Business Administration</p>
-                        <p className="text-xs text-slate-500">
-                          Manage articles, FAQs, chatbot rules, conversations, and specialists
-                        </p>
-                      </div>
-                      <Link
-                        href="/admin"
-                        className="font-mono text-xs font-semibold text-teal-700 hover:underline shrink-0"
-                      >
-                        careflow.com/admin &rarr;
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4 text-xs">
-                  <Link
-                    href="/portals"
-                    className="inline-flex items-center gap-1.5 font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
-                  >
-                    <span>Browse Live Customer Portals</span>
-                    <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-                  </Link>
+                <div className="pt-5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4">
+                  <span className="text-xs text-slate-500">
+                    No complex setup or custom code required.
+                  </span>
                   <Link
                     href="/onboarding"
-                    className="inline-flex items-center gap-1.5 font-semibold text-slate-700 hover:text-slate-900 whitespace-nowrap"
+                    className="inline-flex items-center gap-2 py-2.5 px-5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap"
                   >
-                    <span>Launch a New Portal</span>
+                    <span>Create Your Workspace</span>
                     <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                   </Link>
                 </div>
               </div>
-
-              <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-7 sm:p-8">
-                <div className="flex items-center gap-3">
-                  <UserCheck className="w-5 h-5 text-teal-700 shrink-0" aria-hidden="true" />
-                  <h3 className="text-lg font-bold tracking-tight text-slate-900">
-                    Deterministic Response Priority
-                  </h3>
-                </div>
-                <p className="mt-2.5 text-sm text-slate-600 leading-relaxed">
-                  Every business chatbot resolves enquiries in strict priority order—preventing
-                  invented policies and controlling external AI costs.
-                </p>
-
-                <ol className="mt-5 divide-y divide-slate-100 border-t border-slate-100">
-                  {RESPONSE_PRIORITY_TIERS.map((tier) => (
-                    <li key={tier.order} className="py-3 flex items-start gap-3">
-                      <span className="font-mono tabular-nums text-xs font-semibold text-blue-600 mt-0.5 shrink-0">
-                        {tier.order}
-                      </span>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{tier.name}</p>
-                        <p className="text-xs text-slate-500 leading-relaxed">{tier.detail}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </div>
             </div>
           </div>
         </section>
 
-        {/* Section 2: How the Platform Works */}
+        {/* 5. Buyer FAQ Section */}
         <section
-          id="how-it-works"
-          className="py-16 lg:py-24 bg-white border-y border-slate-200/80 scroll-mt-16"
+          id="faq"
+          className="py-16 lg:py-24 bg-white border-t border-slate-200/80 scroll-mt-16"
         >
-          <div className="max-w-7xl mx-auto px-6">
-            <div className="max-w-2xl">
-              <p className="text-xs font-semibold text-teal-700">How CareFlow Works</p>
-              <h2 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 text-balance">
-                A clear path from business setup to customer resolution
+          <div className="max-w-4xl mx-auto px-6">
+            <div className="text-center max-w-2xl mx-auto">
+              <p className="text-xs font-semibold text-teal-700">Common Questions</p>
+              <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+                Everything you need to know before getting started
               </h2>
             </div>
 
-            <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8">
-              {HOW_PLATFORM_WORKS.map((item) => (
-                <div
-                  key={item.step}
-                  className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-7"
-                >
-                  <span className="font-mono tabular-nums text-xs font-semibold text-blue-600">
-                    Step {item.step}
-                  </span>
-                  <h3 className="mt-3 text-lg font-bold tracking-tight text-slate-900">
-                    {item.step}. {item.title}
-                  </h3>
-                  <p className="mt-2.5 text-sm text-slate-600 leading-relaxed">
-                    {item.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Section 3: Benefits for Businesses */}
-        <section id="benefits" className="py-16 lg:py-24 scroll-mt-16">
-          <div className="max-w-7xl mx-auto px-6">
-            <div className="max-w-2xl">
-              <p className="text-xs font-semibold text-teal-700">Benefits for Businesses</p>
-              <h2 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 text-balance">
-                Designed for clarity, control, and multi-tenant isolation
-              </h2>
-            </div>
-
-            <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {BUSINESS_BENEFITS.map((benefit) => {
-                const Icon = benefit.icon;
+            <div className="mt-10 divide-y divide-slate-200 border-y border-slate-200">
+              {BUYER_FAQS.map((item) => {
+                const isOpen = openFaqId === item.id;
                 return (
-                  <div
-                    key={benefit.title}
-                    className="rounded-2xl border border-slate-200 bg-white p-7 flex items-start gap-5"
-                  >
-                    <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-                      <Icon className="w-5 h-5" aria-hidden="true" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold tracking-tight text-slate-900">
-                        {benefit.title}
-                      </h3>
-                      <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-                        {benefit.description}
+                  <div key={item.id} className="py-5">
+                    <button
+                      type="button"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenFaqId(isOpen ? null : item.id)}
+                      className="w-full flex items-center justify-between gap-4 text-left cursor-pointer"
+                    >
+                      <span className="text-base font-bold text-slate-900">{item.question}</span>
+                      <ChevronDown
+                        className={`w-5 h-5 text-slate-400 shrink-0 transition-transform duration-150 ${
+                          isOpen ? 'rotate-180 text-blue-600' : ''
+                        }`}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    {isOpen && (
+                      <p className="mt-3 text-sm text-slate-600 leading-relaxed pr-8">
+                        {item.answer}
                       </p>
-                    </div>
+                    )}
                   </div>
                 );
               })}
@@ -671,20 +933,20 @@ export function CentralPlatformHome() {
           </div>
         </section>
 
-        {/* Section 4: Business Onboarding & Login Access */}
-        <section id="onboarding" className="pb-16 lg:pb-24 scroll-mt-16">
+        {/* 6. Closing Conversion CTA */}
+        <section className="py-16 lg:py-24 bg-slate-50">
           <div className="max-w-7xl mx-auto px-6">
             <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 px-8 py-12 sm:px-12 sm:py-16 text-white grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
               <div className="lg:col-span-7">
                 <p className="text-xs font-semibold text-teal-300 tracking-wide">
-                  Business Onboarding &amp; Workspace Access
+                  Ready When You Are
                 </p>
                 <h2 className="mt-3 text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-white text-balance">
-                  Launch a dedicated CareFlow portal for your customers
+                  Give your customers faster answers and a better support experience today.
                 </h2>
                 <p className="mt-4 text-base text-slate-300 leading-relaxed tracking-wide max-w-2xl">
-                  Configure your business profile, branding, knowledge base, guided troubleshooting
-                  flows, and chatbot settings from an isolated administration dashboard.
+                  Launch your branded {CAREFLOW_NAME} support portal in minutes, organize your key
+                  answers once, and keep your team focused on the conversations that matter most.
                 </p>
               </div>
 
@@ -693,7 +955,7 @@ export function CentralPlatformHome() {
                   href="/onboarding"
                   className="inline-flex items-center gap-2 py-3.5 px-6 text-sm font-semibold text-slate-950 bg-teal-400 hover:bg-teal-300 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300"
                 >
-                  <span>Create Business Workspace</span>
+                  <span>Start Your Portal</span>
                   <ArrowRight className="w-4 h-4" aria-hidden="true" />
                 </Link>
 
@@ -701,7 +963,7 @@ export function CentralPlatformHome() {
                   href="/login"
                   className="inline-flex items-center gap-2 py-3.5 px-6 text-sm font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 >
-                  <span>Workspace Login</span>
+                  <span>Sign In</span>
                 </Link>
               </div>
             </div>
@@ -709,7 +971,7 @@ export function CentralPlatformHome() {
         </section>
       </main>
 
-      {/* Quiet Platform Footer */}
+      {/* Clean Platform Footer */}
       <footer className="border-t border-slate-200 bg-white">
         <div className="max-w-7xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 text-sm text-slate-500">
           <div className="flex flex-wrap items-center gap-3">
@@ -719,20 +981,23 @@ export function CentralPlatformHome() {
           </div>
 
           <div className="flex flex-wrap items-center gap-6">
-            <a href="#capabilities" className="hover:text-slate-900 transition-colors">
-              Platform
+            <a href="#what-we-do" className="hover:text-slate-900 transition-colors">
+              What We Do
             </a>
-            <Link href="/portals" className="hover:text-slate-900 transition-colors">
-              Live Portals
-            </Link>
-            <Link href="/admin" className="hover:text-slate-900 transition-colors">
-              Business Admin
-            </Link>
+            <a href="#interactive-demo" className="hover:text-slate-900 transition-colors">
+              Live Demo
+            </a>
+            <a href="#features" className="hover:text-slate-900 transition-colors">
+              Features
+            </a>
+            <a href="#faq" className="hover:text-slate-900 transition-colors">
+              FAQ
+            </a>
             <Link href="/login" className="hover:text-slate-900 transition-colors">
-              Login
+              Sign In
             </Link>
             <Link href="/onboarding" className="hover:text-slate-900 transition-colors">
-              Onboarding
+              Get Started
             </Link>
             <span className="text-slate-400">
               &copy; {new Date().getFullYear()} {CAREFLOW_NAME}

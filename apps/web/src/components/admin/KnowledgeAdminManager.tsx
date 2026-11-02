@@ -573,9 +573,8 @@ export function KnowledgeAdminManager({
                   Business Knowledge Management
                 </h1>
                 <p className="mt-2 text-sm text-slate-600 max-w-2xl">
-                  Manage your organization&apos;s categories, knowledge articles, and approved FAQs.
-                  Only records marked <span className="font-semibold text-slate-900">Published</span>{' '}
-                  are eligible for customer-facing chatbot retrieval.
+                  Organize your categories, help articles, and approved FAQs. Published items
+                  immediately power answers across your CareFlow support portal.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3 shrink-0">
@@ -630,7 +629,7 @@ export function KnowledgeAdminManager({
                   {loading ? '—' : (overview?.totalCategories ?? 0)}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Scoped to <span className="font-mono">{organizationId}</span>
+                  Organized support topics
                 </p>
               </div>
             </div>
@@ -1568,9 +1567,6 @@ export function KnowledgeAdminManager({
                   className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                 >
                   <div className="space-y-1">
-                    <p className="text-xs text-slate-500 font-mono tabular-nums">
-                      slug: {cat.slug} · order: {cat.displayOrder}
-                    </p>
                     <h3 className="text-base font-bold text-slate-900">{cat.name}</h3>
                     {cat.description && (
                       <p className="text-sm text-slate-600">{cat.description}</p>

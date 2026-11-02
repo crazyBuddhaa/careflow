@@ -91,12 +91,12 @@ export function GuidedSupportPreview({
       const body = (await res.json()) as ApiResponse<PortalAssistantResponseDto>;
       if (body.ok) {
         const layerLabelMap: Record<PortalAssistantResponseDto['resolutionLayer'], string> = {
-          'boundary-guard': 'Topic Boundary Guard',
-          'business-rules': 'Approved FAQ',
-          'knowledge-base': 'Published Knowledge Base',
-          'guided-troubleshooting': 'Guided Procedure',
-          'ai-fallback': 'Configured AI Fallback',
-          'human-escalation': 'Human Handoff Recommended',
+          'boundary-guard': 'Support Scope',
+          'business-rules': 'Verified FAQ',
+          'knowledge-base': 'Help Center',
+          'guided-troubleshooting': 'Guided Check',
+          'ai-fallback': 'CareFlow Assistant',
+          'human-escalation': 'Specialist Support',
         };
         const sourceText = body.data.matchedSourceTitle
           ? `${layerLabelMap[body.data.resolutionLayer]} · ${body.data.matchedSourceTitle}`

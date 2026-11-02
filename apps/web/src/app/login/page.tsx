@@ -21,18 +21,18 @@ export default function LoginPage() {
             {CAREFLOW_NAME}
           </Link>
           <nav className="hidden sm:flex items-center gap-6 text-sm font-semibold text-slate-600">
-            <Link href="/portals" className="hover:text-slate-900 whitespace-nowrap">
-              Live Portals
+            <Link href="/#capabilities" className="hover:text-slate-900 whitespace-nowrap">
+              Capabilities
             </Link>
-            <Link href="/admin" className="hover:text-slate-900 whitespace-nowrap">
-              Business Admin
+            <Link href="/#how-it-works" className="hover:text-slate-900 whitespace-nowrap">
+              How It Works
             </Link>
           </nav>
           <Link
             href="/onboarding"
             className="py-2 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0"
           >
-            Onboard Business
+            Get Started
           </Link>
         </div>
       </header>

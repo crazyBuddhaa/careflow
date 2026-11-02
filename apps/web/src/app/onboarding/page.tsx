@@ -6,8 +6,8 @@ import { CAREFLOW_NAME } from '@careflow/shared';
 import { BusinessOnboardingFlow } from '@/components/BusinessOnboardingFlow';
 
 export const metadata: Metadata = {
-  title: 'Business Onboarding — CareFlow',
-  description: 'Launch a dedicated customer support portal and isolated business workspace on CareFlow.',
+  title: 'Get Started — CareFlow',
+  description: 'Launch your branded customer support portal and workspace on CareFlow.',
 };
 
 export default function OnboardingPage() {
@@ -22,31 +22,31 @@ export default function OnboardingPage() {
             {CAREFLOW_NAME}
           </Link>
           <nav className="hidden sm:flex items-center gap-6 text-sm font-semibold text-slate-600">
-            <Link href="/portals" className="hover:text-slate-900 whitespace-nowrap">
-              Live Portals
+            <Link href="/#capabilities" className="hover:text-slate-900 whitespace-nowrap">
+              Capabilities
             </Link>
-            <Link href="/admin" className="hover:text-slate-900 whitespace-nowrap">
-              Business Admin
+            <Link href="/#how-it-works" className="hover:text-slate-900 whitespace-nowrap">
+              How It Works
             </Link>
           </nav>
           <Link
             href="/login"
             className="py-2 px-4 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0"
           >
-            Workspace Login
+            Sign In
           </Link>
         </div>
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-12 sm:py-16">
         <div className="max-w-2xl mb-10">
-          <p className="text-xs font-semibold text-teal-700">Business Workspace Onboarding</p>
+          <p className="text-xs font-semibold text-teal-700">{CAREFLOW_NAME} Workspace Setup</p>
           <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 text-balance">
             Launch your dedicated support portal on CareFlow
           </h1>
           <p className="mt-3 text-base text-slate-600 leading-relaxed">
-            Every onboarded business receives an isolated knowledge base, configurable chatbot
-            boundaries, and a branded customer support portal.
+            Set up your branded customer support portal, organized knowledge base, and guided
+            assistant in minutes.
           </p>
         </div>
 
@@ -58,7 +58,7 @@ export default function OnboardingPage() {
             className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900"
           >
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-            <span>Back to {CAREFLOW_NAME} Platform</span>
+            <span>Back to {CAREFLOW_NAME}</span>
           </Link>
         </div>
       </main>

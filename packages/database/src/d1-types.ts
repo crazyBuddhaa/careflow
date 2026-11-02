@@ -31,14 +31,45 @@ export interface D1DatabaseLike {
 }
 
 export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    full_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    email_verified INTEGER NOT NULL DEFAULT 1 CHECK (email_verified IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS organizations (
     id TEXT PRIMARY KEY NOT NULL,
     slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    country TEXT NOT NULL DEFAULT 'United States',
+    industry TEXT NOT NULL DEFAULT 'Technology',
+    website TEXT NOT NULL DEFAULT '',
+    onboarding_status TEXT NOT NULL DEFAULT 'incomplete' CHECK (onboarding_status IN ('incomplete', 'in_progress', 'ready_to_publish', 'published', 'suspended')),
+    onboarding_step INTEGER NOT NULL DEFAULT 1,
+    created_by_user_id TEXT,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS organization_members (
+    id TEXT PRIMARY KEY NOT NULL,
+    organization_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('owner', 'admin', 'agent')),
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE (organization_id, user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_org_members_user
+    ON organization_members (user_id, is_active)`,
+  `CREATE INDEX IF NOT EXISTS idx_org_members_org
+    ON organization_members (organization_id, is_active)`,
   `CREATE TABLE IF NOT EXISTS knowledge_categories (
     id TEXT PRIMARY KEY NOT NULL,
     organization_id TEXT NOT NULL,

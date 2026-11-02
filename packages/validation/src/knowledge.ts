@@ -99,7 +99,7 @@ export const KnowledgeListFilterSchema = z.object({
 });
 
 export const DevAdminSessionSignInSchema = z.object({
-  organizationId: z.string().trim().min(2).max(80),
+  organizationId: z.string().trim().min(2, 'Workspace identifier is required.').max(120),
   accessPasscode: z.string().min(1, 'Workspace access passcode is required.'),
 });
 

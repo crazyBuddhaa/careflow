@@ -5,17 +5,18 @@ import {
   ADMIN_SESSION_COOKIE_NAME,
   createSignedAdminSessionToken,
   getAdminCookieOptions,
-  getExpectedAdminPasscode,
   listAvailableAdminWorkspaces,
   resolveServerAdminSession,
   verifyPasscodeConstantTime,
-  type RegisteredWorkspaceSummary,
 } from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
   jsonApiSuccess,
 } from '@/lib/api-response';
+
+import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
+import type { UserWorkspaceMembership } from '@careflow/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,23 +25,38 @@ export interface AdminSessionStatusDto {
   session: {
     userId: string;
     email?: string;
+    userName?: string;
     organizationId: string;
     organizationName: string;
     organizationSlug: string;
     role: UserRole;
   } | null;
-  availableWorkspaces: RegisteredWorkspaceSummary[];
-  authMode: 'stage1-signed-workspace-gate';
-  usesDefaultDevPasscode: boolean;
+  workspaces?: UserWorkspaceMembership[];
+}
+
+function normalizeWorkspaceIdentifier(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/\.careflow\.com$/, '')
+    .replace(/\.localhost(?::\d+)?$/, '');
 }
 
 export async function GET() {
   try {
-    const [resolved, workspaces] = await Promise.all([
-      resolveServerAdminSession(),
-      listAvailableAdminWorkspaces(),
-    ]);
-    const { isDefaultDevPasscode } = getExpectedAdminPasscode();
+    const resolved = await resolveServerAdminSession();
+
+    let userWorkspaces: UserWorkspaceMembership[] = [];
+    if (resolved.identity?.userId) {
+      try {
+        const repo = await getWorkspaceRepository();
+        userWorkspaces = await repo.getUserWorkspaces(resolved.identity.userId);
+      } catch {
+        // Fallback for isolated tests or dev session
+      }
+    }
 
     const response: AdminSessionStatusDto = {
       authenticated: Boolean(resolved.identity),
@@ -48,15 +64,14 @@ export async function GET() {
         ? {
             userId: resolved.identity.userId,
             email: resolved.identity.email,
+            userName: resolved.userName,
             organizationId: resolved.identity.organizationId,
             organizationName: resolved.organizationName ?? resolved.identity.organizationId,
             organizationSlug: resolved.organizationSlug ?? '',
             role: resolved.identity.role,
           }
         : null,
-      availableWorkspaces: workspaces,
-      authMode: 'stage1-signed-workspace-gate',
-      usesDefaultDevPasscode: isDefaultDevPasscode,
+      workspaces: userWorkspaces,
     };
 
     return jsonApiSuccess(response);
@@ -79,19 +94,27 @@ export async function POST(request: Request) {
     if (!verifyPasscodeConstantTime(input.accessPasscode)) {
       return jsonApiError(
         'INVALID_CREDENTIALS',
-        'Invalid workspace access passcode.',
+        'Invalid workspace identifier or access passcode.',
         401
       );
     }
 
+    const normalized = normalizeWorkspaceIdentifier(input.organizationId);
+    const rawTrimmed = input.organizationId.trim().toLowerCase();
+
     const workspaces = await listAvailableAdminWorkspaces();
-    const targetOrg = workspaces.find((w) => w.id === input.organizationId);
+    const targetOrg = workspaces.find(
+      (w) =>
+        w.id.toLowerCase() === rawTrimmed ||
+        w.slug.toLowerCase() === normalized ||
+        w.name.toLowerCase() === rawTrimmed
+    );
 
     if (!targetOrg) {
       return jsonApiError(
-        'WORKSPACE_NOT_FOUND',
-        'Selected organization workspace does not exist or is inactive.',
-        404
+        'INVALID_CREDENTIALS',
+        'Invalid workspace identifier or access passcode.',
+        401
       );
     }
 

@@ -18,11 +18,19 @@ import {
   Lock,
   LogOut,
   ExternalLink,
+  ChevronDown,
+  Plus,
+  Sparkles,
+  Check,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
 import {
   CAREFLOW_NAME,
   type AdminModuleSectionKey,
   type ApiResponse,
+  type UserWorkspaceMembership,
+  UserRole,
 } from '@careflow/shared';
 import type { AdminSessionStatusDto } from '@/app/api/admin/session/route';
 import {
@@ -37,15 +45,22 @@ import {
   WorkspaceOperationsManager,
   type OperationsSubView,
 } from '@/components/admin/WorkspaceOperationsManager';
+import { WorkspaceOnboardingGuide } from '@/components/admin/WorkspaceOnboardingGuide';
 
 interface AdminModuleDescriptor {
   key: AdminModuleSectionKey;
   title: string;
-  group: 'Knowledge' | 'Configuration' | 'Operations';
+  group: 'Workspace Setup' | 'Knowledge' | 'Configuration' | 'Operations';
   icon: React.ComponentType<{ className?: string }>;
 }
 
 const ADMIN_MODULES: AdminModuleDescriptor[] = [
+  {
+    key: 'onboarding-guide',
+    title: 'Onboarding Guide (7 Steps)',
+    group: 'Workspace Setup',
+    icon: Sparkles,
+  },
   {
     key: 'knowledge-overview',
     title: 'Knowledge Overview',
@@ -90,7 +105,7 @@ const ADMIN_MODULES: AdminModuleDescriptor[] = [
   },
   {
     key: 'chatbot-settings',
-    title: 'Chatbot Settings',
+    title: 'Assistant Settings',
     group: 'Configuration',
     icon: Bot,
   },
@@ -108,7 +123,7 @@ const ADMIN_MODULES: AdminModuleDescriptor[] = [
   },
   {
     key: 'agents',
-    title: 'Agents',
+    title: 'Specialists',
     group: 'Operations',
     icon: UserCog,
   },
@@ -135,12 +150,28 @@ const SETTINGS_KEYS = new Set<AdminModuleSectionKey>([
 ]);
 
 export function BusinessAdminShell() {
-  const [selectedKey, setSelectedKey] = useState<AdminModuleSectionKey>('knowledge-overview');
+  const [selectedKey, setSelectedKey] = useState<AdminModuleSectionKey>('onboarding-guide');
   const [sessionState, setSessionState] = useState<AdminSessionStatusDto | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
 
+  // Workspace Switcher Dropdown State
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null);
+
+  // "Create Another Business" Modal State
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [newBizName, setNewBizName] = useState('');
+  const [newBizIndustry, setNewBizIndustry] = useState('Technology');
+  const [newBizCountry, setNewBizCountry] = useState('United States');
+  const [newBizWebsite, setNewBizWebsite] = useState('');
+  const [creatingBusiness, setCreatingBusiness] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
   // Sign-in gate form state
-  const [selectedOrgId, setSelectedOrgId] = useState('');
+  const [authTab, setAuthTab] = useState<'account' | 'workspace_code'>('account');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [workspaceIdentifier, setWorkspaceIdentifier] = useState('');
   const [passcode, setPasscode] = useState('');
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -152,18 +183,101 @@ export function BusinessAdminShell() {
       const body = (await res.json()) as ApiResponse<AdminSessionStatusDto>;
       if (body.ok) {
         setSessionState(body.data);
-        if (!selectedOrgId && body.data.availableWorkspaces.length > 0) {
-          setSelectedOrgId(body.data.availableWorkspaces[0].id);
-        }
       }
     } finally {
       setLoadingSession(false);
     }
-  }, [selectedOrgId]);
+  }, []);
 
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+
+  async function handleSwitchWorkspace(targetOrgId: string) {
+    if (switchingOrgId) return;
+    setSwitchingOrgId(targetOrgId);
+    try {
+      const res = await fetch('/api/auth/workspaces/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId: targetOrgId }),
+      });
+      const body = await res.json();
+      if (body.ok) {
+        setSwitcherOpen(false);
+        await loadSession();
+      }
+    } finally {
+      setSwitchingOrgId(null);
+    }
+  }
+
+  async function handleCreateNewBusiness(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newBizName.trim()) return;
+
+    setCreatingBusiness(true);
+    setCreateError(null);
+    try {
+      const res = await fetch('/api/auth/workspaces/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessName: newBizName.trim(),
+          industry: newBizIndustry,
+          country: newBizCountry,
+          website: newBizWebsite.trim(),
+        }),
+      });
+
+      const body = await res.json();
+      if (!body.ok) {
+        setCreateError(body.error?.message || 'Unable to create business workspace.');
+        return;
+      }
+
+      setCreateModalOpen(false);
+      setNewBizName('');
+      setNewBizWebsite('');
+      setSwitcherOpen(false);
+      setSelectedKey('onboarding-guide');
+      await loadSession();
+    } catch {
+      setCreateError('Network error while creating workspace.');
+    } finally {
+      setCreatingBusiness(false);
+    }
+  }
+
+  async function handleAccountSignIn(event: React.FormEvent) {
+    event.preventDefault();
+    setSigningIn(true);
+    setAuthError(null);
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: loginEmail.trim(),
+          password: loginPassword,
+        }),
+      });
+
+      const body = await res.json();
+      if (!body.ok) {
+        setAuthError(body.error?.message || 'Invalid email or password.');
+        return;
+      }
+
+      setLoginPassword('');
+      await loadSession();
+    } catch {
+      setAuthError('Unable to reach account authentication service.');
+    } finally {
+      setSigningIn(false);
+    }
+  }
 
   async function handleSignIn(event: React.FormEvent) {
     event.preventDefault();
@@ -175,7 +289,7 @@ export function BusinessAdminShell() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          organizationId: selectedOrgId,
+          organizationId: workspaceIdentifier.trim(),
           accessPasscode: passcode,
         }),
       });
@@ -189,7 +303,7 @@ export function BusinessAdminShell() {
       setPasscode('');
       await loadSession();
     } catch {
-      setAuthError('Unable to reach workspace session endpoint.');
+      setAuthError('Unable to reach workspace authentication service.');
     } finally {
       setSigningIn(false);
     }
@@ -201,64 +315,254 @@ export function BusinessAdminShell() {
   }
 
   const activeSession = sessionState?.session ?? null;
+  const workspaces = sessionState?.workspaces ?? [];
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* SaaS Dashboard Top Bar Contract: Breadcrumb left, 1-2 primary actions right */}
+      {/* Top Bar with Workspace Switcher */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
-          <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0 truncate">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 px-6 py-3.5">
+          {/* Left: Breadcrumbs & Workspace Switcher */}
+          <div className="flex items-center gap-3 whitespace-nowrap shrink-0">
             <Link href="/" className="text-lg font-bold tracking-tight text-slate-900">
               {CAREFLOW_NAME}
             </Link>
             <span className="text-slate-300" aria-hidden="true">
               /
             </span>
-            <span className="text-sm font-semibold text-slate-600">Business Administration</span>
-            {activeSession && (
-              <>
-                <span className="hidden sm:inline text-slate-300" aria-hidden="true">
-                  /
-                </span>
-                <span className="hidden sm:inline text-sm font-bold text-slate-900 truncate max-w-[200px]">
-                  {activeSession.organizationName}
-                </span>
-              </>
+
+            {activeSession ? (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSwitcherOpen(!switcherOpen)}
+                  className="flex items-center gap-2 py-1.5 px-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all text-xs font-bold text-slate-900"
+                >
+                  <Building2 className="w-3.5 h-3.5 text-teal-600" />
+                  <span className="truncate max-w-[160px] sm:max-w-[220px]">
+                    {activeSession.organizationName}
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-bold bg-slate-100 text-slate-600">
+                    {activeSession.role}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                {/* Workspace Switcher Dropdown */}
+                {switcherOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setSwitcherOpen(false)}
+                    />
+                    <div className="absolute left-0 top-full mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 space-y-1">
+                      <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Your Businesses ({workspaces.length > 0 ? workspaces.length : 1})
+                      </div>
+
+                      <div className="max-h-60 overflow-y-auto space-y-0.5">
+                        {workspaces.map((ws) => {
+                          const isCurrent = ws.organizationId === activeSession.organizationId;
+                          return (
+                            <button
+                              key={ws.organizationId}
+                              type="button"
+                              onClick={() => void handleSwitchWorkspace(ws.organizationId)}
+                              disabled={isCurrent || switchingOrgId === ws.organizationId}
+                              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left text-xs transition-colors ${
+                                isCurrent
+                                  ? 'bg-teal-50 text-teal-900 font-bold'
+                                  : 'text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="truncate pr-2">
+                                <div className="truncate">{ws.organizationName}</div>
+                                <div className="text-[10px] text-slate-500 font-normal">
+                                  {ws.industry} · {ws.country}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase font-semibold">
+                                  {ws.role}
+                                </span>
+                                {isCurrent && <Check className="w-3.5 h-3.5 text-teal-600" />}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSwitcherOpen(false);
+                            setCreateModalOpen(true);
+                          }}
+                          className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Create Another Business</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <span className="text-sm font-semibold text-slate-600">Workspace</span>
             )}
           </div>
 
+          {/* Right: Actions */}
           <div className="flex items-center gap-3 shrink-0">
             {sessionState?.authenticated && activeSession ? (
               <>
                 {activeSession.organizationSlug && (
                   <Link
                     href={`/portal/${activeSession.organizationSlug}`}
-                    className="inline-flex items-center gap-1.5 py-2 px-3.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hidden sm:inline-flex items-center gap-1.5 py-2 px-3 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors whitespace-nowrap shrink-0"
                   >
-                    <span>Open Customer Portal</span>
+                    <span>Customer Portal</span>
                     <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
                   </Link>
                 )}
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className="inline-flex items-center gap-1.5 py-2 px-3.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 py-2 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Switch Business</span>
+                  <span>Sign Out</span>
                 </button>
               </>
             ) : (
               <Link
                 href="/"
-                className="py-2 px-4 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                className="py-2 px-4 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0"
               >
-                Platform Home
+                {CAREFLOW_NAME} Home
               </Link>
             )}
           </div>
         </div>
       </header>
+
+      {/* "Create Another Business" Modal */}
+      {createModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-teal-600" />
+                <span>Create Another Business</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Provision a new isolated workspace under your current CareFlow account. Each business
+              maintains its own distinct knowledge base, support configurations, branding, and team.
+            </p>
+
+            {createError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-800">
+                {createError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateNewBusiness} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                  Business Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newBizName}
+                  onChange={(e) => setNewBizName(e.target.value)}
+                  placeholder="e.g. Apex Health Systems"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Industry
+                  </label>
+                  <select
+                    value={newBizIndustry}
+                    onChange={(e) => setNewBizIndustry(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white outline-none"
+                  >
+                    <option value="Technology">Technology</option>
+                    <option value="E-commerce and retail">E-commerce and retail</option>
+                    <option value="Financial services">Financial services</option>
+                    <option value="Healthcare">Healthcare</option>
+                    <option value="Education">Education</option>
+                    <option value="Hospitality">Hospitality</option>
+                    <option value="Professional services">Professional services</option>
+                    <option value="Logistics and transportation">Logistics</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Country
+                  </label>
+                  <input
+                    type="text"
+                    value={newBizCountry}
+                    onChange={(e) => setNewBizCountry(e.target.value)}
+                    placeholder="e.g. United States"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                  Website (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newBizWebsite}
+                  onChange={(e) => setNewBizWebsite(e.target.value)}
+                  placeholder="https://example.com"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setCreateModalOpen(false)}
+                  className="py-2.5 px-4 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingBusiness}
+                  className="py-2.5 px-5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold tracking-wide transition-all shadow-sm"
+                >
+                  {creatingBusiness ? 'Creating...' : 'Provision Business'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Loading State */}
       {loadingSession ? (
@@ -272,99 +576,163 @@ export function BusinessAdminShell() {
       ) : !sessionState?.authenticated || !activeSession ? (
         /* Protected Admin Authorization Gate */
         <main className="flex-1 flex items-center justify-center px-6 py-14">
-          <div className="max-w-md w-full rounded-2xl border border-slate-200 bg-white p-8 space-y-6">
+          <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-8 space-y-6 shadow-sm">
             <div>
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <Lock className="w-5 h-5" aria-hidden="true" />
+              <div className="w-12 h-12 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center">
+                <Lock className="w-6 h-6" aria-hidden="true" />
               </div>
               <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
-                Authorize Business Workspace
+                Sign In to Your Workspace
               </h1>
-              <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-                Select a business organization to open its isolated administration dashboard for
-                knowledge, FAQs, chatbot rules, and customer conversations.
+              <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
+                Sign in with your CareFlow account email and password, or use a workspace passcode.
               </p>
             </div>
 
-            <form onSubmit={handleSignIn} className="space-y-4">
-              <div>
-                <label
-                  htmlFor="admin-org-select"
-                  className="block text-xs font-semibold text-slate-700"
-                >
-                  Select Business Organization
-                </label>
-                <select
-                  id="admin-org-select"
-                  value={selectedOrgId}
-                  onChange={(e) => setSelectedOrgId(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
-                >
-                  {(sessionState?.availableWorkspaces ?? []).map((ws) => (
-                    <option key={ws.id} value={ws.id}>
-                      {ws.name} ({ws.slug}.careflow.com)
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('account');
+                  setAuthError(null);
+                }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  authTab === 'account'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Account Email
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('workspace_code');
+                  setAuthError(null);
+                }}
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  authTab === 'workspace_code'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Workspace Code
+              </button>
+            </div>
 
-              <div>
-                <div className="flex items-center justify-between gap-2">
+            {authTab === 'account' ? (
+              <form onSubmit={handleAccountSignIn} className="space-y-4">
+                <div>
                   <label
-                    htmlFor="admin-passcode"
-                    className="block text-xs font-semibold text-slate-700"
+                    htmlFor="loginEmail"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
                   >
-                    Workspace Access Passcode
+                    Email Address
                   </label>
-                  {sessionState?.usesDefaultDevPasscode && (
-                    <button
-                      type="button"
-                      onClick={() => setPasscode('careflow-dev-admin')}
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
-                    >
-                      Fill dev passcode
-                    </button>
-                  )}
+                  <input
+                    id="loginEmail"
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="you@company.com"
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
+                  />
                 </div>
-                <input
-                  id="admin-passcode"
-                  type="password"
-                  required
-                  value={passcode}
-                  onChange={(e) => setPasscode(e.target.value)}
-                  placeholder="Enter workspace admin passcode"
-                  className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
-                />
-                {sessionState?.usesDefaultDevPasscode && (
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    Development passcode:{' '}
-                    <span className="font-mono text-slate-800">careflow-dev-admin</span>
+
+                <div>
+                  <label
+                    htmlFor="loginPassword"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
+                  >
+                    Password
+                  </label>
+                  <input
+                    id="loginPassword"
+                    type="password"
+                    required
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="Enter your account password"
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
+
+                {authError && (
+                  <p role="alert" className="text-xs font-semibold text-rose-700">
+                    {authError}
                   </p>
                 )}
-              </div>
 
-              {authError && (
-                <p role="alert" className="text-xs font-semibold text-red-700">
-                  {authError}
-                </p>
-              )}
+                <button
+                  type="submit"
+                  disabled={signingIn || !loginEmail.trim() || !loginPassword}
+                  className="w-full py-2.5 px-5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-60 rounded-xl transition-colors cursor-pointer"
+                >
+                  {signingIn ? 'Signing In...' : 'Sign In to Dashboard'}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleSignIn} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="wsId"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
+                  >
+                    Workspace Identifier
+                  </label>
+                  <input
+                    id="wsId"
+                    type="text"
+                    required
+                    value={workspaceIdentifier}
+                    onChange={(e) => setWorkspaceIdentifier(e.target.value)}
+                    placeholder="e.g. ultimatetechapp or org_ultimatetechapp"
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
 
-              <button
-                type="submit"
-                disabled={signingIn || !selectedOrgId}
-                className="w-full py-2.5 px-5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-xl transition-colors cursor-pointer"
-              >
-                {signingIn ? 'Authorizing Session...' : 'Open Isolated Admin Session'}
-              </button>
-            </form>
+                <div>
+                  <label
+                    htmlFor="wsPasscode"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
+                  >
+                    Access Passcode
+                  </label>
+                  <input
+                    id="wsPasscode"
+                    type="password"
+                    required
+                    value={passcode}
+                    onChange={(e) => setPasscode(e.target.value)}
+                    placeholder="Enter workspace access passcode"
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
+
+                {authError && (
+                  <p role="alert" className="text-xs font-semibold text-rose-700">
+                    {authError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={signingIn || !workspaceIdentifier.trim()}
+                  className="w-full py-2.5 px-5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-60 rounded-xl transition-colors cursor-pointer"
+                >
+                  {signingIn ? 'Signing In...' : 'Sign In with Passcode'}
+                </button>
+              </form>
+            )}
 
             <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-              <span>Launching a new company?</span>
+              <span>Setting up a new business?</span>
               <Link
                 href="/onboarding"
-                className="font-semibold text-blue-600 hover:text-blue-700"
+                className="font-bold text-teal-600 hover:text-teal-700"
               >
-                Onboard Business &rarr;
+                Register Account &rarr;
               </Link>
             </div>
           </div>
@@ -372,13 +740,14 @@ export function BusinessAdminShell() {
       ) : (
         /* Authenticated Admin Workspace Body */
         <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Sidebar Navigation (240px-280px equivalent in 12-col grid) */}
+          {/* Sidebar Navigation */}
           <aside
-            aria-label="Business Administration Sections"
+            aria-label="Workspace Navigation"
             className="lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 space-y-5"
           >
-            {(['Knowledge', 'Configuration', 'Operations'] as const).map((groupName) => {
+            {(['Workspace Setup', 'Knowledge', 'Configuration', 'Operations'] as const).map((groupName) => {
               const items = ADMIN_MODULES.filter((m) => m.group === groupName);
+              if (items.length === 0) return null;
               return (
                 <div key={groupName}>
                   <p className="px-3 text-xs font-semibold text-slate-400">{groupName}</p>
@@ -386,18 +755,23 @@ export function BusinessAdminShell() {
                     {items.map((item) => {
                       const Icon = item.icon;
                       const active = item.key === selectedKey;
+                      const isGuide = item.key === 'onboarding-guide';
                       return (
                         <button
                           key={item.key}
                           type="button"
                           onClick={() => setSelectedKey(item.key)}
-                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold transition-colors text-left cursor-pointer whitespace-nowrap ${
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors text-left cursor-pointer whitespace-nowrap ${
                             active
-                              ? 'bg-blue-50 text-blue-700'
+                              ? isGuide
+                                ? 'bg-teal-50 text-teal-800 font-bold'
+                                : 'bg-blue-50 text-blue-700 font-bold'
+                              : isGuide
+                              ? 'text-teal-700 hover:bg-teal-50/60 font-semibold'
                               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                           }`}
                         >
-                          <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          <Icon className={`w-4 h-4 shrink-0 ${isGuide && !active ? 'text-teal-600' : ''}`} aria-hidden="true" />
                           <span className="truncate">{item.title}</span>
                         </button>
                       );
@@ -410,8 +784,17 @@ export function BusinessAdminShell() {
 
           {/* Main Administration Panel */}
           <main className="lg:col-span-8 xl:col-span-9">
-            {KNOWLEDGE_KEYS.has(selectedKey) ? (
+            {selectedKey === 'onboarding-guide' ? (
+              <WorkspaceOnboardingGuide
+                key={activeSession.organizationId}
+                organizationId={activeSession.organizationId}
+                organizationSlug={activeSession.organizationSlug}
+                onNavigateSection={(sec) => setSelectedKey(sec)}
+                onPortalPublished={() => void loadSession()}
+              />
+            ) : KNOWLEDGE_KEYS.has(selectedKey) ? (
               <KnowledgeAdminManager
+                key={activeSession.organizationId}
                 activeSubView={selectedKey as KnowledgeSubView}
                 organizationName={activeSession.organizationName}
                 organizationId={activeSession.organizationId}
@@ -419,12 +802,14 @@ export function BusinessAdminShell() {
               />
             ) : SETTINGS_KEYS.has(selectedKey) ? (
               <WorkspaceSettingsManager
+                key={activeSession.organizationId}
                 activeSubView={selectedKey as SettingsSubView}
                 organizationName={activeSession.organizationName}
                 organizationSlug={activeSession.organizationSlug}
               />
             ) : (
               <WorkspaceOperationsManager
+                key={activeSession.organizationId}
                 activeSubView={selectedKey as OperationsSubView}
                 organizationName={activeSession.organizationName}
               />

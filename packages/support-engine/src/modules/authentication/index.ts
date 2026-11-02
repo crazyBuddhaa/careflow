@@ -17,6 +17,7 @@ const ROLE_WEIGHT: Record<UserRole, number> = {
   [UserRole.Agent]: 20,
   [UserRole.Supervisor]: 30,
   [UserRole.Admin]: 40,
+  [UserRole.Owner]: 50,
 };
 
 /**

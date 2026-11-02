@@ -5,14 +5,19 @@ import {
   SupportChannel,
   UserRole,
   type AgentAvailability,
+  type BusinessOnboardingStatus,
   type BusinessPortalConfig,
+  type CareFlowUserRecord,
   type CommunicationStyle,
+  type OnboardingProgressReport,
+  type OnboardingStepItemStatus,
   type PortalAccentTheme,
   type PortalAssistantResponseDto,
   type PortalFaqItem,
   type PortalKnowledgePreviewItem,
   type PublicPortalSummary,
   type SupportProcedureItem,
+  type UserWorkspaceMembership,
   type WorkspaceAgentRecord,
   type WorkspaceAnalyticsSummary,
   type WorkspaceConversationItem,
@@ -25,12 +30,41 @@ import {
   ULTIMATE_TECH_APP_PRESET,
   buildDefaultPortalConfigForNewBusiness,
 } from './d1-portal-presets';
+import { hashPassword, verifyPassword } from './password-auth';
 
 interface OrgRow {
   id: string;
   slug: string;
   name: string;
+  country?: string;
+  industry?: string;
+  website?: string;
+  onboarding_status?: string;
+  onboarding_step?: number;
+  created_by_user_id?: string | null;
   is_active: number;
+}
+
+interface UserRow {
+  id: string;
+  email: string;
+  full_name: string;
+  password_hash: string;
+  email_verified: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MemberJoinOrgRow {
+  organization_id: string;
+  slug: string;
+  name: string;
+  role: string;
+  country: string | null;
+  industry: string | null;
+  website: string | null;
+  onboarding_status: string | null;
+  onboarding_step: number | null;
 }
 
 interface SettingsRow {
@@ -146,7 +180,7 @@ export class D1WorkspaceRepository {
     const normalized = slug.trim().toLowerCase();
     return this.db
       .prepare(
-        `SELECT id, slug, name, is_active
+        `SELECT id, slug, name, country, industry, website, onboarding_status, onboarding_step, created_by_user_id, is_active
          FROM organizations
          WHERE slug = ? AND is_active = 1`
       )
@@ -157,7 +191,7 @@ export class D1WorkspaceRepository {
   private async getActiveOrgById(organizationId: string): Promise<OrgRow | null> {
     return this.db
       .prepare(
-        `SELECT id, slug, name, is_active
+        `SELECT id, slug, name, country, industry, website, onboarding_status, onboarding_step, created_by_user_id, is_active
          FROM organizations
          WHERE id = ? AND is_active = 1`
       )
@@ -255,6 +289,7 @@ export class D1WorkspaceRepository {
 
     return {
       ...baseConfig,
+      onboardingStatus: (org.onboarding_status as BusinessOnboardingStatus) ?? 'published',
       publishedKnowledge:
         liveArticles.length > 0 ? liveArticles : baseConfig.publishedKnowledge,
       faqs: liveFaqs.length > 0 ? liveFaqs : baseConfig.faqs,
@@ -1277,5 +1312,749 @@ export class D1WorkspaceRepository {
         availableSpecialists: agents.filter((a) => a.availability === 'available').length,
       },
     };
+  }
+
+  /* -------------------------------------------------------------------------
+   * Multi-Business Account & Workspace Management
+   * ------------------------------------------------------------------------- */
+
+  async registerUserAndFirstBusiness(input: {
+    fullName: string;
+    email: string;
+    password: string;
+    businessName: string;
+    industry: string;
+    country: string;
+    website?: string;
+  }): Promise<{
+    user: CareFlowUserRecord;
+    organization: {
+      id: string;
+      slug: string;
+      name: string;
+      role: UserRole;
+      country: string;
+      industry: string;
+      website?: string;
+      onboardingStatus: BusinessOnboardingStatus;
+    };
+  }> {
+    const email = input.email.trim().toLowerCase();
+    const existingUser = await this.db
+      .prepare(`SELECT id FROM users WHERE email = ?`)
+      .bind(email)
+      .first<{ id: string }>();
+
+    if (existingUser) {
+      throw new Error('An account with this email address already exists. Please sign in.');
+    }
+
+    const now = new Date().toISOString();
+    const userId = `usr_${Math.random().toString(36).slice(2, 10)}`;
+    const passwordHash = hashPassword(input.password);
+
+    await this.db
+      .prepare(
+        `INSERT INTO users (id, email, full_name, password_hash, email_verified, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`
+      )
+      .bind(userId, email, input.fullName.trim(), passwordHash, now, now)
+      .run();
+
+    // Generate unique slug
+    let baseSlug = input.businessName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 36);
+    if (!baseSlug || ['admin', 'api', 'login', 'onboarding', 'portals', 'www'].includes(baseSlug)) {
+      baseSlug = `biz-${Math.random().toString(36).slice(2, 6)}`;
+    }
+
+    let finalSlug = baseSlug;
+    const existingOrg = await this.db
+      .prepare(`SELECT id FROM organizations WHERE slug = ?`)
+      .bind(finalSlug)
+      .first<{ id: string }>();
+
+    if (existingOrg) {
+      finalSlug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
+    }
+
+    const organizationId = `org_${finalSlug.replace(/-/g, '_')}_${Math.random().toString(36).slice(2, 6)}`;
+    const website = input.website?.trim() ?? '';
+
+    await this.db
+      .prepare(
+        `INSERT INTO organizations
+          (id, slug, name, country, industry, website, onboarding_status, onboarding_step, created_by_user_id, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'incomplete', 1, ?, 1, ?, ?)`
+      )
+      .bind(
+        organizationId,
+        finalSlug,
+        input.businessName.trim(),
+        input.country.trim(),
+        input.industry.trim(),
+        website,
+        userId,
+        now,
+        now
+      )
+      .run();
+
+    // Assign registering user as owner of the organization
+    const memberId = `mem_${Math.random().toString(36).slice(2, 10)}`;
+    await this.db
+      .prepare(
+        `INSERT INTO organization_members
+          (id, organization_id, user_id, role, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, 'owner', 1, ?, ?)`
+      )
+      .bind(memberId, organizationId, userId, now, now)
+      .run();
+
+    // Initialize default portal settings
+    const portalConfig = buildDefaultPortalConfigForNewBusiness({
+      organizationId,
+      slug: finalSlug,
+      businessName: input.businessName.trim(),
+      contactEmail: email,
+      accentTheme: 'blue-teal',
+      welcomeHeadline: `Welcome to ${input.businessName.trim()} Support`,
+      welcomeDescription: '',
+      initialGreeting: `Hi! Welcome to ${input.businessName.trim()} support center. What can I help you with today?`,
+      supportedTopics: ['General Questions', 'Service Support', 'Account Inquiries'],
+      restrictedTopics: ['Unrelated third-party topics'],
+      communicationStyle: 'warm-helpful',
+    });
+
+    await this.db
+      .prepare(
+        `INSERT INTO organization_portal_settings (organization_id, settings_json, updated_at)
+         VALUES (?, ?, ?)`
+      )
+      .bind(organizationId, JSON.stringify(portalConfig), now)
+      .run();
+
+    // Seed empty knowledge category & owner support agent entry
+    const initialCatId = `cat_${Math.random().toString(36).slice(2, 10)}`;
+    await this.db
+      .prepare(
+        `INSERT INTO knowledge_categories
+          (id, organization_id, slug, name, description, display_order, created_at, updated_at)
+         VALUES (?, ?, 'general', 'General Support', 'Core guidance and general information.', 10, ?, ?)`
+      )
+      .bind(initialCatId, organizationId, now, now)
+      .run();
+
+    const agentId = `agt_${Math.random().toString(36).slice(2, 10)}`;
+    await this.db
+      .prepare(
+        `INSERT INTO support_agents
+          (id, organization_id, display_name, email, role, specialty, availability, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'admin', 'Primary Administrator', 'available', ?, ?)`
+      )
+      .bind(agentId, organizationId, input.fullName.trim(), email, now, now)
+      .run();
+
+    return {
+      user: {
+        id: userId,
+        email,
+        fullName: input.fullName.trim(),
+        emailVerified: true,
+        createdAt: now,
+      },
+      organization: {
+        id: organizationId,
+        slug: finalSlug,
+        name: input.businessName.trim(),
+        role: UserRole.Owner,
+        country: input.country.trim(),
+        industry: input.industry.trim(),
+        website,
+        onboardingStatus: 'incomplete',
+      },
+    };
+  }
+
+  async authenticateUser(
+    emailInput: string,
+    passwordInput: string
+  ): Promise<{
+    user: CareFlowUserRecord;
+    activeMembership: UserWorkspaceMembership;
+    workspaces: UserWorkspaceMembership[];
+  } | null> {
+    const email = emailInput.trim().toLowerCase();
+    const userRow = await this.db
+      .prepare(`SELECT id, email, full_name, password_hash, email_verified, created_at, updated_at FROM users WHERE email = ?`)
+      .bind(email)
+      .first<UserRow>();
+
+    if (!userRow) {
+      return null;
+    }
+
+    const isValid = verifyPassword(passwordInput, userRow.password_hash);
+    if (!isValid) {
+      return null;
+    }
+
+    const workspaces = await this.getUserWorkspaces(userRow.id);
+    if (workspaces.length === 0) {
+      return null;
+    }
+
+    return {
+      user: {
+        id: userRow.id,
+        email: userRow.email,
+        fullName: userRow.full_name,
+        emailVerified: Boolean(userRow.email_verified),
+        createdAt: userRow.created_at,
+      },
+      activeMembership: workspaces[0],
+      workspaces,
+    };
+  }
+
+  async getUserWorkspaces(userId: string): Promise<UserWorkspaceMembership[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT
+           om.organization_id,
+           o.slug,
+           o.name,
+           om.role,
+           o.country,
+           o.industry,
+           o.website,
+           o.onboarding_status,
+           o.onboarding_step
+         FROM organization_members om
+         JOIN organizations o ON o.id = om.organization_id
+         WHERE om.user_id = ? AND om.is_active = 1 AND o.is_active = 1
+         ORDER BY o.name ASC`
+      )
+      .bind(userId)
+      .all<MemberJoinOrgRow>();
+
+    return results.map((r) => ({
+      organizationId: r.organization_id,
+      organizationSlug: r.slug,
+      organizationName: r.name,
+      role: (r.role as UserRole) || UserRole.Admin,
+      country: r.country ?? 'United States',
+      industry: r.industry ?? 'Technology',
+      website: r.website ?? '',
+      onboardingStatus: (r.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
+      onboardingStep: r.onboarding_step ?? 1,
+    }));
+  }
+
+  async getUserActiveMembership(
+    userId: string,
+    organizationId: string
+  ): Promise<UserWorkspaceMembership | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT
+           om.organization_id,
+           o.slug,
+           o.name,
+           om.role,
+           o.country,
+           o.industry,
+           o.website,
+           o.onboarding_status,
+           o.onboarding_step
+         FROM organization_members om
+         JOIN organizations o ON o.id = om.organization_id
+         WHERE om.user_id = ? AND om.organization_id = ? AND om.is_active = 1 AND o.is_active = 1`
+      )
+      .bind(userId, organizationId)
+      .first<MemberJoinOrgRow>();
+
+    if (!row) return null;
+
+    return {
+      organizationId: row.organization_id,
+      organizationSlug: row.slug,
+      organizationName: row.name,
+      role: (row.role as UserRole) || UserRole.Admin,
+      country: row.country ?? 'United States',
+      industry: row.industry ?? 'Technology',
+      website: row.website ?? '',
+      onboardingStatus: (row.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
+      onboardingStep: row.onboarding_step ?? 1,
+    };
+  }
+
+  async createAdditionalBusinessForUser(
+    userId: string,
+    input: {
+      businessName: string;
+      industry: string;
+      country: string;
+      website?: string;
+    }
+  ): Promise<UserWorkspaceMembership> {
+    const user = await this.db
+      .prepare(`SELECT id, email, full_name FROM users WHERE id = ?`)
+      .bind(userId)
+      .first<UserRow>();
+
+    if (!user) {
+      throw new Error('User account not found.');
+    }
+
+    const now = new Date().toISOString();
+    let baseSlug = input.businessName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 36);
+    if (!baseSlug || ['admin', 'api', 'login', 'onboarding', 'portals', 'www'].includes(baseSlug)) {
+      baseSlug = `biz-${Math.random().toString(36).slice(2, 6)}`;
+    }
+
+    let finalSlug = baseSlug;
+    const existing = await this.db
+      .prepare(`SELECT id FROM organizations WHERE slug = ?`)
+      .bind(finalSlug)
+      .first<{ id: string }>();
+
+    if (existing) {
+      finalSlug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
+    }
+
+    const organizationId = `org_${finalSlug.replace(/-/g, '_')}_${Math.random().toString(36).slice(2, 6)}`;
+    const website = input.website?.trim() ?? '';
+
+    await this.db
+      .prepare(
+        `INSERT INTO organizations
+          (id, slug, name, country, industry, website, onboarding_status, onboarding_step, created_by_user_id, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'incomplete', 1, ?, 1, ?, ?)`
+      )
+      .bind(
+        organizationId,
+        finalSlug,
+        input.businessName.trim(),
+        input.country.trim(),
+        input.industry.trim(),
+        website,
+        userId,
+        now,
+        now
+      )
+      .run();
+
+    const memberId = `mem_${Math.random().toString(36).slice(2, 10)}`;
+    await this.db
+      .prepare(
+        `INSERT INTO organization_members
+          (id, organization_id, user_id, role, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, 'owner', 1, ?, ?)`
+      )
+      .bind(memberId, organizationId, userId, now, now)
+      .run();
+
+    const portalConfig = buildDefaultPortalConfigForNewBusiness({
+      organizationId,
+      slug: finalSlug,
+      businessName: input.businessName.trim(),
+      contactEmail: user.email,
+      accentTheme: 'blue-teal',
+      welcomeHeadline: `Welcome to ${input.businessName.trim()} Support`,
+      welcomeDescription: '',
+      initialGreeting: `Hi! Welcome to ${input.businessName.trim()} support. How can we help you?`,
+      supportedTopics: ['General Questions', 'Service Support'],
+      restrictedTopics: ['Unrelated third-party topics'],
+      communicationStyle: 'warm-helpful',
+    });
+
+    await this.db
+      .prepare(
+        `INSERT INTO organization_portal_settings (organization_id, settings_json, updated_at)
+         VALUES (?, ?, ?)`
+      )
+      .bind(organizationId, JSON.stringify(portalConfig), now)
+      .run();
+
+    return {
+      organizationId,
+      organizationSlug: finalSlug,
+      organizationName: input.businessName.trim(),
+      role: UserRole.Owner,
+      country: input.country.trim(),
+      industry: input.industry.trim(),
+      website,
+      onboardingStatus: 'incomplete',
+      onboardingStep: 1,
+    };
+  }
+
+  async switchUserActiveWorkspace(
+    userId: string,
+    targetOrganizationId: string
+  ): Promise<UserWorkspaceMembership> {
+    const membership = await this.getUserActiveMembership(userId, targetOrganizationId);
+    if (!membership) {
+      throw new Error('You do not have active membership in this workspace.');
+    }
+    return membership;
+  }
+
+  /* -------------------------------------------------------------------------
+   * 7-Step Guided Onboarding Progress & Publishing
+   * ------------------------------------------------------------------------- */
+
+  async getOnboardingProgress(organizationId: string): Promise<OnboardingProgressReport> {
+    const org = await this.getActiveOrgById(organizationId);
+    if (!org) {
+      throw new Error('Organization workspace not found.');
+    }
+
+    const settings = await this.loadBaseSettingsForOrg(org);
+    const [articleCount, faqCount, agentCount] = await Promise.all([
+      this.db
+        .prepare(`SELECT COUNT(*) AS total FROM knowledge_articles WHERE organization_id = ?`)
+        .bind(organizationId)
+        .first<{ total: number }>(),
+      this.db
+        .prepare(`SELECT COUNT(*) AS total FROM knowledge_faqs WHERE organization_id = ?`)
+        .bind(organizationId)
+        .first<{ total: number }>(),
+      this.db
+        .prepare(`SELECT COUNT(*) AS total FROM support_agents WHERE organization_id = ?`)
+        .bind(organizationId)
+        .first<{ total: number }>(),
+    ]);
+
+    const totalArticles = Number(articleCount?.total ?? 0);
+    const totalFaqs = Number(faqCount?.total ?? 0);
+    const totalAgents = Number(agentCount?.total ?? 0);
+
+    // Step 1: Profile (Requires business description and contact email)
+    const profileComplete = Boolean(
+      (org.country && org.country.trim().length > 0) &&
+      (org.industry && org.industry.trim().length > 0) &&
+      (settings.contactEmail && settings.contactEmail.includes('@')) &&
+      (settings.welcomeDescription && settings.welcomeDescription.trim().length >= 10)
+    );
+
+    // Step 2: Branding
+    const brandingComplete = Boolean(
+      settings.branding.displayName.trim().length >= 2 &&
+      settings.branding.accentTheme &&
+      settings.welcomeHeadline.trim().length >= 4
+    );
+
+    // Step 3: Support Configuration
+    const supportConfigComplete = Boolean(
+      settings.chatbot.supportedTopics.length >= 1 &&
+      settings.categories.length >= 1
+    );
+
+    // Step 4: Knowledge Base Setup (at least 1 article or FAQ created)
+    const knowledgeBaseComplete = totalArticles > 0 || totalFaqs > 0;
+
+    // Step 5: Human Support Configuration (Operating hours must come from business itself)
+    const humanSupportComplete = Boolean(
+      settings.supportHours && settings.supportHours.trim().length >= 3
+    );
+
+    // Step 6: Chatbot Configuration
+    const chatbotComplete = Boolean(
+      settings.chatbot.assistantName.trim().length >= 2 &&
+      settings.chatbot.initialGreeting.trim().length >= 4 &&
+      settings.chatbot.supportedTopics.length >= 1
+    );
+
+    // Step 7: Publishing status
+    const isPublished = org.onboarding_status === 'published';
+
+    const missingRequirements: string[] = [];
+    if (!profileComplete) missingRequirements.push('Complete business profile and description.');
+    if (!brandingComplete) missingRequirements.push('Configure brand display name and welcome headline.');
+    if (!supportConfigComplete) missingRequirements.push('Define at least one supported support topic.');
+    if (!humanSupportComplete) missingRequirements.push('Configure operating hours or human support escalation.');
+    if (!chatbotComplete) missingRequirements.push('Configure assistant display name and initial greeting.');
+
+    const canPublish = missingRequirements.length === 0;
+
+    let computedStatus: BusinessOnboardingStatus = (org.onboarding_status as BusinessOnboardingStatus) || 'incomplete';
+    if (computedStatus === 'incomplete') {
+      if (org.onboarding_step && org.onboarding_step > 1) {
+        computedStatus = canPublish ? 'ready_to_publish' : 'in_progress';
+      }
+    } else if (computedStatus !== 'published' && computedStatus !== 'suspended') {
+      computedStatus = canPublish ? 'ready_to_publish' : 'in_progress';
+    }
+
+    const steps: OnboardingStepItemStatus[] = [
+      {
+        step: 1,
+        id: 'business-profile',
+        title: 'Complete Business Profile',
+        description: 'Provide your business description, dedicated support email, country, and primary industry.',
+        completed: profileComplete,
+        isOptional: false,
+        summary: profileComplete
+          ? `${org.name} · ${org.industry} · ${org.country}`
+          : 'Profile information incomplete',
+      },
+      {
+        step: 2,
+        id: 'branding',
+        title: 'Business Branding',
+        description: 'Customize support portal colors, logo presentation, welcome headline, and display name.',
+        completed: brandingComplete,
+        isOptional: false,
+        summary: brandingComplete
+          ? `Portal: ${settings.branding.displayName} (${settings.branding.accentTheme})`
+          : 'Branding not fully customized',
+      },
+      {
+        step: 3,
+        id: 'support-configuration',
+        title: 'Support Configuration',
+        description: 'Define supported products, issue types, languages, and handled topics.',
+        completed: supportConfigComplete,
+        isOptional: false,
+        summary: `${settings.chatbot.supportedTopics.length} supported topics configured`,
+      },
+      {
+        step: 4,
+        id: 'knowledge-base',
+        title: 'Knowledge Base Setup',
+        description: 'Add knowledge articles and FAQs. Your assistant relies on approved business information.',
+        completed: knowledgeBaseComplete,
+        isOptional: false,
+        summary: knowledgeBaseComplete
+          ? `${totalArticles} articles · ${totalFaqs} FAQs available`
+          : 'Knowledge base is currently empty (assistant relies on approved docs)',
+      },
+      {
+        step: 5,
+        id: 'human-support',
+        title: 'Human Support Configuration',
+        description: 'Set operating hours, time zone, escalation conditions, and specialist coverage.',
+        completed: humanSupportComplete,
+        isOptional: false,
+        summary: humanSupportComplete
+          ? `${settings.supportHours || 'Escalation configured'} · ${totalAgents} specialists`
+          : 'Operating hours and escalation rules pending',
+      },
+      {
+        step: 6,
+        id: 'chatbot-configuration',
+        title: 'Assistant Configuration',
+        description: 'Set assistant display name, greeting, communication tone, and approved topics.',
+        completed: chatbotComplete,
+        isOptional: false,
+        summary: `${settings.chatbot.assistantName} (${settings.chatbot.communicationStyle})`,
+      },
+      {
+        step: 7,
+        id: 'test-and-publish',
+        title: 'Test and Publish Support Portal',
+        description: 'Preview portal, test guided assistant responses, and publish your branded portal live.',
+        completed: isPublished,
+        isOptional: false,
+        summary: isPublished
+          ? 'Portal is live and published'
+          : canPublish
+            ? 'Ready for final review and publication'
+            : `${missingRequirements.length} required setup items remaining`,
+      },
+    ];
+
+    const completedStepsCount = steps.filter((s) => s.completed).length;
+    const completionPercentage = Math.round((completedStepsCount / steps.length) * 100);
+
+    return {
+      organizationId,
+      organizationName: org.name,
+      organizationSlug: org.slug,
+      country: org.country ?? 'United States',
+      industry: org.industry ?? 'Technology',
+      website: org.website ?? '',
+      status: computedStatus,
+      currentStep: org.onboarding_step ?? 1,
+      completedStepsCount,
+      totalStepsCount: steps.length,
+      completionPercentage,
+      canPublish,
+      missingRequirements,
+      steps,
+      lastSavedAt: new Date().toISOString(),
+    };
+  }
+
+  async saveOnboardingStep(
+    organizationId: string,
+    step: number,
+    data: {
+      profile?: {
+        description?: string;
+        contactEmail?: string;
+        country?: string;
+        industry?: string;
+        website?: string;
+        phoneNumber?: string;
+        address?: string;
+        socialLinks?: Record<string, string>;
+      };
+      branding?: {
+        displayName?: string;
+        logoText?: string;
+        logoUrl?: string;
+        accentTheme?: PortalAccentTheme;
+        primaryColor?: string;
+        secondaryColor?: string;
+        welcomeMessage?: string;
+      };
+      supportConfig?: {
+        supportedProducts?: string[];
+        handledIssues?: string[];
+        supportedTopics?: string[];
+        restrictedTopics?: string[];
+        languages?: string[];
+        communicationStyle?: CommunicationStyle;
+      };
+      humanSupport?: {
+        contactInfo?: string;
+        operatingHours?: string;
+        timezone?: string;
+        escalationConditions?: string;
+        humanSupportAvailable?: boolean;
+      };
+      chatbot?: {
+        assistantName?: string;
+        greetingMessage?: string;
+        communicationStyle?: CommunicationStyle;
+        supportedLanguages?: string[];
+        approvedTopics?: string[];
+        restrictedTopics?: string[];
+        escalationRules?: string | string[];
+        aiProviderConfigured?: boolean;
+      };
+    }
+  ): Promise<OnboardingProgressReport> {
+    const org = await this.getActiveOrgById(organizationId);
+    if (!org) {
+      throw new Error('Organization workspace not found.');
+    }
+
+    const currentSettings = await this.loadBaseSettingsForOrg(org);
+    const now = new Date().toISOString();
+
+    // 1. Update organizations table columns if provided in profile
+    if (data.profile) {
+      const country = data.profile.country?.trim() || org.country || 'United States';
+      const industry = data.profile.industry?.trim() || org.industry || 'Technology';
+      const website = data.profile.website?.trim() ?? org.website ?? '';
+
+      await this.db
+        .prepare(
+          `UPDATE organizations
+           SET country = ?, industry = ?, website = ?, onboarding_step = MAX(onboarding_step, ?), updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(country, industry, website, step, now, organizationId)
+        .run();
+    } else {
+      await this.db
+        .prepare(
+          `UPDATE organizations
+           SET onboarding_step = MAX(onboarding_step, ?), updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(step, now, organizationId)
+        .run();
+    }
+
+    // 2. Patch portal settings
+    const updatedBranding = {
+      ...currentSettings.branding,
+      ...(data.branding?.displayName ? { displayName: data.branding.displayName.trim() } : {}),
+      ...(data.branding?.logoText ? { logoText: data.branding.logoText.trim() } : {}),
+      ...(data.branding?.logoUrl !== undefined ? { logoUrl: data.branding.logoUrl.trim() } : {}),
+      ...(data.branding?.primaryColor ? { primaryColor: data.branding.primaryColor.trim() } : {}),
+      ...(data.branding?.secondaryColor ? { secondaryColor: data.branding.secondaryColor.trim() } : {}),
+      ...(data.branding?.accentTheme ? { accentTheme: data.branding.accentTheme } : {}),
+    };
+
+    const updatedChatbot = {
+      ...currentSettings.chatbot,
+      ...(data.chatbot?.assistantName ? { assistantName: data.chatbot.assistantName.trim() } : {}),
+      ...(data.chatbot?.greetingMessage ? { initialGreeting: data.chatbot.greetingMessage.trim() } : {}),
+      ...(data.chatbot?.communicationStyle ? { communicationStyle: data.chatbot.communicationStyle } : {}),
+      ...(data.supportConfig?.communicationStyle ? { communicationStyle: data.supportConfig.communicationStyle } : {}),
+      ...(data.supportConfig?.supportedTopics ? { supportedTopics: data.supportConfig.supportedTopics } : {}),
+      ...(data.supportConfig?.restrictedTopics ? { restrictedTopics: data.supportConfig.restrictedTopics } : {}),
+      ...(data.chatbot?.approvedTopics ? { supportedTopics: data.chatbot.approvedTopics } : {}),
+      ...(data.chatbot?.restrictedTopics ? { restrictedTopics: data.chatbot.restrictedTopics } : {}),
+    };
+
+    const updatedSettings: BusinessPortalConfig = {
+      ...currentSettings,
+      contactEmail: data.profile?.contactEmail?.trim() || currentSettings.contactEmail,
+      supportHours: data.humanSupport?.operatingHours?.trim() || currentSettings.supportHours,
+      welcomeDescription: data.profile?.description?.trim() || currentSettings.welcomeDescription,
+      welcomeHeadline: data.branding?.welcomeMessage?.trim() || currentSettings.welcomeHeadline,
+      branding: updatedBranding,
+      chatbot: updatedChatbot,
+      escalation: {
+        ...currentSettings.escalation,
+        ...(data.humanSupport?.escalationConditions
+          ? { supportInstructions: data.humanSupport.escalationConditions.trim() }
+          : {}),
+      },
+    };
+
+    await this.db
+      .prepare(
+        `INSERT INTO organization_portal_settings (organization_id, settings_json, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (organization_id) DO UPDATE SET
+           settings_json = excluded.settings_json,
+           updated_at = excluded.updated_at`
+      )
+      .bind(organizationId, JSON.stringify(updatedSettings), now)
+      .run();
+
+    // 3. Mark status as in_progress if currently incomplete
+    if (org.onboarding_status === 'incomplete') {
+      await this.db
+        .prepare(`UPDATE organizations SET onboarding_status = 'in_progress', updated_at = ? WHERE id = ?`)
+        .bind(now, organizationId)
+        .run();
+    }
+
+    return this.getOnboardingProgress(organizationId);
+  }
+
+  async publishWorkspacePortal(organizationId: string): Promise<OnboardingProgressReport> {
+    const progress = await this.getOnboardingProgress(organizationId);
+    if (!progress.canPublish) {
+      throw new Error(
+        `Cannot publish portal yet. Missing requirements: ${progress.missingRequirements.join(' ')}`
+      );
+    }
+
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(`UPDATE organizations SET onboarding_status = 'published', updated_at = ? WHERE id = ?`)
+      .bind(now, organizationId)
+      .run();
+
+    return this.getOnboardingProgress(organizationId);
   }
 }

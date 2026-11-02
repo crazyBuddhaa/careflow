@@ -40,24 +40,24 @@ interface WorkspaceSettingsManagerProps {
 
 const PRIORITY_LABELS: Record<ResponsePriorityLayer, { label: string; detail: string }> = {
   'business-rules': {
-    label: 'Programmed Business Rules & Approved FAQs',
-    detail: 'Exact policy answers and topic boundary enforcement.',
+    label: 'Approved Business Rules & FAQs',
+    detail: 'Canonical answers and topic rules defined by your team.',
   },
   'knowledge-base': {
-    label: 'Published Knowledge Base Retrieval',
-    detail: 'Verified help articles scoped strictly to this workspace.',
+    label: 'Published Knowledge Base',
+    detail: 'Verified help articles written for your customers.',
   },
   'guided-troubleshooting': {
-    label: 'Guided Troubleshooting Procedures',
-    detail: 'Step-by-step diagnostic checklists for recurring issues.',
+    label: 'Guided Troubleshooting Flows',
+    detail: 'Step-by-step checks for recurring customer questions.',
   },
   'ai-fallback': {
-    label: 'Optional External AI Provider Fallback',
-    detail: 'Invoked only when enabled and within daily request limits.',
+    label: 'Assisted Resolution',
+    detail: 'Context-aware assistance governed by your confidence and usage limits.',
   },
   'human-escalation': {
-    label: 'Human-Agent Escalation',
-    detail: 'Routes unresolved enquiries to your support queue with context.',
+    label: 'Human Specialist Handoff',
+    detail: 'Routes unresolved enquiries to your support team with context.',
   },
 };
 
@@ -515,7 +515,7 @@ export function WorkspaceSettingsManager({
               href={portalHref}
               className="inline-flex items-center gap-1.5 py-2 px-4 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl whitespace-nowrap self-start"
             >
-              <span>View Live Portal</span>
+              <span>Open Support Portal</span>
               <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
             </Link>
           </div>
@@ -540,10 +540,10 @@ export function WorkspaceSettingsManager({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700">
-                Tenant Identifier &amp; Portal Slug
+                Support Portal Address
               </label>
               <p className="mt-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-mono text-slate-600">
-                {config?.organizationId} · /{config?.slug}
+                {config?.slug}.careflow.com
               </p>
             </div>
 
@@ -851,11 +851,11 @@ export function WorkspaceSettingsManager({
                 Configuration · {organizationName}
               </p>
               <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
-                Chatbot Settings &amp; Business Boundaries
+                Assistant Settings &amp; Topic Scope
               </h1>
               <p className="mt-1.5 text-sm text-slate-600">
-                Configure assistant greeting, tone of voice, supported vs. restricted topics,
-                response priority order, and optional external AI fallback limits.
+                Configure your assistant greeting, tone of voice, supported topics, resolution
+                order, and assisted response controls.
               </p>
             </div>
 
@@ -1037,10 +1037,9 @@ export function WorkspaceSettingsManager({
 
             {/* Response Priority Order */}
             <div className="pt-6 border-t border-slate-100">
-              <h2 className="text-sm font-bold text-slate-900">Response Priority Pipeline</h2>
+              <h2 className="text-sm font-bold text-slate-900">Resolution Order</h2>
               <p className="mt-1 text-xs text-slate-500">
-                CareFlow evaluates customer enquiries in this order before invoking external AI or
-                human handoff.
+                CareFlow resolves customer enquiries in this order across your support portal.
               </p>
 
               <div className="mt-4 divide-y divide-slate-100 border-y border-slate-100">
@@ -1086,16 +1085,16 @@ export function WorkspaceSettingsManager({
               </div>
             </div>
 
-            {/* Optional External AI Fallback Controls */}
+            {/* Assisted Resolution Controls */}
             <div className="pt-6 border-t border-slate-100 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900">
-                    Optional External AI Fallback
+                    Assisted Resolution Controls
                   </h2>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Provider API keys remain strictly server-side in Worker secrets and are never
-                    exposed in frontend code.
+                    Set confidence thresholds, daily request limits, and guidance rules for assisted
+                    replies.
                   </p>
                 </div>
                 <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer">
@@ -1105,7 +1104,7 @@ export function WorkspaceSettingsManager({
                     onChange={(e) => setAiEnabled(e.target.checked)}
                     className="rounded border-slate-300 text-blue-600 focus:ring-blue-600"
                   />
-                  <span>{aiEnabled ? 'Fallback Enabled' : 'Fallback Disabled (Deterministic Only)'}</span>
+                  <span>{aiEnabled ? 'Enabled' : 'Standard Knowledge Mode'}</span>
                 </label>
               </div>
 
@@ -1115,7 +1114,7 @@ export function WorkspaceSettingsManager({
                     htmlFor="ai-provider"
                     className="block text-xs font-semibold text-slate-700"
                   >
-                    Preferred Provider
+                    Response Engine
                   </label>
                   <select
                     id="ai-provider"
@@ -1123,9 +1122,9 @@ export function WorkspaceSettingsManager({
                     onChange={(e) => setAiProvider(e.target.value as ExternalAiProviderKey)}
                     className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
                   >
-                    <option value="gemini">Google Gemini</option>
-                    <option value="groq">Groq</option>
-                    <option value="openrouter">OpenRouter</option>
+                    <option value="gemini">CareFlow Standard</option>
+                    <option value="groq">CareFlow Fast Response</option>
+                    <option value="openrouter">CareFlow Extended Reasoning</option>
                   </select>
                 </div>
 
@@ -1153,7 +1152,7 @@ export function WorkspaceSettingsManager({
                     htmlFor="ai-cap"
                     className="block text-xs font-semibold text-slate-700"
                   >
-                    Daily Request Cap
+                    Daily Request Limit
                   </label>
                   <input
                     id="ai-cap"
@@ -1171,7 +1170,7 @@ export function WorkspaceSettingsManager({
                     htmlFor="ai-inst"
                     className="block text-xs font-semibold text-slate-700"
                   >
-                    Business Boundary System Instructions
+                    Assistant Guidance Instructions
                   </label>
                   <textarea
                     id="ai-inst"
@@ -1212,16 +1211,16 @@ export function WorkspaceSettingsManager({
             </div>
           </form>
 
-          {/* Interactive Chatbot Test Sandbox */}
+          {/* Interactive Assistant Preview */}
           <div className="rounded-2xl border border-slate-200 bg-white p-7 space-y-4">
             <div>
-              <p className="text-xs font-semibold text-teal-700">Live Workspace Test Sandbox</p>
+              <p className="text-xs font-semibold text-teal-700">Assistant Preview</p>
               <h2 className="mt-1 text-lg font-bold text-slate-900">
-                Test Assistant Retrieval &amp; Topic Boundaries
+                Preview Customer Responses
               </h2>
               <p className="mt-1 text-xs text-slate-500">
-                Enter a customer question to inspect how {organizationName}&apos;s published
-                articles, FAQs, procedures, and restricted-topic boundaries respond.
+                Ask a sample customer question to preview how {organizationName}&apos;s published
+                knowledge, FAQs, and topic rules respond.
               </p>
             </div>
 

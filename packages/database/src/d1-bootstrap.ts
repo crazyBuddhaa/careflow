@@ -6,17 +6,24 @@ import {
   NORTHSTAR_COMMERCE_PRESET,
   ULTIMATE_TECH_APP_PRESET,
 } from './d1-portal-presets';
+import { hashPassword } from './password-auth';
 
 const DEFAULT_TENANTS = [
   {
     id: 'org_ultimatetechapp',
     slug: 'ultimatetechapp',
     name: 'UltimateTechApp',
+    country: 'United States',
+    industry: 'Financial services',
+    onboardingStatus: 'published',
   },
   {
     id: 'org_northstar_commerce',
     slug: 'northstar-commerce',
     name: 'Northstar Commerce',
+    country: 'United States',
+    industry: 'E-commerce and retail',
+    onboardingStatus: 'published',
   },
 ];
 
@@ -61,18 +68,73 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     await db.prepare(statement).run();
   }
 
+  // Safe migrations for pre-existing databases that had an older organizations schema
+  const orgColumnAdditions = [
+    `ALTER TABLE organizations ADD COLUMN country TEXT NOT NULL DEFAULT 'United States'`,
+    `ALTER TABLE organizations ADD COLUMN industry TEXT NOT NULL DEFAULT 'Technology'`,
+    `ALTER TABLE organizations ADD COLUMN website TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE organizations ADD COLUMN onboarding_status TEXT NOT NULL DEFAULT 'incomplete'`,
+    `ALTER TABLE organizations ADD COLUMN onboarding_step INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE organizations ADD COLUMN created_by_user_id TEXT`,
+  ];
+  for (const alterSql of orgColumnAdditions) {
+    try {
+      await db.prepare(alterSql).run();
+    } catch {
+      // Column already exists or already upgraded
+    }
+  }
+
   const now = new Date().toISOString();
 
   for (const org of DEFAULT_TENANTS) {
     await db
       .prepare(
-        `INSERT INTO organizations (id, slug, name, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, 1, ?, ?)
-         ON CONFLICT (id) DO NOTHING`
+        `INSERT INTO organizations (id, slug, name, country, industry, onboarding_status, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           country = excluded.country,
+           industry = excluded.industry,
+           onboarding_status = COALESCE(organizations.onboarding_status, excluded.onboarding_status)`
       )
-      .bind(org.id, org.slug, org.name, now, now)
+      .bind(org.id, org.slug, org.name, org.country, org.industry, org.onboardingStatus, now, now)
       .run();
   }
+
+  // Seed default admin user for development, tests, and seed environments
+  const defaultAdminId = 'user_admin_default_uta';
+  const defaultAdminEmail = 'admin@ultimatetechapp.example';
+  const defaultPassHash = hashPassword('careflow-dev-admin');
+
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, full_name, password_hash, email_verified, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 1, ?, ?)
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(defaultAdminId, defaultAdminEmail, 'CareFlow Administrator', defaultPassHash, now, now)
+    .run();
+
+  // Link default user to org_ultimatetechapp as owner
+  await db
+    .prepare(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 'owner', 1, ?, ?)
+       ON CONFLICT (organization_id, user_id) DO NOTHING`
+    )
+    .bind('mem_admin_uta', 'org_ultimatetechapp', defaultAdminId, now, now)
+    .run();
+
+  // Link default user to org_northstar_commerce as admin
+  await db
+    .prepare(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 'admin', 1, ?, ?)
+       ON CONFLICT (organization_id, user_id) DO NOTHING`
+    )
+    .bind('mem_admin_ns', 'org_northstar_commerce', defaultAdminId, now, now)
+    .run();
+
 
   // Seed default portal settings for UltimateTechApp and Northstar Commerce if absent
   await db

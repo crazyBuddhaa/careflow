@@ -1048,8 +1048,8 @@ export function WorkspaceOperationsManager({
               Workspace Support Metrics
             </h1>
             <p className="mt-1.5 text-sm text-slate-600">
-              Live counts computed directly from {organizationName}&apos;s isolated knowledge base
-              and conversation tables.
+              Real-time support activity, published knowledge coverage, and specialist availability
+              for {organizationName}.
             </p>
 
             {loadingAnalytics || !analytics ? (

@@ -52,6 +52,9 @@ export const UpdateWorkspaceSettingsSchema = z.object({
     .object({
       displayName: z.string().trim().min(2).max(100),
       logoText: z.string().trim().min(2).max(120),
+      logoUrl: z.string().trim().max(600000).optional(),
+      primaryColor: z.string().trim().max(30).optional(),
+      secondaryColor: z.string().trim().max(30).optional(),
       accentTheme: PortalAccentThemeSchema,
       portalSubtitle: z.string().trim().min(2).max(160),
     })
@@ -164,4 +167,145 @@ export const CreateDemoConversationSchema = z.object({
   category: z.string().trim().min(2).max(100),
   subject: z.string().trim().min(4).max(180),
   message: z.string().trim().min(4).max(1500),
+});
+
+export const BusinessCategoryEnum = z.enum([
+  'E-commerce and retail',
+  'Financial services',
+  'Technology',
+  'Education',
+  'Healthcare',
+  'Hospitality',
+  'Professional services',
+  'Logistics and transportation',
+  'Other',
+]);
+
+export const RegisterUserAccountSchema = z
+  .object({
+    fullName: z.string().trim().min(2, 'Full name must be at least 2 characters.').max(100),
+    email: z.string().trim().email('Please provide a valid email address.').max(160),
+    password: z
+      .string()
+      .min(8, 'Password must be at least 8 characters long.')
+      .max(128)
+      .regex(
+        /^(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
+        'Password must contain at least one number or special character.'
+      ),
+    confirmPassword: z.string(),
+    agreeToTerms: z
+      .boolean()
+      .refine((val) => val === true, 'You must accept the Terms of Service and Privacy Policy.'),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+
+export const RegisterInitialBusinessSchema = z.object({
+  businessName: z.string().trim().min(2, 'Business name must be at least 2 characters.').max(90),
+  industry: z.string().trim().min(2, 'Please select or enter an industry.').max(60),
+  country: z.string().trim().min(2, 'Please select a country of operation.').max(80),
+  website: z.string().trim().max(180).optional().default(''),
+});
+
+export const FullRegistrationSchema = z
+  .object({
+    fullName: z.string().trim().min(2, 'Full name must be at least 2 characters.').max(100),
+    email: z.string().trim().email('Please provide a valid email address.').max(160),
+    password: z
+      .string()
+      .min(8, 'Password must be at least 8 characters long.')
+      .max(128)
+      .regex(
+        /^(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
+        'Password must contain at least one number or special character.'
+      ),
+    confirmPassword: z.string(),
+    agreeToTerms: z
+      .boolean()
+      .refine((val) => val === true, 'You must accept the Terms of Service and Privacy Policy.'),
+    businessName: z.string().trim().min(2, 'Business name must be at least 2 characters.').max(90),
+    industry: z.string().trim().min(2, 'Please select or enter an industry.').max(60),
+    country: z.string().trim().min(2, 'Please select a country of operation.').max(80),
+    website: z.string().trim().max(180).optional().default(''),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+
+export const UserLoginSchema = z.object({
+  email: z.string().trim().email('Please enter a valid email.').max(160),
+  password: z.string().min(1, 'Please enter your password.').max(128),
+});
+
+export const SwitchWorkspaceSchema = z.object({
+  organizationId: z.string().trim().min(2).max(100),
+});
+
+export const CreateAdditionalBusinessSchema = z.object({
+  businessName: z.string().trim().min(2, 'Business name must be at least 2 characters.').max(90),
+  industry: z.string().trim().min(2, 'Please select or enter an industry.').max(60),
+  country: z.string().trim().min(2, 'Please select a country of operation.').max(80),
+  website: z.string().trim().max(180).optional().default(''),
+});
+
+export const SaveOnboardingStepSchema = z.object({
+  step: z.number().int().min(1).max(7),
+  profile: z
+    .object({
+      description: z.string().trim().min(10).max(600).optional(),
+      contactEmail: z.string().trim().email().max(160).optional(),
+      country: z.string().trim().min(2).max(80).optional(),
+      industry: z.string().trim().min(2).max(60).optional(),
+      website: z.string().trim().max(180).optional(),
+      phoneNumber: z.string().trim().max(40).optional(),
+      address: z.string().trim().max(200).optional(),
+      socialLinks: z.record(z.string(), z.string()).optional(),
+    })
+    .optional(),
+  branding: z
+    .object({
+      displayName: z.string().trim().min(2).max(100).optional(),
+      logoText: z.string().trim().min(2).max(120).optional(),
+      logoUrl: z.string().trim().max(600000).optional(),
+      accentTheme: PortalAccentThemeSchema.optional(),
+      primaryColor: z.string().trim().max(30).optional(),
+      secondaryColor: z.string().trim().max(30).optional(),
+      welcomeMessage: z.string().trim().min(4).max(300).optional(),
+    })
+    .optional(),
+  supportConfig: z
+    .object({
+      supportedProducts: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+      handledIssues: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+      supportedTopics: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+      restrictedTopics: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+      languages: z.array(z.string().trim().min(2).max(50)).max(10).optional(),
+      communicationStyle: CommunicationStyleSchema.optional(),
+    })
+    .optional(),
+  humanSupport: z
+    .object({
+      contactInfo: z.string().trim().max(200).optional(),
+      operatingHours: z.string().trim().max(160).optional(),
+      timezone: z.string().trim().max(60).optional(),
+      escalationConditions: z.string().trim().max(400).optional(),
+      humanSupportAvailable: z.boolean().optional(),
+    })
+    .optional(),
+  chatbot: z
+    .object({
+      assistantName: z.string().trim().min(2).max(80).optional(),
+      greetingMessage: z.string().trim().min(4).max(300).optional(),
+      communicationStyle: CommunicationStyleSchema.optional(),
+      supportedLanguages: z.array(z.string().trim().min(2).max(50)).max(10).optional(),
+      approvedTopics: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+      restrictedTopics: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+      escalationRules: z.string().trim().max(400).optional(),
+      aiProviderConfigured: z.boolean().optional(),
+    })
+    .optional(),
 });

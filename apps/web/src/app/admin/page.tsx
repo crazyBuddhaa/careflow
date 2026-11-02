@@ -3,9 +3,9 @@ import type { Metadata } from 'next';
 import { BusinessAdminShell } from '@/components/BusinessAdminShell';
 
 export const metadata: Metadata = {
-  title: 'Business Administration — CareFlow',
+  title: 'Workspace — CareFlow',
   description:
-    'Isolated CareFlow administration workspace for managing business profiles, branding, knowledge bases, chatbots, and conversations.',
+    'Manage your CareFlow support portal, knowledge base, assistant settings, and customer conversations.',
 };
 
 export default function AdminWorkspacePage() {
