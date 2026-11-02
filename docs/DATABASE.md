@@ -1,64 +1,53 @@
-# CareFlow Database & Supabase Architecture
+# CareFlow Database Architecture (`v0.1.0` — Stage 1 Cloudflare D1)
 
-## 1. Overview
+## 1. Strategic Direction: Cloudflare D1 (SQLite)
 
-CareFlow uses **Supabase PostgreSQL** managed via versioned SQL migrations in `supabase/migrations/`. Database access is encapsulated in `@careflow/database` with separate entrypoints for browser and server runtimes:
+CareFlow's primary persistence target is **Cloudflare D1 (SQLite)** accessed through repository interfaces in `@careflow/support-engine` and `@careflow/database/d1`:
 
-- **Browser Client (`@careflow/database/client`):** Uses `@supabase/ssr` `createBrowserClient` with `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Governed strictly by PostgreSQL Row Level Security (RLS).
-- **Server Session Client (`@careflow/database/server`):** Uses `createServerClient` with a portable `CookieStoreAdapter` to propagate authenticated user JWTs in Next.js Route Handlers and Server Components while respecting RLS.
-- **Service-Role Admin Client (`@careflow/database/server`):** Uses `SUPABASE_SERVICE_ROLE_KEY` with session persistence disabled and a strict `typeof window !== 'undefined'` runtime guard. Reserved exclusively for verified server-to-server tasks (such as signed Telegram webhooks).
+- **Cloudflare Workers / Pages Production Runtime:** Binds directly to a Cloudflare D1 database (`env.DB`) implementing `D1DatabaseLike`.
+- **Local & Node.js Server Runtime:** Uses `NodeSqliteD1Adapter` (`packages/database/src/sqlite-d1-adapter.ts`) backed by Node 22's built-in `node:sqlite` (`DatabaseSync` with `WAL` mode and `PRAGMA foreign_keys = ON`) persisting to `.careflow-data/careflow-knowledge.sqlite` (configurable via `CAREFLOW_SQLITE_PATH`).
+- **Legacy Foundation Files Preserved:** Initial `supabase/` SQL files and `@careflow/database/client` / `@careflow/database/server` adapters remain intact so existing health checks and references continue compiling without breaking changes.
 
 ---
 
 ## 2. Directory Layout
 
 ```text
-supabase/
-  config.toml                                           # Supabase local CLI configuration
-  migrations/
-    20261101000000_foundation_architecture.sql          # Extensions, triggers, tenant table, RLS baseline
-  seed.sql/
-    001_initial_seed.sql                                # Seeds initial client: UltimateTechApp
+cloudflare/
+  d1/
+    migrations/
+      0001_business_knowledge_management.sql    # Stage 1 D1 SQLite schema & indexes
+packages/
+  database/
+    src/
+      d1.ts                                     # Edge/Workers-safe D1 Knowledge Repository entrypoint
+      d1-types.ts                               # Portable D1DatabaseLike interface & schema SQL
+      d1-bootstrap.ts                           # Edge/Workers-safe D1 schema & starter workspace bootstrap
+      d1-knowledge-repository.ts                # Tenant-isolated SQL repository
+      sqlite-node.ts                            # Local Node.js built-in SQLite adapter
+      sqlite-d1-adapter.ts                      # Backwards-compatible Node/D1 re-export
 ```
 
 ---
 
-## 3. Foundational Migration (`v0.1.0`)
+## 3. Stage 1 Knowledge Management Schema (`0001_business_knowledge_management.sql`)
 
-Per `v0.1.0` architectural scope, `20261101000000_foundation_architecture.sql` establishes the database foundation without premature production domain tables:
+1. **`organizations`** — Multi-business tenant root (`id`, `slug`, `name`, `is_active`, `created_at`, `updated_at`).
+2. **`knowledge_categories`** — Per-business configurable categories (`id`, `organization_id`, `slug`, `name`, `description`, `display_order`, `created_at`, `updated_at`), with `UNIQUE (organization_id, slug)`.
+3. **`knowledge_articles`** — Structured business knowledge (`id`, `organization_id`, `category_id`, `slug`, `title`, `short_description`, `content`, `tags_json`, `status`, `search_keywords`, `created_at`, `updated_at`), enforcing `status IN ('draft', 'published', 'archived')` and `ON DELETE SET NULL` when a category is deleted.
+4. **`knowledge_faqs`** — Approved question-and-answer records (`id`, `organization_id`, `category_id`, `question`, `answer`, `status`, `search_keywords`, `display_order`, `created_at`, `updated_at`), enforcing `status IN ('draft', 'published', 'archived')`.
 
-1. **`pgcrypto` Extension:** Enables cryptographically strong UUIDv4 generation (`gen_random_uuid()`).
-2. **`public.set_updated_at()` Trigger:** Automatically maintains UTC `updated_at` timestamps across mutable tables.
-3. **`public.organizations` Table:** Establishes the multi-tenant isolation root (seeded with `ultimatetechapp` / `UltimateTechApp`).
-4. **`public.current_user_organization_id()` Helper:** Reads `app_metadata.organization_id` from the verified Supabase Auth JWT claim for clean, index-friendly RLS policies.
-
----
-
-## 4. Row Level Security (RLS) Policy Model
-
-Every table created in `public` **must** enable Row Level Security immediately upon creation:
-
-```sql
-alter table public.<table_name> enable row level security;
-```
-
-- **Tenant Isolation:** Authenticated queries filter rows via `organization_id = public.current_user_organization_id()`.
-- **Role Separation:** Role elevation (`agent`, `supervisor`, `admin`) is stored in `auth.users.raw_app_meta_data` (modifiable only by server admin logic, never by `supabase.auth.updateUser()` from the browser).
+### Composite Tenant Indexes
+- `idx_knowledge_categories_org_order (organization_id, display_order, name)`
+- `idx_knowledge_articles_org_status_updated (organization_id, status, updated_at DESC)`
+- `idx_knowledge_articles_org_category (organization_id, category_id)`
+- `idx_knowledge_faqs_org_status_order (organization_id, status, display_order, updated_at DESC)`
+- `idx_knowledge_faqs_org_category (organization_id, category_id)`
 
 ---
 
-## 5. Running Migrations Locally & in Production
+## 4. Multi-Business Isolation Rules
 
-### Local Development (Supabase CLI)
-```bash
-supabase start
-supabase db reset   # Applies all files in supabase/migrations/ and runs supabase/seed.sql/001_initial_seed.sql
-```
-
-### Production Deployment
-Link your hosted Supabase project and push SQL migrations via GitHub Actions or CLI:
-```bash
-supabase link --project-ref <your-project-ref>
-supabase db push
-```
-Never hardcode database passwords or connection strings in source files; store `DATABASE_URL` in local `.env.local` or GitHub/Vercel encrypted secrets.
+- Every `SELECT`, `INSERT`, `UPDATE`, and `DELETE` query in `D1KnowledgeRepository` binds `organization_id = ?` using the server-verified admin session identity.
+- Category assignments on articles and FAQs verify that `category_id` belongs to the exact same `organization_id` prior to write.
+- Future chatbot retrieval (`retrievePublishedKnowledge`) queries strictly `WHERE organization_id = ? AND status = 'published'`.

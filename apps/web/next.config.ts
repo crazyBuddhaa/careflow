@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     '**.google.com',
     '**.googleusercontent.com',
   ],
+  serverExternalPackages: ['node:sqlite'],
   transpilePackages: [
     '@careflow/shared',
     '@careflow/validation',

@@ -9,13 +9,17 @@
   ],
   "scripts": {
     "dev": "next dev apps/web -p 3000 -H 0.0.0.0",
-    "build": "next build apps/web",
+    "build": "node scripts/build.mjs",
+    "cf:build": "node scripts/cf-build-if-needed.mjs",
+    "cf:deploy": "npx wrangler deploy",
     "start": "next start apps/web -p 3000 -H 0.0.0.0",
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "clean": "rm -rf apps/web/.next dist"
+    "test": "node --import ./scripts/ts-test-loader.mjs --experimental-transform-types --test tests/knowledge-stage1.test.ts",
+    "clean": "rm -rf apps/web/.next apps/web/.open-next dist"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.15",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/postcss": "^4.3.3",
@@ -34,7 +38,8 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wrangler": "^4.156.2"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {

@@ -10,10 +10,13 @@
     "./server": "./src/server.ts",
     "./realtime": "./src/realtime.ts",
     "./storage": "./src/storage.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./d1": "./src/d1.ts",
+    "./sqlite-node": "./src/sqlite-node.ts"
   },
   "dependencies": {
     "@careflow/shared": "workspace:*",
+    "@careflow/support-engine": "workspace:*",
     "@careflow/validation": "workspace:*",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0"

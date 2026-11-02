@@ -19,18 +19,20 @@ careflow/
     shared/              # Domain types, enums, API contracts, and platform constants
     validation/          # Zod schemas for environment variables and REST API payloads
     support-engine/      # Portable service interfaces for all 9 core support domain modules
+  cloudflare/
+    d1/migrations/       # Cloudflare D1 (SQLite) migrations for multi-tenant Knowledge Base
   supabase/
-    config.toml          # Local Supabase CLI project configuration
-    migrations/          # Versioned PostgreSQL SQL migrations & RLS baseline
-    seed.sql/            # Initial development seed scripts (UltimateTechApp tenant)
+    config.toml          # Legacy Supabase CLI configuration
+    migrations/          # Legacy PostgreSQL migrations
+    seed.sql/            # Initial development seed scripts
   docs/
     ARCHITECTURE.md      # Modular architecture, portability, channels, and security design
-    DATABASE.md          # Supabase PostgreSQL setup, migrations, RLS, Realtime, and Storage
+    DATABASE.md          # Database schema, tenant isolation, and D1/SQLite persistence
     API.md               # REST API Route Handlers, envelope convention, and Zod validation
-    DEVELOPMENT.md       # Installation, environment configuration, local workflow, & Vercel deploy
+    DEVELOPMENT.md       # Local workflow & Cloudflare Workers + D1 deployment guide
   .env.example           # Required & optional environment variables template
-  pnpm-workspace.yaml    # pnpm monorepo workspace declaration
-  vercel.json            # Vercel monorepo build & routing configuration
+  pnpm-workspace.yaml    # Monorepo workspace declaration
+  wrangler.jsonc         # Cloudflare Workers + OpenNext monorepo deployment configuration
 ```
 
 ---

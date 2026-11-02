@@ -35,7 +35,14 @@
     "apps/**/*.ts",
     "apps/**/*.tsx",
     "packages/**/*.ts",
-    "packages/**/*.tsx"
+    "packages/**/*.tsx",
+    "tests/**/*.ts"
   ],
-  "exclude": ["node_modules", "dist", "apps/web/.next"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".open-next",
+    "apps/web/.next",
+    "apps/web/.open-next"
+  ]
 }

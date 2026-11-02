@@ -81,17 +81,39 @@ pnpm start
 
 ---
 
-## 6. Deployment Preparation (GitHub + Vercel + Supabase)
+## 6. Deployment Guide (Cloudflare Workers + D1 + GitHub)
 
-CareFlow is pre-configured for zero-lock-in deployment to **Vercel** and **Supabase**:
+CareFlow is pre-configured for **Cloudflare Workers** (`@opennextjs/cloudflare` + `wrangler.jsonc` at the monorepo root) and **Cloudflare D1**:
 
-1. **GitHub Repository:** Push the monorepo to GitHub (`main` for production, feature branches for preview deployments).
-2. **Supabase Project:**
-   - Provision a new Supabase PostgreSQL project.
-   - Apply SQL migrations (`supabase link --project-ref <ref> && supabase db push`).
-3. **Vercel Project Connection:**
-   - Import the GitHub repository in Vercel.
-   - `vercel.json` at the repository root automatically configures `pnpm install`, `pnpm --filter @careflow/web build`, and `apps/web/.next` output routing (or set Vercel **Root Directory** to `apps/web`).
-   - Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `NEXT_PUBLIC_APP_URL` inside **Vercel Project Settings → Environment Variables**.
-4. **Post-Deploy Verification:**
-   - Visit `https://<your-domain>/api/health` and confirm `"status": "operational"` and `"publicClientConfigured": true`.
+### A. Automatic GitHub Deployments via Cloudflare Workers Builds
+1. Connect the GitHub repository in **Cloudflare Dashboard → Workers & Pages → Create → Workers → Connect to Git**.
+2. Keep the default repository root settings:
+   - **Root directory:** `/`
+   - **Build command:** `bun run build` (or `npm run cf:build`)
+   - **Deploy command:** `npx wrangler deploy`
+   - Root `wrangler.jsonc` targets `apps/web/.open-next/worker.js` and `apps/web/.open-next/assets`, avoiding monorepo auto-detection errors.
+
+### B. Provisioning & Binding Cloudflare D1 (Stage 1 Knowledge Persistence)
+1. Create a D1 database (via CLI or Cloudflare Dashboard → Storage & Databases → D1):
+   ```bash
+   npx wrangler d1 create careflow-db
+   ```
+2. Bind the D1 database to the `careflow` Worker with variable name **`DB`**:
+   - **Option 1 (Cloudflare Dashboard — zero code edit):** Go to **Workers & Pages → careflow → Settings → Bindings → Add → D1 database**, set Variable name to `DB`, and select `careflow-db`.
+   - **Option 2 (`wrangler.jsonc`):** Uncomment the `d1_databases` block in `/wrangler.jsonc` and paste your `database_id`.
+3. *(Optional)* Run SQL migrations explicitly (`cloudflare/d1/migrations/0001_business_knowledge_management.sql`):
+   ```bash
+   npx wrangler d1 migrations apply careflow-db --remote
+   ```
+   *(CareFlow also automatically initializes any missing D1 tables and base workspaces on first request.)*
+
+### C. Production Secrets (Admin Workspace Sign-In)
+In **Workers & Pages → careflow → Settings → Variables and Secrets** (or via `npx wrangler secret put`), add:
+- `CAREFLOW_ADMIN_SESSION_SECRET` — random secret string (`>= 16` characters, `32+` recommended)
+- `CAREFLOW_ADMIN_PASSCODE` — strong workspace administrator passcode
+
+### D. Post-Deploy Verification
+- Visit `https://<your-worker>.workers.dev/` for the central CareFlow website.
+- Visit `https://<your-worker>.workers.dev/portal/ultimatetechapp` for the business support portal.
+- Visit `https://<your-worker>.workers.dev/admin` to sign in and manage business knowledge in Cloudflare D1.
+- Visit `https://<your-worker>.workers.dev/api/health` to verify runtime health.

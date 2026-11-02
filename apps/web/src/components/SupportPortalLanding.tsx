@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'motion/react';
 import {
   ArrowRight,
@@ -11,69 +12,29 @@ import {
   MessageSquareText,
   Menu,
   X,
+  ChevronDown,
 } from 'lucide-react';
+import type { BusinessPortalConfig, PortalIconKey } from '@careflow/shared';
 import {
   GuidedSupportPreview,
-  INITIAL_GREETING,
   getReplyForNode,
   type ChatTurn,
 } from '@/components/GuidedSupportPreview';
+import { getDefaultUltimateTechAppConfig } from '@/config/business-portals';
 
-interface HelpCategory {
-  id: string;
-  title: string;
-  description: string;
-  actionLabel: string;
-  customerPrompt: string;
-  targetNodeId: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-const QUICK_HELP_CATEGORIES: HelpCategory[] = [
-  {
-    id: 'deposit-assistance',
-    title: 'Deposit Assistance',
-    description: 'Help with deposits, payment confirmation and missing balances.',
-    actionLabel: 'Start deposit guide',
-    customerPrompt: 'I have a deposit problem.',
-    targetNodeId: 'deposit_root',
-    icon: Wallet,
-  },
-  {
-    id: 'product-support',
-    title: 'Product Support',
-    description: 'Learn how to use products and resolve common issues.',
-    actionLabel: 'Explore product help',
-    customerPrompt: 'I need help using a product.',
-    targetNodeId: 'product_root',
-    icon: Compass,
-  },
-  {
-    id: 'account-assistance',
-    title: 'Account Assistance',
-    description: 'Get help with account-related enquiries.',
-    actionLabel: 'Get account help',
-    customerPrompt: 'I need help with an account enquiry.',
-    targetNodeId: 'account_root',
-    icon: UserCheck,
-  },
-  {
-    id: 'other-enquiries',
-    title: 'Other Enquiries',
-    description: 'Find assistance for other questions.',
-    actionLabel: 'Ask another question',
-    customerPrompt: 'I have another question.',
-    targetNodeId: 'other_root',
-    icon: HelpCircle,
-  },
-];
+const ICON_MAP: Record<PortalIconKey, React.ComponentType<{ className?: string }>> = {
+  wallet: Wallet,
+  compass: Compass,
+  'user-check': UserCheck,
+  'help-circle': HelpCircle,
+};
 
 const HOW_IT_WORKS_STEPS = [
   {
     step: '01',
     title: 'Choose your issue',
     description:
-      'Select what you need help with—whether it involves a deposit, learning how a product works, or an account question.',
+      'Select what you need help with from the support categories or guided conversation options.',
   },
   {
     step: '02',
@@ -89,13 +50,22 @@ const HOW_IT_WORKS_STEPS = [
   },
 ];
 
-export function SupportPortalLanding() {
+export interface SupportPortalLandingProps {
+  portalConfig?: BusinessPortalConfig;
+}
+
+export function SupportPortalLanding({
+  portalConfig = getDefaultUltimateTechAppConfig(),
+}: SupportPortalLandingProps) {
+  const { branding, chatbot, escalation, categories, faqs } = portalConfig;
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [openFaqId, setOpenFaqId] = useState<string | null>(faqs[0]?.id ?? null);
   const [turns, setTurns] = useState<ChatTurn[]>([
     {
       id: 'initial-greeting',
       sender: 'assistant',
-      text: INITIAL_GREETING,
+      text: chatbot.initialGreeting,
     },
   ]);
   const [currentNodeId, setCurrentNodeId] = useState<string>('root');
@@ -116,13 +86,13 @@ export function SupportPortalLanding() {
     triggerPreviewHighlight();
 
     if (customerPrompt && nextNodeId) {
-      const reply = getReplyForNode(nextNodeId);
+      const reply = getReplyForNode(nextNodeId, chatbot);
       const stamp = Date.now().toString();
       setTurns([
         {
           id: 'initial-greeting',
           sender: 'assistant',
-          text: INITIAL_GREETING,
+          text: chatbot.initialGreeting,
         },
         {
           id: `cust-${stamp}`,
@@ -140,7 +110,7 @@ export function SupportPortalLanding() {
   }
 
   function handleSelectOption(label: string, nextNodeId: string) {
-    const reply = getReplyForNode(nextNodeId);
+    const reply = getReplyForNode(nextNodeId, chatbot);
     const stamp = Date.now().toString();
     setTurns((prev) => [
       ...prev,
@@ -155,7 +125,7 @@ export function SupportPortalLanding() {
       {
         id: 'initial-greeting',
         sender: 'assistant',
-        text: INITIAL_GREETING,
+        text: chatbot.initialGreeting,
       },
     ]);
     setCurrentNodeId('root');
@@ -166,12 +136,12 @@ export function SupportPortalLanding() {
       {/* 1. Navigation — Strict 3-Zone Top Bar Contract */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
-          {/* Zone 1: Brand Wordmark */}
+          {/* Zone 1: Business Portal Brand Wordmark */}
           <a
             href="#top"
             className="text-xl font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
-            CareFlow
+            {branding.displayName}
           </a>
 
           {/* Zone 2: Navigation Links */}
@@ -191,6 +161,14 @@ export function SupportPortalLanding() {
             >
               How It Works
             </a>
+            {faqs.length > 0 && (
+              <a
+                href="#faqs"
+                className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+              >
+                FAQs
+              </a>
+            )}
             <a
               href="#contact-support"
               className="hover:text-slate-900 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
@@ -245,6 +223,15 @@ export function SupportPortalLanding() {
             >
               How It Works
             </a>
+            {faqs.length > 0 && (
+              <a
+                href="#faqs"
+                onClick={() => setMobileMenuOpen(false)}
+                className="block py-2 hover:text-slate-900"
+              >
+                FAQs
+              </a>
+            )}
             <a
               href="#contact-support"
               onClick={() => setMobileMenuOpen(false)}
@@ -268,17 +255,14 @@ export function SupportPortalLanding() {
                 transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 className="lg:col-span-6"
               >
-                <p className="text-xs font-semibold text-teal-700">
-                  Customer Support Portal · UltimateTechApp
-                </p>
+                <p className="text-xs font-semibold text-teal-700">{branding.portalSubtitle}</p>
 
                 <h1 className="mt-4 text-4xl sm:text-5xl lg:text-[3.5rem] font-bold tracking-tight text-slate-900 leading-[1.1] text-balance">
-                  Get help. Find answers. Move forward.
+                  {portalConfig.welcomeHeadline}
                 </h1>
 
                 <p className="mt-6 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl">
-                  Need help with a deposit or using a product? Find answers through guided support
-                  or connect with a human representative when you need one.
+                  {portalConfig.welcomeDescription}
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center gap-4">
@@ -291,14 +275,14 @@ export function SupportPortalLanding() {
                     className="inline-flex items-center gap-2 py-3 px-6 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                   >
                     <MessageSquareText className="w-4 h-4" aria-hidden="true" />
-                    <span>Start a Conversation</span>
+                    <span>{portalConfig.primaryCtaLabel}</span>
                   </button>
 
                   <a
                     href="#help-topics"
                     className="inline-flex items-center gap-2 py-3 px-6 text-sm font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                   >
-                    <span>Explore Help Topics</span>
+                    <span>{portalConfig.secondaryCtaLabel}</span>
                   </a>
                 </div>
               </motion.div>
@@ -317,6 +301,7 @@ export function SupportPortalLanding() {
                   onSelectOption={handleSelectOption}
                   onReset={handleResetConversation}
                   highlighted={chatHighlighted}
+                  chatbotConfig={chatbot}
                 />
               </motion.div>
             </div>
@@ -337,8 +322,8 @@ export function SupportPortalLanding() {
             </div>
 
             <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {QUICK_HELP_CATEGORIES.map((category) => {
-                const Icon = category.icon;
+              {categories.map((category) => {
+                const Icon = ICON_MAP[category.iconKey] ?? HelpCircle;
                 return (
                   <button
                     key={category.id}
@@ -374,7 +359,7 @@ export function SupportPortalLanding() {
           </div>
         </section>
 
-        {/* 4. How CareFlow Works */}
+        {/* 4. How Support Works */}
         <section
           id="how-it-works"
           className="py-16 lg:py-24 bg-white border-y border-slate-200/80 scroll-mt-16"
@@ -386,8 +371,7 @@ export function SupportPortalLanding() {
                 Simple, guided support from start to finish
               </h2>
               <p className="mt-3 text-base text-slate-600 leading-relaxed">
-                CareFlow helps you find clear answers quickly while keeping human support within
-                easy reach.
+                Find clear answers quickly while keeping human support within easy reach.
               </p>
             </div>
 
@@ -414,20 +398,60 @@ export function SupportPortalLanding() {
           </div>
         </section>
 
+        {/* Configurable Business FAQs */}
+        {faqs.length > 0 && (
+          <section id="faqs" className="py-16 lg:py-20 scroll-mt-16 border-b border-slate-200/80">
+            <div className="max-w-4xl mx-auto px-6">
+              <p className="text-xs font-semibold text-teal-700">Common Questions</p>
+              <h2 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 text-balance">
+                Frequently asked questions at {branding.displayName}
+              </h2>
+
+              <div className="mt-8 divide-y divide-slate-200 border-y border-slate-200">
+                {faqs.map((faq) => {
+                  const isOpen = openFaqId === faq.id;
+                  return (
+                    <div key={faq.id} className="py-5">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFaqId(isOpen ? null : faq.id)}
+                        aria-expanded={isOpen}
+                        className="w-full flex items-center justify-between gap-4 text-left text-base font-semibold text-slate-900 hover:text-blue-700 transition-colors cursor-pointer"
+                      >
+                        <span>{faq.question}</span>
+                        <ChevronDown
+                          className={`w-4 h-4 text-slate-500 shrink-0 transition-transform duration-150 ${
+                            isOpen ? 'rotate-180' : ''
+                          }`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {isOpen && (
+                        <p className="mt-3 text-sm text-slate-600 leading-relaxed pr-8">
+                          {faq.answer}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* 5. Human Support Section */}
         <section id="contact-support" className="py-16 lg:py-24 scroll-mt-16">
           <div className="max-w-7xl mx-auto px-6">
             <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 px-8 py-12 sm:px-12 sm:py-16 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-8">
               <div className="max-w-2xl">
                 <p className="text-xs font-semibold text-teal-300 tracking-wide">
-                  Human Assistance
+                  {escalation.sectionEyebrow}
                 </p>
                 <h2 className="mt-3 text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-white text-balance">
-                  Still need a helping hand?
+                  {escalation.headline}
                 </h2>
                 <p className="mt-4 text-base text-slate-300 leading-relaxed tracking-wide">
-                  If guided assistance doesn&apos;t solve your problem, your enquiry can be passed
-                  to a human support representative.
+                  {escalation.description}
                 </p>
               </div>
 
@@ -435,11 +459,14 @@ export function SupportPortalLanding() {
                 <button
                   type="button"
                   onClick={() =>
-                    scrollToAssistantAndStart('I want to speak with support.', 'human_root')
+                    scrollToAssistantAndStart(
+                      escalation.customerTriggerPrompt,
+                      escalation.targetNodeId
+                    )
                   }
                   className="inline-flex items-center gap-2 py-3.5 px-7 text-sm font-semibold text-slate-950 bg-teal-400 hover:bg-teal-300 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300"
                 >
-                  <span>Contact Support</span>
+                  <span>{escalation.ctaLabel}</span>
                   <ArrowRight className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
@@ -448,13 +475,17 @@ export function SupportPortalLanding() {
         </section>
       </main>
 
-      {/* 6. Simple Footer */}
+      {/* 6. Portal Footer — Includes Powered by CareFlow link back to central platform */}
       <footer className="border-t border-slate-200 bg-white">
         <div className="max-w-7xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 text-sm text-slate-500">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="font-bold text-slate-900">CareFlow</span>
+            <span className="font-bold text-slate-900">{branding.displayName}</span>
             <span aria-hidden="true">·</span>
-            <span>Customer Support Portal</span>
+            <span>Customer Support Center</span>
+            <span aria-hidden="true">·</span>
+            <Link href="/" className="text-slate-500 hover:text-blue-600 transition-colors">
+              Powered by CareFlow
+            </Link>
           </div>
 
           <div className="flex flex-wrap items-center gap-6">
@@ -464,14 +495,17 @@ export function SupportPortalLanding() {
             <button
               type="button"
               onClick={() =>
-                scrollToAssistantAndStart('I want to speak with support.', 'human_root')
+                scrollToAssistantAndStart(
+                  escalation.customerTriggerPrompt,
+                  escalation.targetNodeId
+                )
               }
               className="hover:text-slate-900 transition-colors cursor-pointer"
             >
               Contact Support
             </button>
             <span className="text-slate-400">
-              &copy; {new Date().getFullYear()} CareFlow. All rights reserved.
+              &copy; {new Date().getFullYear()} {branding.displayName}
             </span>
           </div>
         </div>

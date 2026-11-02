@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "careflow",
+  "main": "apps/web/.open-next/worker.js",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "build": {
+    "command": "CF_SKIP_IF_BUILT=1 node scripts/cf-build-if-needed.mjs"
+  },
+  "assets": {
+    "directory": "apps/web/.open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "careflow"
+    }
+  ]
+  // ---------------------------------------------------------------------------
+  // Cloudflare D1 Database Binding (Required for persistent Stage 1 Knowledge Base)
+  // 1. Create database: npx wrangler d1 create careflow-db
+  // 2. Apply schema (optional — CareFlow also auto-bootstraps tables on first request):
+  //    npx wrangler d1 migrations apply careflow-db --remote
+  // 3. Uncomment `d1_databases` below (or bind `DB` in Cloudflare Dashboard -> Worker -> Settings -> Bindings):
+  // ---------------------------------------------------------------------------
+  // "d1_databases": [
+  //   {
+  //     "binding": "DB",
+  //     "database_name": "careflow-db",
+  //     "database_id": "<YOUR_D1_DATABASE_UUID>",
+  //     "migrations_dir": "cloudflare/d1/migrations"
+  //   }
+  // ]
+}

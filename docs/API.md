@@ -2,112 +2,58 @@
 
 ## 1. Design Conventions
 
-CareFlow exposes RESTful endpoints implemented via **Next.js App Router Route Handlers** (`apps/web/src/app/api/**/route.ts`).
+CareFlow exposes JSON endpoints implemented via **Next.js App Router Route Handlers** (`apps/web/src/app/api/**/route.ts`), structured cleanly for portability to Cloudflare Workers:
 
-To maintain architectural portability and clean separation of concerns, every endpoint adheres to a 3-layer pipeline:
+1. **Transport, Auth & Validation Layer (`route.ts`, `admin-auth.ts`, `@careflow/validation`):** Verifies HMAC-signed `HttpOnly` admin session cookies (`cf_admin_session`) and validates request bodies/queries with Zod schemas.
+2. **Domain & Authorization Layer (`@careflow/support-engine`):** `KnowledgeManagementService` enforces `UserRole.Admin` RBAC, slug uniqueness, keyword indexing, and cross-tenant category ownership checks independent of HTTP frameworks.
+3. **Persistence Layer (`@careflow/database/d1`):** `D1KnowledgeRepository` executes parameterized SQLite/D1 queries scoped strictly by server-verified `organizationId`.
 
-1. **Transport & Validation Layer (`route.ts` + `@careflow/validation`):** Parses HTTP request headers/JSON and validates inputs with Zod schemas.
-2. **Application Service Layer (`apps/web/src/services/*` & `@careflow/support-engine`):** Executes pure business orchestration independent of `NextRequest`/`NextResponse`.
-3. **Persistence Adapter Layer (`@careflow/database`):** Executes parameterized queries through RLS-enforced Supabase clients.
-
----
-
-## 2. Standard JSON Envelope
-
-All API responses conform to `ApiResponse<T>` defined in `@careflow/shared`:
-
-### Success Response
-```json
-{
-  "ok": true,
-  "data": {},
-  "meta": {
-    "version": "0.1.0",
-    "timestamp": "2026-11-01T22:00:00.000Z"
-  }
-}
-```
-
-### Error Response
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Enter a valid work email address",
-    "details": {
-      "workEmail": ["Enter a valid work email address"]
-    }
-  }
-}
-```
+All responses conform to `ApiResponse<T>` (`{ ok: true, data, meta }` or `{ ok: false, error }`).
 
 ---
 
-## 3. Available Endpoints (`v0.1.0`)
+## 2. Stage 1 — Business Knowledge Management Admin Endpoints
 
-### `GET /api/health`
-Returns runtime health, environment validation status, Supabase client configuration readiness (without exposing secrets), and scaffolded support module status.
+> **Tenant Isolation Rule:** None of the `/api/admin/knowledge/*` endpoints accept `organizationId` from the browser. Every query and mutation uses `session.organizationId` resolved on the server from the verified `cf_admin_session` cookie.
 
-- **Cache Policy:** `Cache-Control: no-store, max-age=0`
-- **Status Codes:**
-  - `200 OK` — Environment schema valid and service operational.
-  - `503 Service Unavailable` — Environment schema reported validation issues.
+### `GET /api/admin/session`
+Returns the active administrator session (`authenticated: boolean`, `session`, and available workspace options).
 
-**Example Response (`200 OK`):**
-```json
-{
-  "ok": true,
-  "data": {
-    "service": "CareFlow",
-    "version": "0.1.0",
-    "client": "UltimateTechApp",
-    "status": "operational",
-    "environment": "development",
-    "architecture": {
-      "hosting": "vercel-ready",
-      "backend": "nextjs-route-handlers",
-      "database": "supabase-postgresql",
-      "realtime": "supabase-realtime-prepared",
-      "channels": ["web_widget", "telegram", "portal"]
-    },
-    "supabase": {
-      "publicClientConfigured": false,
-      "serverRoleConfigured": false
-    },
-    "modules": [
-      { "key": "authentication", "name": "Authentication & RBAC", "stage": "scaffolded" }
-    ],
-    "timestamp": "2026-11-01T22:00:00.000Z"
-  },
-  "meta": {
-    "version": "0.1.0",
-    "timestamp": "2026-11-01T22:00:00.000Z"
-  }
-}
-```
+### `POST /api/admin/session`
+Authenticates a business administrator for a selected workspace (`organizationId` + `accessPasscode`) and sets an `HttpOnly`, `SameSite=Lax`, HMAC-SHA256 signed session cookie.
+- `200 OK` — Session established.
+- `401 Unauthorized` — Invalid administrator passcode.
+- `422 Unprocessable Entity` — Failed schema validation.
+
+### `DELETE /api/admin/session`
+Clears the `cf_admin_session` cookie and signs out the administrator.
+
+### `GET /api/admin/knowledge/overview`
+Returns category, article (`total`, `published`, `draft`, `archived`), and FAQ (`total`, `published`, `draft`, `archived`) counts for the authenticated business.
+
+### `GET /api/admin/knowledge/categories` | `POST /api/admin/knowledge/categories`
+Lists categories ordered by `displayOrder` or creates a new category (`name`, `slug`, `description`, `displayOrder`) for the authenticated business.
+
+### `PATCH /api/admin/knowledge/categories/[categoryId]` | `DELETE /api/admin/knowledge/categories/[categoryId]`
+Updates or deletes a category owned by the authenticated business. Deleting a category preserves its articles and FAQs with `categoryId = null`.
+
+### `GET /api/admin/knowledge/articles` | `POST /api/admin/knowledge/articles`
+- `GET` supports `?query=`, `?categoryId=`, and `?status=draft|published|archived`.
+- `POST` creates a new article (`title`, `slug?`, `shortDescription`, `content`, `categoryId`, `tags`, `status`).
+
+### `GET /api/admin/knowledge/articles/[articleId]` | `PATCH /api/admin/knowledge/articles/[articleId]` | `DELETE /api/admin/knowledge/articles/[articleId]`
+Fetches full article content, updates fields or `status` (`draft`, `published`, `archived`), or deletes an article within the authenticated business.
+
+### `GET /api/admin/knowledge/faqs` | `POST /api/admin/knowledge/faqs`
+- `GET` supports `?search=`, `?categoryId=`, and `?status=draft|published|archived`.
+- `POST` creates a new FAQ (`question`, `answer`, `categoryId`, `status`, `displayOrder`).
+
+### `PATCH /api/admin/knowledge/faqs/[faqId]` | `DELETE /api/admin/knowledge/faqs/[faqId]`
+Updates question/answer/category/status or deletes an FAQ within the authenticated business.
 
 ---
 
-### `POST /api/enquiries`
-Validates deployment onboarding requests submitted from the CareFlow landing page using `DeploymentEnquirySchema` (`@careflow/validation`).
+## 3. Platform Public Endpoints
 
-- **Request Body:**
-  - `fullName` (`string`, 2–100 chars, required)
-  - `workEmail` (`string`, valid email, required)
-  - `organization` (`string`, 2–100 chars, required)
-  - `primaryChannel` (`"web_widget" | "telegram" | "portal"`)
-  - `monthlyTicketVolume` (`"under_1k" | "1k_10k" | "10k_50k" | "50k_plus"`)
-  - `notes` (`string`, optional, max 1000 chars)
-- **Status Codes:**
-  - `201 Created` — Validated and issued a `CF-*` confirmation reference.
-  - `400 Bad Request` — Malformed JSON payload.
-  - `422 Unprocessable Entity` — Failed Zod schema validation.
-
----
-
-## 4. Planned Channel Endpoints (`v0.2+`)
-
-Both the embeddable Website Widget and Telegram bot webhook will converge on shared conversation handlers:
-- `POST /api/v1/conversations` — Open or resume a conversation via `ChannelConversationGatewayPort`.
-- `POST /api/v1/webhooks/telegram` — Verify `X-Telegram-Bot-Api-Secret-Token` and forward normalized envelopes to `ChannelConversationGatewayPort`.
+- **`GET /api/health`** — Runtime health, environment validation, and module readiness status.
+- **`POST /api/enquiries`** — Validates business onboarding enquiries submitted from `/onboarding`.

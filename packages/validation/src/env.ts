@@ -25,6 +25,9 @@ export const ServerEnvSchema = PublicEnvSchema.extend({
   DATABASE_URL: z.string().min(1).optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+  CAREFLOW_ADMIN_SESSION_SECRET: z.string().min(16).optional(),
+  CAREFLOW_ADMIN_PASSCODE: z.string().min(4).optional(),
+  CAREFLOW_SQLITE_PATH: z.string().min(1).optional(),
 });
 
 export type PublicEnv = z.infer<typeof PublicEnvSchema>;

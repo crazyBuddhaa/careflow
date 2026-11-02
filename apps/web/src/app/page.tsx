@@ -1,6 +1,6 @@
 import React from 'react';
-import { SupportPortalLanding } from '@/components/SupportPortalLanding';
+import { CentralPlatformHome } from '@/components/CentralPlatformHome';
 
 export default function HomePage() {
-  return <SupportPortalLanding />;
+  return <CentralPlatformHome />;
 }

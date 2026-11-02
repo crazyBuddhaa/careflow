@@ -24,13 +24,13 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CareFlow — Customer Support Center',
+  title: 'CareFlow — Smarter Support. Better Experiences.',
   description:
-    'Get help with deposits, learn how to use products, follow guided support, or connect with a human representative.',
+    'CareFlow helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
   openGraph: {
-    title: 'CareFlow — Customer Support Center',
+    title: 'CareFlow — Smarter Support. Better Experiences.',
     description:
-      'Get help with deposits, learn how to use products, follow guided support, or connect with a human representative.',
+      'CareFlow helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
     type: 'website',
   },
 };
