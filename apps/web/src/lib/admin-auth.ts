@@ -1,9 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { UserRole } from '@careflow/shared';
 import type { AuthSessionIdentity } from '@careflow/support-engine';
-import { getKnowledgeDatabase } from '@/lib/knowledge-runtime';
+import { getActiveCloudflareEnv, getKnowledgeDatabase } from '@/lib/knowledge-runtime';
 
 export const ADMIN_SESSION_COOKIE_NAME = 'cf_admin_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
@@ -29,14 +28,10 @@ function readRuntimeSecret(key: string): string | undefined {
   if (fromProcess && fromProcess.length > 0) {
     return fromProcess;
   }
-  try {
-    const cfEnv = getCloudflareContext()?.env as Record<string, unknown> | undefined;
-    const fromCf = cfEnv?.[key];
-    if (typeof fromCf === 'string' && fromCf.trim().length > 0) {
-      return fromCf.trim();
-    }
-  } catch {
-    // Standard Node.js dev/start outside OpenNext Cloudflare context
+  const cfEnv = getActiveCloudflareEnv();
+  const fromCf = cfEnv?.[key];
+  if (typeof fromCf === 'string' && fromCf.trim().length > 0) {
+    return fromCf.trim();
   }
   return undefined;
 }

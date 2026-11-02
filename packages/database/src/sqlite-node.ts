@@ -11,6 +11,65 @@ function assertServerSideRuntime(): void {
   }
 }
 
+let sqliteWarningFilterInstalled = false;
+
+function isSqliteExperimentalWarning(warning: unknown, typeHint?: unknown): boolean {
+  const message =
+    typeof warning === 'string'
+      ? warning
+      : typeof warning === 'object' && warning !== null && 'message' in warning
+        ? String((warning as { message?: unknown }).message ?? '')
+        : '';
+
+  if (!message.toLowerCase().includes('sqlite')) {
+    return false;
+  }
+
+  const warningName =
+    typeof typeHint === 'string'
+      ? typeHint
+      : typeof typeHint === 'object' && typeHint !== null && 'type' in typeHint
+        ? String((typeHint as { type?: unknown }).type ?? '')
+        : typeof warning === 'object' && warning !== null && 'name' in warning
+          ? String((warning as { name?: unknown }).name ?? '')
+          : '';
+
+  return (
+    message.includes('SQLite is an experimental feature') ||
+    warningName === 'ExperimentalWarning'
+  );
+}
+
+function suppressSqliteExperimentalWarning(): void {
+  if (sqliteWarningFilterInstalled || typeof process === 'undefined') {
+    return;
+  }
+  sqliteWarningFilterInstalled = true;
+
+  if (typeof process.emitWarning === 'function') {
+    const originalEmitWarning = process.emitWarning.bind(process);
+    process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+      if (isSqliteExperimentalWarning(warning, args[0])) {
+        return;
+      }
+      return (originalEmitWarning as (...params: unknown[]) => void)(warning, ...args);
+    }) as typeof process.emitWarning;
+  }
+
+  if (typeof process.emit === 'function') {
+    const originalEmit = process.emit.bind(process);
+    process.emit = ((event: string | symbol, ...args: unknown[]) => {
+      if (event === 'warning' && isSqliteExperimentalWarning(args[0])) {
+        return false;
+      }
+      return (originalEmit as (ev: string | symbol, ...params: unknown[]) => boolean)(
+        event,
+        ...args
+      );
+    }) as typeof process.emit;
+  }
+}
+
 function loadNodeSqliteModule(): typeof import('node:sqlite') {
   const getBuiltin = (
     process as unknown as { getBuiltinModule?: (id: string) => unknown }
@@ -22,6 +81,7 @@ function loadNodeSqliteModule(): typeof import('node:sqlite') {
     );
   }
 
+  suppressSqliteExperimentalWarning();
   const sqliteMod = getBuiltin('node:sqlite') as typeof import('node:sqlite') | undefined;
   if (!sqliteMod?.DatabaseSync) {
     throw new Error(
@@ -149,6 +209,7 @@ export function isNodeSqliteAvailable(): boolean {
     return false;
   }
   try {
+    suppressSqliteExperimentalWarning();
     const sqliteMod = getBuiltin('node:sqlite') as { DatabaseSync?: unknown } | undefined;
     return typeof sqliteMod?.DatabaseSync === 'function';
   } catch {

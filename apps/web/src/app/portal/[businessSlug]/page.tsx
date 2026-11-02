@@ -1,8 +1,10 @@
 import React from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { businessPortalRegistry } from '@/config/business-portals';
+import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
 import { SupportPortalLanding } from '@/components/SupportPortalLanding';
+
+export const dynamic = 'force-dynamic';
 
 interface BusinessPortalPageProps {
   params: Promise<{
@@ -14,7 +16,8 @@ export async function generateMetadata({
   params,
 }: BusinessPortalPageProps): Promise<Metadata> {
   const { businessSlug } = await params;
-  const portal = await businessPortalRegistry.resolveBySlug(businessSlug);
+  const repo = await getWorkspaceRepository();
+  const portal = await repo.resolvePortalBySlug(businessSlug);
 
   if (!portal) {
     return {
@@ -35,7 +38,8 @@ export async function generateMetadata({
 
 export default async function BusinessPortalPage({ params }: BusinessPortalPageProps) {
   const { businessSlug } = await params;
-  const portal = await businessPortalRegistry.resolveBySlug(businessSlug);
+  const repo = await getWorkspaceRepository();
+  const portal = await repo.resolvePortalBySlug(businessSlug);
 
   if (!portal) {
     notFound();

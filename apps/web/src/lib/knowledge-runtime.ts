@@ -2,6 +2,7 @@ import path from 'node:path';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import {
   D1KnowledgeRepository,
+  D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
   type D1DatabaseLike,
 } from '@careflow/database/d1';
@@ -26,20 +27,40 @@ function isD1DatabaseBinding(value: unknown): value is D1DatabaseLike {
   );
 }
 
-async function resolveCloudflareD1Binding(): Promise<D1DatabaseLike | null> {
-  try {
-    const context = await getCloudflareContext({ async: true });
-    const envRecord = context?.env as Record<string, unknown> | undefined;
-    if (!envRecord) {
-      return null;
-    }
+const CLOUDFLARE_CONTEXT_SYMBOL = Symbol.for('__cloudflare-context__');
 
-    const candidate = envRecord.DB ?? envRecord.CAREFLOW_DB;
-    if (isD1DatabaseBinding(candidate)) {
-      return candidate;
-    }
+/**
+ * Returns the active Cloudflare Worker `env` bindings only when executing inside an
+ * initialized OpenNext Cloudflare Worker request context (`runWithCloudflareRequestContext`).
+ *
+ * Avoids calling `getCloudflareContext({ async: true })` in standard Node.js (`next dev`,
+ * `next start`, `next build`), which would otherwise spawn Wrangler's Miniflare/workerd
+ * `getPlatformProxy()` against `WORKER_SELF_REFERENCE` and crash `workerd`.
+ */
+export function getActiveCloudflareEnv(): Record<string, unknown> | null {
+  const globalScope = globalThis as Record<symbol, unknown>;
+  if (!globalScope[CLOUDFLARE_CONTEXT_SYMBOL]) {
+    return null;
+  }
+
+  try {
+    const context = getCloudflareContext({ async: false });
+    const envRecord = context?.env as Record<string, unknown> | undefined;
+    return envRecord ?? null;
   } catch {
-    // Running outside OpenNext Cloudflare context (e.g., standard `next dev` / `next start`)
+    return null;
+  }
+}
+
+function resolveCloudflareD1Binding(): D1DatabaseLike | null {
+  const envRecord = getActiveCloudflareEnv();
+  if (!envRecord) {
+    return null;
+  }
+
+  const candidate = envRecord.DB ?? envRecord.CAREFLOW_DB;
+  if (isD1DatabaseBinding(candidate)) {
+    return candidate;
   }
   return null;
 }
@@ -48,7 +69,6 @@ function resolveDefaultSqlitePath(): string {
   if (process.env.CAREFLOW_SQLITE_PATH && process.env.CAREFLOW_SQLITE_PATH.trim().length > 0) {
     return process.env.CAREFLOW_SQLITE_PATH.trim();
   }
-  // Store inside workspace .careflow-data/ directory regardless of cwd (root vs apps/web)
   const cwd = process.cwd();
   const baseRoot = cwd.endsWith(path.join('apps', 'web'))
     ? path.resolve(cwd, '..', '..')
@@ -58,7 +78,7 @@ function resolveDefaultSqlitePath(): string {
 
 export async function getKnowledgeDatabase(): Promise<D1DatabaseLike> {
   // 1. Prefer native Cloudflare Workers D1 binding (`env.DB`) when deployed on Cloudflare
-  const cloudflareD1 = await resolveCloudflareD1Binding();
+  const cloudflareD1 = resolveCloudflareD1Binding();
   if (cloudflareD1) {
     if (!globalThis.__careflowWorkerD1BootstrapPromise) {
       globalThis.__careflowWorkerD1BootstrapPromise = bootstrapKnowledgeD1Schema(
@@ -103,4 +123,9 @@ export async function getKnowledgeManagementService(): Promise<KnowledgeManageme
   const db = await getKnowledgeDatabase();
   const repository = new D1KnowledgeRepository(db);
   return new KnowledgeManagementService(repository);
+}
+
+export async function getWorkspaceRepository(): Promise<D1WorkspaceRepository> {
+  const db = await getKnowledgeDatabase();
+  return new D1WorkspaceRepository(db);
 }

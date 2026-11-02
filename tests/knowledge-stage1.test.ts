@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { KnowledgeStatus, UserRole } from '@careflow/shared';
+import { ConversationStatus, KnowledgeStatus, UserRole } from '@careflow/shared';
 import {
   CreateKnowledgeArticleSchema,
   CreateKnowledgeCategorySchema,
@@ -11,6 +11,7 @@ import {
 } from '@careflow/validation';
 import {
   D1KnowledgeRepository,
+  D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
 } from '@careflow/database/d1';
 import { NodeSqliteD1Adapter } from '@careflow/database/sqlite-node';
@@ -45,8 +46,9 @@ async function createIsolatedTestService(sqlitePath = ':memory:') {
   const adapter = new NodeSqliteD1Adapter(sqlitePath);
   await bootstrapKnowledgeD1Schema(adapter);
   const repository = new D1KnowledgeRepository(adapter);
+  const workspaceRepo = new D1WorkspaceRepository(adapter);
   const service = new KnowledgeManagementService(repository);
-  return { adapter, repository, service };
+  return { adapter, repository, workspaceRepo, service };
 }
 
 test('1. Category creation, editing, duplicate slug guard, and safe deletion', async () => {
@@ -383,3 +385,164 @@ test('7. File-backed SQLite database persistence across connection restarts', as
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('8. Multi-business support portals, settings updates, and new workspace onboarding', async () => {
+  const { adapter, workspaceRepo } = await createIsolatedTestService();
+  try {
+    const portals = await workspaceRepo.listPublicPortals();
+    assert.equal(portals.length >= 2, true);
+    assert.equal(portals.some((p) => p.slug === 'ultimatetechapp'), true);
+    assert.equal(portals.some((p) => p.slug === 'northstar-commerce'), true);
+
+    const existingUta = await workspaceRepo.getWorkspaceSettings('org_ultimatetechapp');
+
+    // Update UltimateTechApp chatbot greeting & branding without affecting Northstar
+    const updatedUta = await workspaceRepo.updateWorkspaceSettings('org_ultimatetechapp', {
+      branding: {
+        ...existingUta.branding,
+        accentTheme: 'teal-slate',
+      },
+      chatbot: {
+        ...existingUta.chatbot,
+        initialGreeting: 'Welcome to UltimateTechApp Verified Support. How can we assist?',
+      },
+    });
+    assert.equal(updatedUta.branding.accentTheme, 'teal-slate');
+    assert.equal(
+      updatedUta.chatbot.initialGreeting,
+      'Welcome to UltimateTechApp Verified Support. How can we assist?'
+    );
+
+    const northstar = await workspaceRepo.resolvePortalBySlug('northstar-commerce');
+    assert.ok(northstar);
+    assert.equal(northstar.branding.accentTheme, 'teal-slate');
+    assert.equal(northstar.branding.displayName, 'Northstar Commerce');
+    assert.notEqual(northstar.chatbot.initialGreeting, updatedUta.chatbot.initialGreeting);
+
+    // Provision a brand-new business workspace
+    const onboarded = await workspaceRepo.provisionNewBusinessWorkspace({
+      businessName: 'Helios Cloud Systems',
+      slug: 'helios-cloud',
+      contactEmail: 'support@helioscloud.example',
+      accentTheme: 'indigo-sky',
+      welcomeHeadline: 'Fast answers for Helios Cloud customers.',
+      welcomeDescription: 'Search infrastructure guides or connect with a cloud specialist.',
+      initialGreeting: 'Hello! How can Helios Cloud support help you today?',
+      supportedTopics: ['Cluster Provisioning', 'Invoice Reconciliation', 'API Tokens'],
+      restrictedTopics: ['Legal advice', 'Tax filing advice'],
+      communicationStyle: 'technical-precise',
+    });
+    assert.equal(onboarded.slug, 'helios-cloud');
+    assert.equal(onboarded.displayName, 'Helios Cloud Systems');
+
+    const resolvedHelios = await workspaceRepo.resolvePortalBySlug('helios-cloud');
+    assert.ok(resolvedHelios);
+    assert.equal(resolvedHelios.branding.displayName, 'Helios Cloud Systems');
+    assert.equal(resolvedHelios.branding.accentTheme, 'indigo-sky');
+  } finally {
+    adapter.close();
+  }
+});
+
+test('9. Natural-language chatbot response priority and restricted-topic boundaries', async () => {
+  const { adapter, workspaceRepo } = await createIsolatedTestService();
+  try {
+    // Restricted topic is blocked immediately before retrieval
+    const restrictedReply = await workspaceRepo.answerPortalQuestion(
+      'ultimatetechapp',
+      'Can you give me investment advice on which crypto asset to buy?'
+    );
+    assert.ok(restrictedReply);
+    assert.equal(restrictedReply.resolutionLayer, 'boundary-guard');
+    assert.equal(restrictedReply.suggestEscalation, false);
+
+    // Knowledge-base / procedure match for UltimateTechApp deposit question
+    const depositReply = await workspaceRepo.answerPortalQuestion(
+      'ultimatetechapp',
+      'My bank deposit payment receipt has not credited my balance yet'
+    );
+    assert.ok(depositReply);
+    assert.equal(
+      depositReply.resolutionLayer === 'knowledge-base' ||
+        depositReply.resolutionLayer === 'guided-troubleshooting' ||
+        depositReply.resolutionLayer === 'business-rules',
+      true
+    );
+
+    // Cross-tenant query on UltimateTechApp for Northstar parcel dispatch does NOT leak Northstar articles
+    const crossTenantReply = await workspaceRepo.answerPortalQuestion(
+      'ultimatetechapp',
+      'Where is my Northstar parcel courier dispatch tracking?'
+    );
+    assert.ok(crossTenantReply);
+    assert.equal(
+      crossTenantReply.matchedSourceTitle?.toLowerCase().includes('northstar') ?? false,
+      false
+    );
+  } finally {
+    adapter.close();
+  }
+});
+
+test('10. Customer escalation, conversation queue, agent management, and analytics isolation', async () => {
+  const { adapter, workspaceRepo } = await createIsolatedTestService();
+  try {
+    const utaBefore = await workspaceRepo.listConversations('org_ultimatetechapp');
+    const nsBefore = await workspaceRepo.listConversations('org_northstar_commerce');
+
+    const createdConv = await workspaceRepo.createEscalatedConversation({
+      organizationId: 'org_ultimatetechapp',
+      customerName: 'Tunde Adeyemi',
+      customerEmail: 'tunde.adeyemi@example.com',
+      subject: 'Missing instant transfer credit TXN-99412',
+      category: 'Deposit Assistance',
+      message: 'Transferred funds 45 minutes ago and have my PDF receipt ready.',
+    });
+    assert.equal(createdConv.organizationId, 'org_ultimatetechapp');
+    assert.equal(createdConv.status, ConversationStatus.Escalated);
+
+    const utaAfter = await workspaceRepo.listConversations('org_ultimatetechapp');
+    const nsAfter = await workspaceRepo.listConversations('org_northstar_commerce');
+    assert.equal(utaAfter.length, utaBefore.length + 1);
+    assert.equal(nsAfter.length, nsBefore.length);
+
+    // Reply as specialist and transition status
+    const replied = await workspaceRepo.replyToConversation({
+      organizationId: 'org_ultimatetechapp',
+      conversationId: createdConv.id,
+      senderName: 'Amara Okafor',
+      body: 'Thank you Tunde. We have verified TXN-99412 and credited your wallet.',
+      nextStatus: ConversationStatus.Resolved,
+    });
+    assert.equal(replied.status, ConversationStatus.Resolved);
+    assert.equal(replied.messages.length, 2);
+
+    // Cross-tenant reply attempt fails cleanly
+    await assert.rejects(() =>
+      workspaceRepo.replyToConversation({
+        organizationId: 'org_northstar_commerce',
+        conversationId: createdConv.id,
+        senderName: 'Intruder',
+        body: 'Should never succeed',
+      })
+    );
+
+    // Specialist CRUD & analytics summary
+    const specialist = await workspaceRepo.createAgent('org_ultimatetechapp', {
+      displayName: 'Kemi Balogun',
+      email: 'kemi.balogun@ultimatetechapp.example',
+      role: UserRole.Agent,
+      specialty: 'Deposit Escalations',
+      availability: 'available',
+    });
+    assert.equal(specialist.organizationId, 'org_ultimatetechapp');
+
+    const analytics = await workspaceRepo.getAnalyticsSummary('org_ultimatetechapp');
+    assert.equal(analytics.organizationId, 'org_ultimatetechapp');
+    assert.equal(analytics.conversations.resolved >= 1, true);
+    assert.equal(analytics.knowledge.publishedArticles >= 1, true);
+  } finally {
+    adapter.close();
+  }
+});
+

@@ -15,9 +15,9 @@ import {
   Users,
   BarChart3,
   LayoutDashboard,
-  ArrowLeft,
   Lock,
   LogOut,
+  ExternalLink,
 } from 'lucide-react';
 import {
   CAREFLOW_NAME,
@@ -29,14 +29,19 @@ import {
   KnowledgeAdminManager,
   type KnowledgeSubView,
 } from '@/components/admin/KnowledgeAdminManager';
+import {
+  WorkspaceSettingsManager,
+  type SettingsSubView,
+} from '@/components/admin/WorkspaceSettingsManager';
+import {
+  WorkspaceOperationsManager,
+  type OperationsSubView,
+} from '@/components/admin/WorkspaceOperationsManager';
 
 interface AdminModuleDescriptor {
   key: AdminModuleSectionKey;
   title: string;
   group: 'Knowledge' | 'Configuration' | 'Operations';
-  isLiveInStage1?: boolean;
-  summary: string;
-  plannedControls: string[];
   icon: React.ComponentType<{ className?: string }>;
 }
 
@@ -45,141 +50,72 @@ const ADMIN_MODULES: AdminModuleDescriptor[] = [
     key: 'knowledge-overview',
     title: 'Knowledge Overview',
     group: 'Knowledge',
-    isLiveInStage1: true,
-    summary: 'Workspace summary of published, draft, and archived knowledge records.',
-    plannedControls: [],
     icon: LayoutDashboard,
   },
   {
     key: 'knowledge-articles',
     title: 'Knowledge Articles',
     group: 'Knowledge',
-    isLiveInStage1: true,
-    summary:
-      'Create, edit, search, filter, publish, archive, and delete organization-scoped articles.',
-    plannedControls: [],
     icon: BookOpen,
   },
   {
     key: 'faqs',
     title: 'FAQs',
     group: 'Knowledge',
-    isLiveInStage1: true,
-    summary:
-      'Maintain approved question-and-answer pairs scoped strictly to your business workspace.',
-    plannedControls: [],
     icon: HelpCircle,
   },
   {
     key: 'categories',
     title: 'Categories',
     group: 'Knowledge',
-    isLiveInStage1: true,
-    summary: 'Configure business-specific categories for organizing articles and FAQs.',
-    plannedControls: [],
     icon: FolderTree,
   },
   {
     key: 'support-procedures',
     title: 'Support Procedures',
     group: 'Knowledge',
-    summary:
-      'Define step-by-step troubleshooting decision trees and escalation rules for recurring issues.',
-    plannedControls: [
-      'Multi-step diagnostic flows and customer prompts',
-      'Required context capture prior to human escalation',
-      'Escalation priority rules by issue type',
-    ],
     icon: GitBranch,
   },
   {
     key: 'business-profile',
     title: 'Business Profile',
     group: 'Configuration',
-    summary:
-      'Manage organization identity, verified subdomain or custom hostname bindings, and tenant contact settings.',
-    plannedControls: [
-      'Organization display name and verified portal domain mapping',
-      'Supported vs. restricted business topic boundaries',
-      'Tenant-scoped workspace identifiers',
-    ],
     icon: Building2,
   },
   {
     key: 'branding',
     title: 'Branding',
     group: 'Configuration',
-    summary:
-      'Customize your public customer support portal logo, colour palette, welcome headline, and footer attribution.',
-    plannedControls: [
-      'Portal logo mark and display wordmark',
-      'Primary and secondary accent theme selection',
-      'Hero welcome headline and supporting message',
-    ],
     icon: Palette,
   },
   {
     key: 'chatbot-settings',
     title: 'Chatbot Settings',
     group: 'Configuration',
-    summary:
-      'Configure assistant greeting, communication style, natural-language response priority, and optional AI fallback limits.',
-    plannedControls: [
-      'Assistant greeting and tone of voice',
-      'Response priority order (business rules, KB, troubleshooting, AI fallback, human)',
-      'Optional external AI provider selection and usage caps',
-    ],
     icon: Bot,
   },
   {
     key: 'conversations',
     title: 'Conversations',
     group: 'Operations',
-    summary:
-      'Review and respond to active customer enquiries across your web support portal, widget, and messaging channels.',
-    plannedControls: [
-      'Unified multi-channel conversation queue',
-      'Pre-attached troubleshooting history on escalated threads',
-      'Status transitions (open, troubleshooting, escalated, resolved)',
-    ],
     icon: MessageSquare,
   },
   {
     key: 'customers',
     title: 'Customers',
     group: 'Operations',
-    summary: 'View organization-isolated customer records and prior conversation context.',
-    plannedControls: [
-      'Tenant-scoped customer directory',
-      'External application reference linking',
-      'Conversation history per customer',
-    ],
     icon: Users,
   },
   {
     key: 'agents',
     title: 'Agents',
     group: 'Operations',
-    summary:
-      'Manage human support representatives, role permissions, and queue availability.',
-    plannedControls: [
-      'Role-based access (Agent, Supervisor, Admin)',
-      'Specialist availability and active load',
-      'Escalation routing assignment',
-    ],
     icon: UserCog,
   },
   {
     key: 'analytics',
     title: 'Analytics',
     group: 'Operations',
-    summary:
-      'Understand common customer enquiry topics, self-service resolution paths, and human escalation volume.',
-    plannedControls: [
-      'Top enquiry categories and unanswered questions',
-      'Guided troubleshooting completion vs. escalation breakdown',
-      'Knowledge base coverage insights',
-    ],
     icon: BarChart3,
   },
 ];
@@ -189,6 +125,13 @@ const KNOWLEDGE_KEYS = new Set<AdminModuleSectionKey>([
   'knowledge-articles',
   'faqs',
   'categories',
+]);
+
+const SETTINGS_KEYS = new Set<AdminModuleSectionKey>([
+  'business-profile',
+  'branding',
+  'chatbot-settings',
+  'support-procedures',
 ]);
 
 export function BusinessAdminShell() {
@@ -257,16 +200,14 @@ export function BusinessAdminShell() {
     await loadSession();
   }
 
-  const activeModule =
-    ADMIN_MODULES.find((item) => item.key === selectedKey) ?? ADMIN_MODULES[0];
-  const ActiveIcon = activeModule.icon;
+  const activeSession = sessionState?.session ?? null;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* Top Bar */}
+      {/* SaaS Dashboard Top Bar Contract: Breadcrumb left, 1-2 primary actions right */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
-          <div className="flex items-center gap-3 whitespace-nowrap shrink-0">
+          <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0 truncate">
             <Link href="/" className="text-lg font-bold tracking-tight text-slate-900">
               {CAREFLOW_NAME}
             </Link>
@@ -274,24 +215,37 @@ export function BusinessAdminShell() {
               /
             </span>
             <span className="text-sm font-semibold text-slate-600">Business Administration</span>
+            {activeSession && (
+              <>
+                <span className="hidden sm:inline text-slate-300" aria-hidden="true">
+                  /
+                </span>
+                <span className="hidden sm:inline text-sm font-bold text-slate-900 truncate max-w-[200px]">
+                  {activeSession.organizationName}
+                </span>
+              </>
+            )}
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
-            {sessionState?.authenticated && sessionState.session ? (
+          <div className="flex items-center gap-3 shrink-0">
+            {sessionState?.authenticated && activeSession ? (
               <>
-                <span className="hidden sm:inline text-xs text-slate-600">
-                  Workspace:{' '}
-                  <strong className="font-semibold text-slate-900">
-                    {sessionState.session.organizationName}
-                  </strong>
-                </span>
+                {activeSession.organizationSlug && (
+                  <Link
+                    href={`/portal/${activeSession.organizationSlug}`}
+                    className="inline-flex items-center gap-1.5 py-2 px-3.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                  >
+                    <span>Open Customer Portal</span>
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={handleSignOut}
                   className="inline-flex items-center gap-1.5 py-2 px-3.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Sign Out / Switch Business</span>
+                  <span>Switch Business</span>
                 </button>
               </>
             ) : (
@@ -315,8 +269,8 @@ export function BusinessAdminShell() {
             <div className="h-10 rounded-xl bg-slate-100 animate-pulse" />
           </div>
         </div>
-      ) : !sessionState?.authenticated || !sessionState.session ? (
-        /* Protected Admin Authorization Gate (Prevents unauthenticated public admin access) */
+      ) : !sessionState?.authenticated || !activeSession ? (
+        /* Protected Admin Authorization Gate */
         <main className="flex-1 flex items-center justify-center px-6 py-14">
           <div className="max-w-md w-full rounded-2xl border border-slate-200 bg-white p-8 space-y-6">
             <div>
@@ -327,31 +281,8 @@ export function BusinessAdminShell() {
                 Authorize Business Workspace
               </h1>
               <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-                Knowledge management operations require a server-signed organization session cookie.
-                Client-supplied organization IDs are never trusted directly on API requests.
-              </p>
-            </div>
-
-            {/* Explicit Stage 1 Development Auth Disclosure */}
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 space-y-1">
-              <p className="font-semibold text-slate-900">
-                Stage 1 Development Session Gate
-              </p>
-              <p>
-                Full user account registration and multi-user authentication are scheduled for a
-                later milestone. Use your configured{' '}
-                <span className="font-mono">CAREFLOW_ADMIN_PASSCODE</span>
-                {sessionState?.usesDefaultDevPasscode && (
-                  <>
-                    {' '}
-                    (default local dev passcode:{' '}
-                    <span className="font-mono font-semibold text-slate-900">
-                      careflow-dev-admin
-                    </span>
-                    )
-                  </>
-                )}{' '}
-                to open an isolated session for a specific business.
+                Select a business organization to open its isolated administration dashboard for
+                knowledge, FAQs, chatbot rules, and customer conversations.
               </p>
             </div>
 
@@ -367,23 +298,34 @@ export function BusinessAdminShell() {
                   id="admin-org-select"
                   value={selectedOrgId}
                   onChange={(e) => setSelectedOrgId(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
+                  className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
                 >
                   {(sessionState?.availableWorkspaces ?? []).map((ws) => (
                     <option key={ws.id} value={ws.id}>
-                      {ws.name} ({ws.slug})
+                      {ws.name} ({ws.slug}.careflow.com)
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label
-                  htmlFor="admin-passcode"
-                  className="block text-xs font-semibold text-slate-700"
-                >
-                  Workspace Access Passcode
-                </label>
+                <div className="flex items-center justify-between gap-2">
+                  <label
+                    htmlFor="admin-passcode"
+                    className="block text-xs font-semibold text-slate-700"
+                  >
+                    Workspace Access Passcode
+                  </label>
+                  {sessionState?.usesDefaultDevPasscode && (
+                    <button
+                      type="button"
+                      onClick={() => setPasscode('careflow-dev-admin')}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+                    >
+                      Fill dev passcode
+                    </button>
+                  )}
+                </div>
                 <input
                   id="admin-passcode"
                   type="password"
@@ -393,6 +335,12 @@ export function BusinessAdminShell() {
                   placeholder="Enter workspace admin passcode"
                   className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
                 />
+                {sessionState?.usesDefaultDevPasscode && (
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Development passcode:{' '}
+                    <span className="font-mono text-slate-800">careflow-dev-admin</span>
+                  </p>
+                )}
               </div>
 
               {authError && (
@@ -409,12 +357,22 @@ export function BusinessAdminShell() {
                 {signingIn ? 'Authorizing Session...' : 'Open Isolated Admin Session'}
               </button>
             </form>
+
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span>Launching a new company?</span>
+              <Link
+                href="/onboarding"
+                className="font-semibold text-blue-600 hover:text-blue-700"
+              >
+                Onboard Business &rarr;
+              </Link>
+            </div>
           </div>
         </main>
       ) : (
         /* Authenticated Admin Workspace Body */
         <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Sidebar Navigation */}
+          {/* Sidebar Navigation (240px-280px equivalent in 12-col grid) */}
           <aside
             aria-label="Business Administration Sections"
             className="lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 space-y-5"
@@ -433,21 +391,14 @@ export function BusinessAdminShell() {
                           key={item.key}
                           type="button"
                           onClick={() => setSelectedKey(item.key)}
-                          className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-colors text-left cursor-pointer ${
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold transition-colors text-left cursor-pointer whitespace-nowrap ${
                             active
                               ? 'bg-blue-50 text-blue-700'
                               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                           }`}
                         >
-                          <span className="flex items-center gap-3 truncate">
-                            <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
-                            <span className="truncate">{item.title}</span>
-                          </span>
-                          {item.isLiveInStage1 && (
-                            <span className="text-[11px] font-normal text-teal-700 shrink-0">
-                              Live
-                            </span>
-                          )}
+                          <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{item.title}</span>
                         </button>
                       );
                     })}
@@ -462,59 +413,21 @@ export function BusinessAdminShell() {
             {KNOWLEDGE_KEYS.has(selectedKey) ? (
               <KnowledgeAdminManager
                 activeSubView={selectedKey as KnowledgeSubView}
-                organizationName={sessionState.session.organizationName}
-                organizationId={sessionState.session.organizationId}
+                organizationName={activeSession.organizationName}
+                organizationId={activeSession.organizationId}
                 onNavigateSubView={(view) => setSelectedKey(view)}
               />
+            ) : SETTINGS_KEYS.has(selectedKey) ? (
+              <WorkspaceSettingsManager
+                activeSubView={selectedKey as SettingsSubView}
+                organizationName={activeSession.organizationName}
+                organizationSlug={activeSession.organizationSlug}
+              />
             ) : (
-              <div className="rounded-2xl border border-slate-200 bg-white p-7 sm:p-9">
-                <p className="text-xs font-semibold text-teal-700">
-                  {activeModule.group} · {sessionState.session.organizationName}
-                </p>
-
-                <div className="mt-3 flex items-center gap-3.5">
-                  <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                    <ActiveIcon className="w-5 h-5" aria-hidden="true" />
-                  </div>
-                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
-                    {activeModule.title}
-                  </h1>
-                </div>
-
-                <p className="mt-4 text-base text-slate-600 leading-relaxed max-w-2xl">
-                  {activeModule.summary}
-                </p>
-
-                <div className="mt-8 pt-6 border-t border-slate-100">
-                  <h2 className="text-sm font-bold text-slate-900">
-                    Scheduled for upcoming stages
-                  </h2>
-                  <ul className="mt-4 space-y-3 text-sm text-slate-600">
-                    {activeModule.plannedControls.map((control) => (
-                      <li key={control} className="leading-relaxed">
-                        <span className="font-semibold text-blue-600 mr-2" aria-hidden="true">
-                          ·
-                        </span>
-                        {control}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-500">
-                  <span>
-                    Stage 1 focuses on Knowledge Management (Overview, Articles, FAQs, and
-                    Categories).
-                  </span>
-                  <Link
-                    href="/"
-                    className="inline-flex items-center gap-1.5 font-semibold text-slate-700 hover:text-slate-900 whitespace-nowrap"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Back to CareFlow Platform</span>
-                  </Link>
-                </div>
-              </div>
+              <WorkspaceOperationsManager
+                activeSubView={selectedKey as OperationsSubView}
+                organizationName={activeSession.organizationName}
+              />
             )}
           </main>
         </div>

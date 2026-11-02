@@ -6,6 +6,10 @@ const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const isCloudflareWorkersCI =
   process.env.WORKERS_CI === '1' || process.env.CF_PAGES === '1';
 
+const nodeOptions = [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning']
+  .filter(Boolean)
+  .join(' ');
+
 if (isCloudflareWorkersCI) {
   console.log('[careflow] Cloudflare CI detected — building OpenNext Worker bundle...');
   execSync('node scripts/cf-build-if-needed.mjs', {
@@ -14,6 +18,7 @@ if (isCloudflareWorkersCI) {
     env: {
       ...process.env,
       NODE_ENV: 'production',
+      NODE_OPTIONS: nodeOptions,
       CF_SKIP_IF_BUILT: '0',
     },
   });
@@ -24,6 +29,7 @@ if (isCloudflareWorkersCI) {
     env: {
       ...process.env,
       NODE_ENV: 'production',
+      NODE_OPTIONS: nodeOptions,
     },
   });
 }
