@@ -9,6 +9,7 @@ import {
   jsonApiSuccess,
 } from '@/lib/api-response';
 import {
+  ensureTelegramBotIdentityAndWebhook,
   getAuthIdentityService,
   getChannelIntegrationService,
 } from '@/lib/knowledge-runtime';
@@ -32,6 +33,15 @@ function verifyTelegramWebhookSecretHeader(
     return false;
   }
   return timingSafeEqual(a, b);
+}
+
+export async function GET() {
+  try {
+    const status = await ensureTelegramBotIdentityAndWebhook();
+    return jsonApiSuccess(status);
+  } catch (err) {
+    return handleKnowledgeApiException(err);
+  }
 }
 
 export async function POST(request: Request) {

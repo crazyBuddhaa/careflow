@@ -137,14 +137,144 @@ export async function getAuthIdentityService(): Promise<D1AuthIdentityService> {
   return new D1AuthIdentityService(db);
 }
 
-export async function getChannelIntegrationService(): Promise<D1ChannelIntegrationService> {
-  const db = await getKnowledgeDatabase();
+declare global {
+  var __careflowResolvedTelegramBotUsername: string | undefined;
+  var __careflowWebhookSyncedAt: number | undefined;
+}
+
+export async function ensureTelegramBotIdentityAndWebhook(): Promise<{
+  configured: boolean;
+  botUsername: string;
+  botId?: number;
+  botFirstName?: string;
+  webhookUrl?: string;
+  webhookRegistered?: boolean;
+  pendingUpdateCount?: number;
+  lastErrorMessage?: string;
+}> {
   const env = getActiveCloudflareEnv();
-  const centralBotUsername =
+  const botToken =
+    (typeof env?.TELEGRAM_BOT_TOKEN === 'string' && env.TELEGRAM_BOT_TOKEN.trim()) ||
+    process.env.TELEGRAM_BOT_TOKEN?.trim() ||
+    '';
+  const webhookSecret =
+    (typeof env?.TELEGRAM_WEBHOOK_SECRET === 'string' && env.TELEGRAM_WEBHOOK_SECRET.trim()) ||
+    process.env.TELEGRAM_WEBHOOK_SECRET?.trim() ||
+    '';
+  const appBaseUrl = (
+    (typeof env?.CAREFLOW_APP_BASE_URL === 'string' && env.CAREFLOW_APP_BASE_URL.trim()) ||
+    process.env.CAREFLOW_APP_BASE_URL?.trim() ||
+    'https://getcustomcare.xyz'
+  ).replace(/\/+$/, '');
+  const fallbackUsername =
+    globalThis.__careflowResolvedTelegramBotUsername ||
     (typeof env?.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME === 'string' &&
       env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME.trim()) ||
     process.env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME?.trim() ||
     'CustomCareBot';
+
+  if (!botToken) {
+    return {
+      configured: false,
+      botUsername: fallbackUsername,
+      webhookRegistered: false,
+    };
+  }
+
+  const targetWebhookUrl = `${appBaseUrl}/api/webhooks/telegram`;
+
+  try {
+    const [meRes, infoRes] = await Promise.all([
+      fetch(`https://api.telegram.org/bot${botToken}/getMe`),
+      fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`),
+    ]);
+
+    const meJson = (await meRes.json()) as {
+      ok?: boolean;
+      result?: { id?: number; username?: string; first_name?: string };
+    };
+    const infoJson = (await infoRes.json()) as {
+      ok?: boolean;
+      result?: {
+        url?: string;
+        pending_update_count?: number;
+        last_error_message?: string;
+      };
+    };
+
+    const resolvedUsername = meJson?.result?.username?.trim() || fallbackUsername;
+    if (meJson?.ok && meJson?.result?.username) {
+      globalThis.__careflowResolvedTelegramBotUsername = resolvedUsername;
+    }
+
+    const currentWebhookUrl = infoJson?.result?.url || '';
+    const now = Date.now();
+    const recentlySynced =
+      typeof globalThis.__careflowWebhookSyncedAt === 'number' &&
+      now - globalThis.__careflowWebhookSyncedAt < 5 * 60 * 1000;
+
+    let webhookRegistered = currentWebhookUrl === targetWebhookUrl;
+
+    if (!webhookRegistered || !recentlySynced) {
+      const setPayload: Record<string, unknown> = {
+        url: targetWebhookUrl,
+        allowed_updates: ['message', 'edited_message', 'callback_query'],
+      };
+      if (webhookSecret) {
+        setPayload.secret_token = webhookSecret;
+      }
+      const setRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(setPayload),
+      });
+      const setJson = (await setRes.json()) as { ok?: boolean };
+      if (setJson?.ok) {
+        webhookRegistered = true;
+        globalThis.__careflowWebhookSyncedAt = now;
+      }
+    }
+
+    return {
+      configured: Boolean(meJson?.ok),
+      botUsername: resolvedUsername,
+      botId: meJson?.result?.id,
+      botFirstName: meJson?.result?.first_name,
+      webhookUrl: webhookRegistered ? targetWebhookUrl : currentWebhookUrl,
+      webhookRegistered,
+      pendingUpdateCount: infoJson?.result?.pending_update_count ?? 0,
+      lastErrorMessage: infoJson?.result?.last_error_message,
+    };
+  } catch {
+    return {
+      configured: true,
+      botUsername: fallbackUsername,
+    };
+  }
+}
+
+export async function getChannelIntegrationService(): Promise<D1ChannelIntegrationService> {
+  const db = await getKnowledgeDatabase();
+  const env = getActiveCloudflareEnv();
+
+  let centralBotUsername =
+    globalThis.__careflowResolvedTelegramBotUsername ||
+    (typeof env?.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME === 'string' &&
+      env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME.trim()) ||
+    process.env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME?.trim() ||
+    'CustomCareBot';
+
+  const hasBotToken = Boolean(
+    (typeof env?.TELEGRAM_BOT_TOKEN === 'string' && env.TELEGRAM_BOT_TOKEN.trim()) ||
+      process.env.TELEGRAM_BOT_TOKEN?.trim()
+  );
+  if (hasBotToken && !globalThis.__careflowResolvedTelegramBotUsername) {
+    const botStatus = await ensureTelegramBotIdentityAndWebhook();
+    if (botStatus.botUsername) {
+      centralBotUsername = botStatus.botUsername;
+    }
+  }
+
   const encryptionKey =
     (typeof env?.CAREFLOW_INTEGRATION_ENCRYPTION_KEY === 'string' &&
       env.CAREFLOW_INTEGRATION_ENCRYPTION_KEY.trim()) ||
@@ -159,4 +289,5 @@ export async function getChannelIntegrationService(): Promise<D1ChannelIntegrati
     encryptionKey,
   });
 }
+
 
