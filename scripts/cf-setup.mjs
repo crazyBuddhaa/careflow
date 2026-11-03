@@ -253,9 +253,9 @@ async function main() {
   }
 
   logStep('5/5 Building & deploying CustomCare Worker to Cloudflare...');
-  execSync('node scripts/build.mjs', {
+  execSync('node scripts/cf-build-if-needed.mjs', {
     stdio: 'inherit',
-    env: process.env,
+    env: { ...process.env, CF_SKIP_IF_BUILT: '0' },
   });
 
   execSync('npx wrangler deploy', {
