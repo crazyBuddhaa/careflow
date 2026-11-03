@@ -22,11 +22,17 @@ export default function OnboardingPage() {
             {CAREFLOW_NAME}
           </Link>
           <nav className="hidden sm:flex items-center gap-6 text-sm font-semibold text-slate-600">
-            <Link href="/#capabilities" className="hover:text-slate-900 whitespace-nowrap">
-              Capabilities
+            <Link href="/#what-we-do" className="hover:text-slate-900 whitespace-nowrap">
+              What We Do
             </Link>
-            <Link href="/#how-it-works" className="hover:text-slate-900 whitespace-nowrap">
-              How It Works
+            <Link href="/#interactive-demo" className="hover:text-slate-900 whitespace-nowrap">
+              Live Demo
+            </Link>
+            <Link href="/#features" className="hover:text-slate-900 whitespace-nowrap">
+              Features
+            </Link>
+            <Link href="/#faq" className="hover:text-slate-900 whitespace-nowrap">
+              FAQ
             </Link>
           </nav>
           <Link

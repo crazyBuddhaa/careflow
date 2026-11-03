@@ -33,11 +33,28 @@ export async function verifyTurnstileToken(
   envSource: Record<string, unknown> = typeof process !== 'undefined' ? process.env : {}
 ): Promise<TurnstileVerificationResult> {
   const token = options.token?.trim() || '';
-  const configuredSecret =
+  const rawConfiguredSecret =
     options.secretKey?.trim() ||
     (typeof envSource.TURNSTILE_SECRET_KEY === 'string'
       ? envSource.TURNSTILE_SECRET_KEY.trim()
       : '');
+
+  const configuredSiteKey =
+    (typeof envSource.NEXT_PUBLIC_TURNSTILE_SITE_KEY === 'string'
+      ? envSource.NEXT_PUBLIC_TURNSTILE_SITE_KEY.trim()
+      : '') ||
+    (typeof envSource.TURNSTILE_SITE_KEY === 'string'
+      ? envSource.TURNSTILE_SITE_KEY.trim()
+      : '');
+
+  // In full application runtime (where NEXT_PUBLIC_APP_NAME or CAREFLOW_APP_BASE_URL is set),
+  // only enforce Turnstile when the frontend also has a Site Key to render the widget.
+  const isAppRuntimeWithoutSiteKey =
+    Boolean(envSource.NEXT_PUBLIC_APP_NAME || envSource.CAREFLOW_APP_BASE_URL) &&
+    !configuredSiteKey &&
+    !options.secretKey?.trim();
+
+  const configuredSecret = isAppRuntimeWithoutSiteKey ? '' : rawConfiguredSecret;
 
   // Explicit test failure token is always rejected
   if (token === DUMMY_FAIL_TOKEN) {

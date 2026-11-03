@@ -62,7 +62,7 @@ function buildWranglerConfig({ databaseName, databaseId, enableCustomDomainRoute
     vars: {
       NEXT_PUBLIC_APP_NAME: 'CustomCare',
       NEXT_PUBLIC_APP_URL: 'https://getcustomcare.xyz',
-      NEXT_PUBLIC_INITIAL_CLIENT: 'UltimateTechApp',
+      NEXT_PUBLIC_INITIAL_CLIENT: 'CustomCare',
       CAREFLOW_APP_BASE_URL: 'https://getcustomcare.xyz',
       CAREFLOW_AUTH_CALLBACK_URL: 'https://getcustomcare.xyz/login',
       CAREFLOW_ALLOWED_REDIRECT_URLS:

@@ -19,6 +19,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { CAREFLOW_NAME, type ApiResponse } from '@careflow/shared';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 const BUSINESS_CATEGORIES = [
   'Technology',
@@ -71,6 +72,7 @@ export function BusinessOnboardingFlow() {
   const [customIndustry, setCustomIndustry] = useState('');
   const [country, setCountry] = useState('United States');
   const [website, setWebsite] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
 
   // Submission State
   const [submitting, setSubmitting] = useState(false);
@@ -145,6 +147,7 @@ export function BusinessOnboardingFlow() {
           industry: selectedIndustry,
           country,
           website: website.trim(),
+          turnstileToken: turnstileToken || undefined,
         }),
       });
 
@@ -488,7 +491,7 @@ export function BusinessOnboardingFlow() {
                 required
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="e.g. Apex Health Systems"
+                placeholder="e.g. UltimateTechApp or Apex Health Systems"
                 className="w-full px-4 py-3 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
               />
               <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500 font-mono">
@@ -581,6 +584,11 @@ export function BusinessOnboardingFlow() {
                 You can add your full business description, support hours, and logo inside the guided dashboard.
               </p>
             </div>
+
+            <TurnstileWidget
+              onVerify={(t) => setTurnstileToken(t)}
+              onExpire={() => setTurnstileToken('')}
+            />
           </div>
 
           <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100">

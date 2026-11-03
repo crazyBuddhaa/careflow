@@ -27,7 +27,6 @@ import {
 import type { D1DatabaseLike } from './d1-types';
 import {
   NORTHSTAR_COMMERCE_PRESET,
-  ULTIMATE_TECH_APP_PRESET,
   buildDefaultPortalConfigForNewBusiness,
 } from './d1-portal-presets';
 import {
@@ -153,9 +152,6 @@ function tokenizeWords(input: string): string[] {
 }
 
 function getFallbackPresetForOrg(org: OrgRow): BusinessPortalConfig {
-  if (org.slug === 'ultimatetechapp') {
-    return structuredClone(ULTIMATE_TECH_APP_PRESET);
-  }
   if (org.slug === 'northstar-commerce') {
     return structuredClone(NORTHSTAR_COMMERCE_PRESET);
   }
@@ -915,7 +911,7 @@ export class D1WorkspaceRepository {
         .prepare(
           `INSERT INTO support_messages
              (id, conversation_id, organization_id, sender_type, sender_name, body, created_at)
-           VALUES (?, ?, ?, 'system', 'CareFlow Handoff Context', ?, ?)`
+           VALUES (?, ?, ?, 'system', 'CustomCare Handoff Context', ?, ?)`
         )
         .bind(
           createId('msg'),

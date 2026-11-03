@@ -20,10 +20,18 @@
       "service": "customcare"
     }
   ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "customcare-db",
+      "database_id": "c084b502-1b1e-42a9-9d39-cd28ac841bec",
+      "migrations_dir": "cloudflare/d1/migrations"
+    }
+  ],
   "vars": {
     "NEXT_PUBLIC_APP_NAME": "CustomCare",
     "NEXT_PUBLIC_APP_URL": "https://getcustomcare.xyz",
-    "NEXT_PUBLIC_INITIAL_CLIENT": "UltimateTechApp",
+    "NEXT_PUBLIC_INITIAL_CLIENT": "CustomCare",
     "CAREFLOW_APP_BASE_URL": "https://getcustomcare.xyz",
     "CAREFLOW_AUTH_CALLBACK_URL": "https://getcustomcare.xyz/login",
     "CAREFLOW_ALLOWED_REDIRECT_URLS": "https://getcustomcare.xyz,https://www.getcustomcare.xyz,https://customcare.cloud111.workers.dev",

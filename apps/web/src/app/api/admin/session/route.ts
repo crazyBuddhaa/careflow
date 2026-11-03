@@ -7,6 +7,7 @@ import {
   extractRequestClientMeta,
   getAdminCookieOptions,
   listAvailableAdminWorkspaces,
+  readRuntimeSecret,
   resolveServerAdminSession,
   verifyPasscodeConstantTime,
   verifyRequestOriginCsrf,
@@ -25,6 +26,7 @@ export const dynamic = 'force-dynamic';
 
 export interface AdminSessionStatusDto {
   authenticated: boolean;
+  turnstileSiteKey?: string;
   session: {
     userId: string;
     email?: string;
@@ -46,6 +48,8 @@ function normalizeWorkspaceIdentifier(raw: string): string {
     .toLowerCase()
     .replace(/^https?:\/\//, '')
     .replace(/\/.*$/, '')
+    .replace(/\.getcustomcare\.xyz$/, '')
+    .replace(/\.customcare\.com$/, '')
     .replace(/\.careflow\.com$/, '')
     .replace(/\.localhost(?::\d+)?$/, '');
 }
@@ -64,8 +68,14 @@ export async function GET() {
       }
     }
 
+    const turnstileSiteKey =
+      readRuntimeSecret('NEXT_PUBLIC_TURNSTILE_SITE_KEY') ||
+      readRuntimeSecret('TURNSTILE_SITE_KEY') ||
+      undefined;
+
     const response: AdminSessionStatusDto = {
       authenticated: Boolean(resolved.identity),
+      turnstileSiteKey,
       session: resolved.identity
         ? {
             userId: resolved.identity.userId,
@@ -149,7 +159,7 @@ export async function POST(request: Request) {
 
     const token = createSignedAdminSessionToken({
       userId: `admin_${targetOrg.slug}`,
-      email: `admin@${targetOrg.slug}.careflow.local`,
+      email: `admin@${targetOrg.slug}.customcare.local`,
       organizationId: targetOrg.id,
       organizationName: targetOrg.name,
       organizationSlug: targetOrg.slug,
@@ -163,7 +173,7 @@ export async function POST(request: Request) {
       authenticated: true,
       session: {
         userId: `admin_${targetOrg.slug}`,
-        email: `admin@${targetOrg.slug}.careflow.local`,
+        email: `admin@${targetOrg.slug}.customcare.local`,
         organizationId: targetOrg.id,
         organizationName: targetOrg.name,
         organizationSlug: targetOrg.slug,

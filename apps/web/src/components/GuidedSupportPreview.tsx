@@ -10,7 +10,7 @@ import type {
   PortalGuidedNode,
   PortalGuidedOption,
 } from '@careflow/shared';
-import { getDefaultUltimateTechAppConfig } from '@/config/business-portals';
+import { getDefaultPortalTemplateConfig } from '@/config/business-portals';
 
 export type SupportTopicId = 'deposit' | 'product' | 'account' | 'other' | 'human';
 
@@ -24,7 +24,7 @@ export interface ChatTurn {
   suggestEscalation?: boolean;
 }
 
-const DEFAULT_CHATBOT_CONFIG = getDefaultUltimateTechAppConfig().chatbot;
+const DEFAULT_CHATBOT_CONFIG = getDefaultPortalTemplateConfig().chatbot;
 
 export const INITIAL_GREETING = DEFAULT_CHATBOT_CONFIG.initialGreeting;
 export const ROOT_OPTIONS: DemoOption[] = DEFAULT_CHATBOT_CONFIG.nodes.root?.options ?? [];
@@ -48,7 +48,7 @@ export function GuidedSupportPreview({
   onReset,
   onAppendTurns,
   onRequestEscalation,
-  businessSlug = 'ultimatetechapp',
+  businessSlug = 'demo-portal',
   highlighted = false,
   chatbotConfig = DEFAULT_CHATBOT_CONFIG,
 }: GuidedSupportPreviewProps) {

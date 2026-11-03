@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { CAREFLOW_NAME, type ApiResponse } from '@careflow/shared';
 import type { AdminSessionStatusDto } from '@/app/api/admin/session/route';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 export function WorkspaceLoginForm() {
   const router = useRouter();
@@ -51,6 +52,7 @@ export function WorkspaceLoginForm() {
   // Passcode login fields
   const [workspaceIdentifier, setWorkspaceIdentifier] = useState(preselectOrg ?? '');
   const [passcode, setPasscode] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -133,12 +135,14 @@ export function WorkspaceLoginForm() {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           password,
+          turnstileToken: turnstileToken || undefined,
         }),
       });
 
       const body = (await res.json()) as ApiResponse<{
         authenticated: boolean;
         mfaRequired?: boolean;
+        challengeToken?: string;
         mfaChallengeToken?: string;
         redirectUrl?: string;
         message?: string;
@@ -149,8 +153,9 @@ export function WorkspaceLoginForm() {
         return;
       }
 
-      if (body.data.mfaRequired && body.data.mfaChallengeToken) {
-        setMfaChallengeToken(body.data.mfaChallengeToken);
+      const issuedChallengeToken = body.data.challengeToken || body.data.mfaChallengeToken;
+      if (body.data.mfaRequired && issuedChallengeToken) {
+        setMfaChallengeToken(issuedChallengeToken);
         setMfaCode('');
         setAuthMode('mfa');
         setStatusMessage(
@@ -177,7 +182,7 @@ export function WorkspaceLoginForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mfaChallengeToken,
+          challengeToken: mfaChallengeToken,
           code: mfaCode.trim(),
         }),
       });
@@ -213,6 +218,7 @@ export function WorkspaceLoginForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: resetEmail.trim().toLowerCase(),
+          turnstileToken: turnstileToken || undefined,
         }),
       });
 
@@ -469,6 +475,11 @@ export function WorkspaceLoginForm() {
             </div>
           </div>
 
+          <TurnstileWidget
+            onVerify={(t) => setTurnstileToken(t)}
+            onExpire={() => setTurnstileToken('')}
+          />
+
           <button
             type="submit"
             disabled={submitting}
@@ -551,6 +562,11 @@ export function WorkspaceLoginForm() {
               className="w-full px-4 py-3 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none"
             />
           </div>
+
+          <TurnstileWidget
+            onVerify={(t) => setTurnstileToken(t)}
+            onExpire={() => setTurnstileToken('')}
+          />
 
           <button
             type="submit"
@@ -688,7 +704,7 @@ export function WorkspaceLoginForm() {
               required
               value={workspaceIdentifier}
               onChange={(e) => setWorkspaceIdentifier(e.target.value)}
-              placeholder="e.g. ultimatetechapp or org_ultimatetechapp"
+              placeholder="e.g. northstar-commerce or your-workspace-slug"
               className="w-full px-4 py-3 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
             />
           </div>

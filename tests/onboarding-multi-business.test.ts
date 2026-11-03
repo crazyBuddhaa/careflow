@@ -296,3 +296,33 @@ test('7. Password hashing utility produces salted scrypt hashes and verifies con
   assert.equal(verifyPassword('', hashed), false);
   assert.equal(verifyPassword(raw, 'invalid_format'), false);
 });
+
+test('8. UltimateTechApp is not pre-seeded and registers through normal registration & onboarding', async () => {
+  const { workspaceRepo } = await createTestService();
+
+  // Before registration, ultimatetechapp does not exist
+  const preExisting = await workspaceRepo.resolvePortalBySlug('ultimatetechapp');
+  assert.equal(preExisting, null);
+
+  // Register UltimateTechApp through normal registration flow
+  const reg = await workspaceRepo.registerUserAndFirstBusiness({
+    fullName: 'Adaeze Obi',
+    email: 'adaeze@ultimatetechapp.com',
+    password: 'UltimatePass2026!',
+    businessName: 'UltimateTechApp',
+    industry: 'Financial services',
+    country: 'Nigeria',
+    website: 'https://ultimatetechapp.com',
+  });
+
+  assert.equal(reg.organization.slug, 'ultimatetechapp');
+  assert.equal(reg.organization.name, 'UltimateTechApp');
+  assert.equal(reg.organization.role, UserRole.Owner);
+  assert.equal(reg.organization.onboardingStatus, 'incomplete');
+
+  const resolvedAfter = await workspaceRepo.resolvePortalBySlug('ultimatetechapp');
+  assert.ok(resolvedAfter);
+  assert.equal(resolvedAfter.branding.displayName, 'UltimateTechApp');
+  assert.equal(resolvedAfter.onboardingStatus, 'incomplete');
+});
+

@@ -48,6 +48,93 @@ async function createIsolatedTestService(sqlitePath = ':memory:') {
   const repository = new D1KnowledgeRepository(adapter);
   const workspaceRepo = new D1WorkspaceRepository(adapter);
   const service = new KnowledgeManagementService(repository);
+
+  // Seed test-only fixture organization for Org A isolation tests (not pre-seeded by production bootstrap)
+  const existingUta = await workspaceRepo.resolvePortalBySlug('ultimatetechapp');
+  if (!existingUta) {
+    const now = '2026-04-01T10:00:00.000Z';
+
+    await adapter
+      .prepare(
+        `INSERT OR IGNORE INTO organizations (id, slug, name, country, industry, onboarding_status, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'published', 1, ?, ?)`
+      )
+      .bind(
+        'org_ultimatetechapp',
+        'ultimatetechapp',
+        'UltimateTechApp',
+        'Nigeria',
+        'Financial services',
+        now,
+        now
+      )
+      .run();
+
+    const baseSettings = await workspaceRepo.getWorkspaceSettings('org_ultimatetechapp');
+    await workspaceRepo.updateWorkspaceSettings('org_ultimatetechapp', {
+      chatbot: {
+        ...baseSettings.chatbot,
+        supportedTopics: ['Deposit Assistance', 'Account & Login Help'],
+        restrictedTopics: ['Investment or financial trading advice'],
+      },
+    });
+
+    await adapter
+      .prepare(
+        `INSERT OR IGNORE INTO knowledge_categories (id, organization_id, slug, name, description, display_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        'cat_uta_deposits',
+        'org_ultimatetechapp',
+        'deposit-assistance',
+        'Deposit Assistance',
+        'Payment confirmation timelines and transfer verification.',
+        10,
+        now,
+        now
+      )
+      .run();
+
+    await adapter
+      .prepare(
+        `INSERT OR IGNORE INTO knowledge_categories (id, organization_id, slug, name, description, display_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        'cat_uta_account',
+        'org_ultimatetechapp',
+        'account-login-help',
+        'Account & Login Help',
+        'Password resets and profile security.',
+        20,
+        now,
+        now
+      )
+      .run();
+
+    await adapter
+      .prepare(
+        `INSERT OR IGNORE INTO knowledge_articles
+          (id, organization_id, category_id, slug, title, short_description, content, tags_json, status, search_keywords, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)`
+      )
+      .bind(
+        'art_uta_deposit_checklist',
+        'org_ultimatetechapp',
+        'cat_uta_deposits',
+        'deposit-verification-checklist',
+        'How to Verify a Pending Deposit or Transfer',
+        'Step-by-step checklist when a bank transfer or card deposit has not reflected in your balance.',
+        'Check your payment receipt reference and bank transfer status before escalating.',
+        JSON.stringify(['Deposits', 'Payment Receipt', 'Reference']),
+        'deposit verification checklist payment receipt reference bank transfer balance',
+        now,
+        now
+      )
+      .run();
+  }
+
   return { adapter, repository, workspaceRepo, service };
 }
 

@@ -29,7 +29,7 @@ import {
   getReplyForNode,
   type ChatTurn,
 } from '@/components/GuidedSupportPreview';
-import { getDefaultUltimateTechAppConfig } from '@/config/business-portals';
+import { getDefaultPortalTemplateConfig } from '@/config/business-portals';
 
 const ICON_MAP: Record<PortalIconKey, React.ComponentType<{ className?: string }>> = {
   wallet: Wallet,
@@ -93,7 +93,7 @@ export interface SupportPortalLandingProps {
 }
 
 export function SupportPortalLanding({
-  portalConfig = getDefaultUltimateTechAppConfig(),
+  portalConfig = getDefaultPortalTemplateConfig(),
 }: SupportPortalLandingProps) {
   const { branding, chatbot, escalation, categories, faqs, publishedKnowledge } = portalConfig;
   const theme = THEME_CLASSES[branding.accentTheme] ?? THEME_CLASSES['blue-teal'];

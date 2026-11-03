@@ -4,28 +4,27 @@ import type {
   PortalAccentTheme,
 } from '@careflow/shared';
 
-const ULTIMATE_TECH_APP_GREETING =
+const DEFAULT_TEMPLATE_GREETING =
   'Hi! 👋 Welcome to CustomCare. What can I help you with today?';
 
-export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
-  organizationId: 'org_ultimatetechapp',
-  slug: 'ultimatetechapp',
+export const DEFAULT_PORTAL_TEMPLATE_PRESET: BusinessPortalConfig = {
+  organizationId: 'org_customcare_template',
+  slug: 'demo-portal',
   verifiedHostnames: [
-    'ultimatetechapp.getcustomcare.xyz',
-    'ultimatetechapp.careflow.com',
-    'ultimatetechapp.localhost',
+    'demo-portal.getcustomcare.xyz',
+    'demo-portal.localhost',
   ],
-  contactEmail: 'support@ultimatetechapp.example',
+  contactEmail: 'support@getcustomcare.xyz',
   supportHours: 'Monday – Saturday · 08:00 – 20:00 UTC',
   branding: {
-    displayName: 'UltimateTechApp',
-    logoText: 'UltimateTechApp Support',
+    displayName: 'CustomCare Demo Portal',
+    logoText: 'CustomCare Support',
     accentTheme: 'blue-teal',
-    portalSubtitle: 'Customer Support Portal · UltimateTechApp',
+    portalSubtitle: 'Customer Support Portal · CustomCare',
   },
   welcomeHeadline: 'Get help. Find answers. Move forward.',
   welcomeDescription:
-    'Need help with a deposit or using a product? Find answers through guided support or connect with a human representative when you need one.',
+    'Need help with an account, payment, or product feature? Find answers through guided support or connect with a human representative when you need one.',
   primaryCtaLabel: 'Start a Conversation',
   secondaryCtaLabel: 'Explore Help Topics',
   categories: [
@@ -72,7 +71,7 @@ export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
       title: 'Verifying Deposit References and Payment Receipts',
       category: 'Deposits',
       summary:
-        'Step-by-step checklist for matching your payment reference with your UltimateTechApp account.',
+        'Step-by-step checklist for matching your payment reference with your registered account.',
     },
     {
       slug: 'using-product-workspaces',
@@ -106,7 +105,7 @@ export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
   ],
   procedures: [
     {
-      id: 'proc_uta_missing_deposit',
+      id: 'proc_template_missing_deposit',
       title: 'Missing Deposit Balance Verification',
       category: 'Deposits',
       triggerPhrases: ['missing deposit', 'balance not updated', 'payment pending', 'deposit delay'],
@@ -118,7 +117,7 @@ export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
         },
         {
           stepNumber: 2,
-          instruction: 'Confirm the account identifier on the payment matches your UltimateTechApp profile.',
+          instruction: 'Confirm the account identifier on the payment matches your registered profile.',
           expectedOutcome: 'Mismatched references are flagged immediately for manual specialist review.',
         },
         {
@@ -131,7 +130,7 @@ export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
       isPublished: true,
     },
     {
-      id: 'proc_uta_workspace_setup',
+      id: 'proc_template_workspace_setup',
       title: 'Product Workspace Action Disabled Check',
       category: 'Products and Services',
       triggerPhrases: ['button disabled', 'cannot continue', 'workspace locked', 'product step'],
@@ -153,8 +152,8 @@ export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
   ],
   chatbot: {
     assistantName: 'CustomCare Assistant',
-    assistantSubtitle: 'UltimateTechApp · Guided & Knowledge Support',
-    initialGreeting: ULTIMATE_TECH_APP_GREETING,
+    assistantSubtitle: 'Guided & Knowledge Support',
+    initialGreeting: DEFAULT_TEMPLATE_GREETING,
     supportedTopics: [
       'Deposit assistance',
       'Payment confirmation',
@@ -181,12 +180,12 @@ export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
       confidenceThreshold: 0.78,
       dailyRequestCap: 500,
       systemInstructions:
-        'Only answer questions strictly grounded in UltimateTechApp deposit verification, product workspace usage, and account settings. Never invent transaction statuses or financial policies.',
+        'Only answer questions strictly grounded in the business knowledge base, product workspace usage, and account settings. Never invent transaction statuses or financial policies.',
     },
     nodes: {
       root: {
         id: 'root',
-        reply: ULTIMATE_TECH_APP_GREETING,
+        reply: DEFAULT_TEMPLATE_GREETING,
         options: [
           {
             id: 'opt-deposit',

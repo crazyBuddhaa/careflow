@@ -1,7 +1,7 @@
 import type { BusinessPortalConfig } from '@careflow/shared';
 import {
+  DEFAULT_PORTAL_TEMPLATE_PRESET,
   NORTHSTAR_COMMERCE_PRESET,
-  ULTIMATE_TECH_APP_PRESET,
 } from '@careflow/database/d1';
 import {
   classifyTenantHostname,
@@ -9,7 +9,6 @@ import {
 } from '@careflow/support-engine';
 
 const REGISTERED_PORTALS: ReadonlyMap<string, BusinessPortalConfig> = new Map([
-  [ULTIMATE_TECH_APP_PRESET.slug, ULTIMATE_TECH_APP_PRESET],
   [NORTHSTAR_COMMERCE_PRESET.slug, NORTHSTAR_COMMERCE_PRESET],
 ]);
 
@@ -42,8 +41,8 @@ export const businessPortalRegistry: BusinessPortalRegistryPort = {
   },
 };
 
-export function getDefaultUltimateTechAppConfig(): BusinessPortalConfig {
-  return ULTIMATE_TECH_APP_PRESET;
+export function getDefaultPortalTemplateConfig(): BusinessPortalConfig {
+  return DEFAULT_PORTAL_TEMPLATE_PRESET;
 }
 
 export function getDefaultNorthstarCommerceConfig(): BusinessPortalConfig {

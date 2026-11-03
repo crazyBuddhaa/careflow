@@ -3,5 +3,5 @@ export const CAREFLOW_NAME = 'CustomCare';
 export const CUSTOMCARE_NAME = 'CustomCare';
 export const CUSTOMCARE_DOMAIN = 'getcustomcare.xyz';
 export const CAREFLOW_TAGLINE = 'Smarter Support. Better Experiences.';
-export const INITIAL_CLIENT_NAME = 'UltimateTechApp';
-export const INITIAL_CLIENT_SLUG = 'ultimatetechapp';
+export const INITIAL_CLIENT_NAME = 'CustomCare';
+export const INITIAL_CLIENT_SLUG = 'customcare';

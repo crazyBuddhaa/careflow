@@ -280,8 +280,9 @@ export function BusinessAdminShell() {
         return;
       }
 
-      if (body.data?.mfaRequired && body.data?.mfaChallengeToken) {
-        setMfaChallengeToken(body.data.mfaChallengeToken);
+      const issuedChallengeToken = body.data?.challengeToken || body.data?.mfaChallengeToken;
+      if (body.data?.mfaRequired && issuedChallengeToken) {
+        setMfaChallengeToken(issuedChallengeToken);
         setMfaCode('');
         setAuthTab('mfa');
         return;
@@ -306,7 +307,7 @@ export function BusinessAdminShell() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mfaChallengeToken,
+          challengeToken: mfaChallengeToken,
           code: mfaCode.trim(),
         }),
       });
@@ -771,7 +772,7 @@ export function BusinessAdminShell() {
                     required
                     value={workspaceIdentifier}
                     onChange={(e) => setWorkspaceIdentifier(e.target.value)}
-                    placeholder="e.g. ultimatetechapp or org_ultimatetechapp"
+                    placeholder="e.g. northstar-commerce or your-workspace-slug"
                     className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
                   />
                 </div>
@@ -867,7 +868,24 @@ export function BusinessAdminShell() {
           </aside>
 
           {/* Main Administration Panel */}
-          <main className="lg:col-span-8 xl:col-span-9">
+          <main className="lg:col-span-8 xl:col-span-9 space-y-6">
+            {activeSession.emailVerified === false && selectedKey !== 'account-security' && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs text-amber-900">
+                  <span className="font-bold">Verify your account email:</span> Please confirm{' '}
+                  <span className="font-mono font-semibold">{activeSession.email}</span> to secure
+                  your CustomCare owner account and enable recovery alerts.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedKey('account-security')}
+                  className="shrink-0 py-1.5 px-3 rounded-xl bg-amber-900 hover:bg-amber-950 text-white text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Verify Email &amp; Security &rarr;
+                </button>
+              </div>
+            )}
+
             {selectedKey === 'onboarding-guide' ? (
               <WorkspaceOnboardingGuide
                 key={activeSession.organizationId}
