@@ -2,7 +2,10 @@ import {
   CreateKnowledgeFaqSchema,
   KnowledgeListFilterSchema,
 } from '@careflow/validation';
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import {
+  resolveServerAdminSession,
+  verifyRequestOriginCsrf,
+} from '@/lib/admin-auth';
 import { getKnowledgeManagementService } from '@/lib/knowledge-runtime';
 import {
   handleKnowledgeApiException,
@@ -33,6 +36,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
     const { identity } = await resolveServerAdminSession();
     let rawBody: unknown;
     try {
@@ -49,3 +57,4 @@ export async function POST(request: Request) {
     return handleKnowledgeApiException(err);
   }
 }
+

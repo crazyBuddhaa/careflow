@@ -198,6 +198,24 @@ export function buildSearchKeywords(parts: Array<string | string[] | undefined>)
   return Array.from(tokens).slice(0, 150).join(' ');
 }
 
+function assertAuthorizedKnowledgeViewer(identity: AuthSessionIdentity | null): AuthSessionIdentity {
+  if (!identity || !identity.organizationId) {
+    throw new KnowledgeDomainError(
+      'UNAUTHORIZED',
+      'An authenticated business workspace session is required.'
+    );
+  }
+
+  if (!hasMinimumRole(identity, UserRole.Viewer)) {
+    throw new KnowledgeDomainError(
+      'FORBIDDEN',
+      'Insufficient permissions to view workspace knowledge.'
+    );
+  }
+
+  return identity;
+}
+
 function assertAuthorizedKnowledgeAdmin(identity: AuthSessionIdentity | null): AuthSessionIdentity {
   if (!identity || !identity.organizationId) {
     throw new KnowledgeDomainError(
@@ -240,14 +258,14 @@ export class KnowledgeManagementService implements ChatbotKnowledgeRetrievalPort
   }
 
   async getOverview(identity: AuthSessionIdentity | null): Promise<KnowledgeOverviewCounts> {
-    const session = assertAuthorizedKnowledgeAdmin(identity);
+    const session = assertAuthorizedKnowledgeViewer(identity);
     return this.repository.getOverviewCounts(session.organizationId);
   }
 
   // ---- Categories ----
 
   async listCategories(identity: AuthSessionIdentity | null): Promise<KnowledgeCategory[]> {
-    const session = assertAuthorizedKnowledgeAdmin(identity);
+    const session = assertAuthorizedKnowledgeViewer(identity);
     return this.repository.listCategories(session.organizationId);
   }
 
@@ -330,7 +348,7 @@ export class KnowledgeManagementService implements ChatbotKnowledgeRetrievalPort
     identity: AuthSessionIdentity | null,
     filter?: KnowledgeListFilterInput
   ): Promise<KnowledgeArticle[]> {
-    const session = assertAuthorizedKnowledgeAdmin(identity);
+    const session = assertAuthorizedKnowledgeViewer(identity);
     return this.repository.listArticles(session.organizationId, filter);
   }
 
@@ -338,7 +356,7 @@ export class KnowledgeManagementService implements ChatbotKnowledgeRetrievalPort
     identity: AuthSessionIdentity | null,
     articleId: string
   ): Promise<KnowledgeArticle> {
-    const session = assertAuthorizedKnowledgeAdmin(identity);
+    const session = assertAuthorizedKnowledgeViewer(identity);
     const article = await this.repository.getArticleById(session.organizationId, articleId);
     if (!article) {
       throw new KnowledgeDomainError('NOT_FOUND', 'Knowledge article not found in this workspace.');
@@ -439,7 +457,7 @@ export class KnowledgeManagementService implements ChatbotKnowledgeRetrievalPort
     identity: AuthSessionIdentity | null,
     filter?: KnowledgeListFilterInput
   ): Promise<KnowledgeFaq[]> {
-    const session = assertAuthorizedKnowledgeAdmin(identity);
+    const session = assertAuthorizedKnowledgeViewer(identity);
     return this.repository.listFaqs(session.organizationId, filter);
   }
 

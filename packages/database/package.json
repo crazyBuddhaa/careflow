@@ -6,8 +6,6 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./client": "./src/client.ts",
-    "./server": "./src/server.ts",
     "./realtime": "./src/realtime.ts",
     "./storage": "./src/storage.ts",
     "./types": "./src/types.ts",
@@ -17,11 +15,10 @@
   "dependencies": {
     "@careflow/shared": "workspace:*",
     "@careflow/support-engine": "workspace:*",
-    "@careflow/validation": "workspace:*",
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.118.0"
+    "@careflow/validation": "workspace:*"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   }
 }
+

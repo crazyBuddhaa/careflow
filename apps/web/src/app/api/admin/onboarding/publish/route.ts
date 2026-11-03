@@ -1,5 +1,8 @@
 import { UserRole } from '@careflow/shared';
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import {
+  requireAuthorizedWorkspaceSession,
+  verifyRequestOriginCsrf,
+} from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -9,29 +12,32 @@ import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const session = await resolveServerAdminSession();
-    if (!session.identity) {
-      return jsonApiError('UNAUTHORIZED', 'Authentication required.', 401);
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
     }
 
-    if (
-      session.identity.role !== UserRole.Owner &&
-      session.identity.role !== UserRole.Admin
-    ) {
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Admin);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
+    }
+
+    if (auth.session.emailVerified === false) {
       return jsonApiError(
-        'FORBIDDEN',
-        'Only business owners or administrators can publish the support portal.',
+        'EMAIL_VERIFICATION_REQUIRED',
+        'Please verify your account email address before publishing your public customer support portal.',
         403
       );
     }
 
     const repo = await getWorkspaceRepository();
-    const progress = await repo.publishWorkspacePortal(session.identity.organizationId);
+    const progress = await repo.publishWorkspacePortal(auth.session.identity.organizationId);
 
     return jsonApiSuccess(progress);
   } catch (err) {
     return handleKnowledgeApiException(err);
   }
 }
+

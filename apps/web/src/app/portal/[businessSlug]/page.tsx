@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { resolveServerAdminSession } from '@/lib/admin-auth';
 import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
 import { SupportPortalLanding } from '@/components/SupportPortalLanding';
 
@@ -12,12 +13,35 @@ interface BusinessPortalPageProps {
   }>;
 }
 
+async function resolveAuthorizedPortal(businessSlugOrHost: string) {
+  const [repo, session] = await Promise.all([
+    getWorkspaceRepository(),
+    resolveServerAdminSession(),
+  ]);
+
+  const accessOptions = {
+    requirePublished: true,
+    viewerUserId: session.identity?.userId,
+    viewerOrganizationId: session.identity?.organizationId,
+  };
+
+  const bySlug = await repo.resolvePortalBySlug(businessSlugOrHost, accessOptions);
+  if (bySlug) {
+    return bySlug;
+  }
+
+  if (businessSlugOrHost.includes('.')) {
+    return repo.resolvePortalByHostname(businessSlugOrHost, accessOptions);
+  }
+
+  return null;
+}
+
 export async function generateMetadata({
   params,
 }: BusinessPortalPageProps): Promise<Metadata> {
   const { businessSlug } = await params;
-  const repo = await getWorkspaceRepository();
-  const portal = await repo.resolvePortalBySlug(businessSlug);
+  const portal = await resolveAuthorizedPortal(businessSlug);
 
   if (!portal) {
     return {
@@ -38,8 +62,7 @@ export async function generateMetadata({
 
 export default async function BusinessPortalPage({ params }: BusinessPortalPageProps) {
   const { businessSlug } = await params;
-  const repo = await getWorkspaceRepository();
-  const portal = await repo.resolvePortalBySlug(businessSlug);
+  const portal = await resolveAuthorizedPortal(businessSlug);
 
   if (!portal) {
     notFound();
@@ -47,3 +70,4 @@ export default async function BusinessPortalPage({ params }: BusinessPortalPageP
 
   return <SupportPortalLanding portalConfig={portal} />;
 }
+

@@ -1,5 +1,6 @@
 import { ConversationStatus, SupportChannel } from '@careflow/shared';
 import { CreatePortalEscalationSchema } from '@careflow/validation';
+import { resolveServerAdminSession } from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -16,8 +17,22 @@ interface RouteContext {
 export async function POST(request: Request, context: RouteContext) {
   try {
     const { businessSlug } = await context.params;
-    const repo = await getWorkspaceRepository();
-    const portal = await repo.resolvePortalBySlug(businessSlug);
+    const [repo, session] = await Promise.all([
+      getWorkspaceRepository(),
+      resolveServerAdminSession(),
+    ]);
+
+    const accessOptions = {
+      requirePublished: true,
+      viewerUserId: session.identity?.userId,
+      viewerOrganizationId: session.identity?.organizationId,
+    };
+
+    const portal =
+      (await repo.resolvePortalBySlug(businessSlug, accessOptions)) ??
+      (businessSlug.includes('.')
+        ? await repo.resolvePortalByHostname(businessSlug, accessOptions)
+        : null);
 
     if (!portal) {
       return jsonApiError('NOT_FOUND', 'Business support portal not found.', 404);
@@ -58,3 +73,4 @@ export async function POST(request: Request, context: RouteContext) {
     return handleKnowledgeApiException(err);
   }
 }
+

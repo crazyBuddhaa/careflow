@@ -78,6 +78,20 @@ interface SettingsRow {
   updated_at: string;
 }
 
+interface OrgWithSettingsRow extends OrgRow {
+  settings_json: string | null;
+  published_article_count?: number;
+  published_faq_count?: number;
+}
+
+export interface PortalResolutionAccessOptions {
+  requirePublished?: boolean;
+  viewerUserId?: string;
+  viewerOrganizationId?: string;
+}
+
+const DUMMY_TIMING_PASSWORD_HASH = hashPassword('careflow-constant-time-dummy-secret-2026');
+
 interface PublishedArticleJoinRow {
   id: string;
   slug: string;
@@ -201,6 +215,27 @@ export class D1WorkspaceRepository {
       .first<OrgRow>();
   }
 
+  private parseSettingsJsonForOrg(
+    org: OrgRow,
+    settingsJson: string | null | undefined
+  ): BusinessPortalConfig {
+    if (!settingsJson) {
+      return getFallbackPresetForOrg(org);
+    }
+
+    try {
+      const parsed = JSON.parse(settingsJson) as BusinessPortalConfig;
+      return {
+        ...getFallbackPresetForOrg(org),
+        ...parsed,
+        organizationId: org.id,
+        slug: org.slug,
+      };
+    } catch {
+      return getFallbackPresetForOrg(org);
+    }
+  }
+
   private async loadBaseSettingsForOrg(org: OrgRow): Promise<BusinessPortalConfig> {
     const row = await this.db
       .prepare(
@@ -211,21 +246,34 @@ export class D1WorkspaceRepository {
       .bind(org.id)
       .first<SettingsRow>();
 
-    if (!row) {
-      return getFallbackPresetForOrg(org);
+    return this.parseSettingsJsonForOrg(org, row?.settings_json);
+  }
+
+  private async canAccessPortalRow(
+    org: OrgRow,
+    options?: PortalResolutionAccessOptions
+  ): Promise<boolean> {
+    if (!options?.requirePublished) {
+      return true;
     }
 
-    try {
-      const parsed = JSON.parse(row.settings_json) as BusinessPortalConfig;
-      return {
-        ...getFallbackPresetForOrg(org),
-        ...parsed,
-        organizationId: org.id,
-        slug: org.slug,
-      };
-    } catch {
-      return getFallbackPresetForOrg(org);
+    const status = (org.onboarding_status as BusinessOnboardingStatus) ?? 'published';
+    if (status === 'published') {
+      return true;
     }
+
+    if (options.viewerOrganizationId && options.viewerOrganizationId === org.id) {
+      return true;
+    }
+
+    if (options.viewerUserId) {
+      const membership = await this.getUserActiveMembership(options.viewerUserId, org.id);
+      if (membership) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async hydrateLiveKnowledgeIntoPortal(
@@ -298,35 +346,60 @@ export class D1WorkspaceRepository {
     };
   }
 
-  async resolvePortalBySlug(slug: string): Promise<BusinessPortalConfig | null> {
+  async resolvePortalBySlug(
+    slug: string,
+    options?: PortalResolutionAccessOptions
+  ): Promise<BusinessPortalConfig | null> {
     const org = await this.getActiveOrgBySlug(slug);
     if (!org) {
+      return null;
+    }
+    if (!(await this.canAccessPortalRow(org, options))) {
       return null;
     }
     const base = await this.loadBaseSettingsForOrg(org);
     return this.hydrateLiveKnowledgeIntoPortal(org, base);
   }
 
-  async resolvePortalByHostname(hostname: string): Promise<BusinessPortalConfig | null> {
+  async resolvePortalByHostname(
+    hostname: string,
+    options?: PortalResolutionAccessOptions
+  ): Promise<BusinessPortalConfig | null> {
     const normalizedHost = hostname.trim().toLowerCase().split(':')[0] ?? '';
     if (!normalizedHost) return null;
 
-    const { results: orgs } = await this.db
+    const { results: orgRows } = await this.db
       .prepare(
-        `SELECT id, slug, name, is_active
-         FROM organizations
-         WHERE is_active = 1`
+        `SELECT
+           o.id,
+           o.slug,
+           o.name,
+           o.country,
+           o.industry,
+           o.website,
+           o.onboarding_status,
+           o.onboarding_step,
+           o.created_by_user_id,
+           o.is_active,
+           s.settings_json
+         FROM organizations o
+         LEFT JOIN organization_portal_settings s
+           ON s.organization_id = o.id
+         WHERE o.is_active = 1`
       )
-      .all<OrgRow>();
+      .all<OrgWithSettingsRow>();
 
-    for (const org of orgs) {
-      const base = await this.loadBaseSettingsForOrg(org);
+    for (const org of orgRows) {
+      const base = this.parseSettingsJsonForOrg(org, org.settings_json);
       if (
         base.verifiedHostnames.some((h) => h.toLowerCase() === normalizedHost) ||
         normalizedHost === `${org.slug}.getcustomcare.xyz` ||
         normalizedHost === `${org.slug}.careflow.com` ||
         normalizedHost === `${org.slug}.localhost`
       ) {
+        if (!(await this.canAccessPortalRow(org, options))) {
+          return null;
+        }
         return this.hydrateLiveKnowledgeIntoPortal(org, base);
       }
     }
@@ -334,50 +407,56 @@ export class D1WorkspaceRepository {
   }
 
   async listPublicPortals(): Promise<PublicPortalSummary[]> {
-    const { results: orgs } = await this.db
+    const { results: rows } = await this.db
       .prepare(
-        `SELECT id, slug, name, is_active
-         FROM organizations
-         WHERE is_active = 1
-         ORDER BY created_at ASC, name ASC`
+        `SELECT
+           o.id,
+           o.slug,
+           o.name,
+           o.country,
+           o.industry,
+           o.website,
+           o.onboarding_status,
+           o.onboarding_step,
+           o.created_by_user_id,
+           o.is_active,
+           s.settings_json,
+           COALESCE(art.published_article_count, 0) AS published_article_count,
+           COALESCE(faq.published_faq_count, 0) AS published_faq_count
+         FROM organizations o
+         LEFT JOIN organization_portal_settings s
+           ON s.organization_id = o.id
+         LEFT JOIN (
+           SELECT organization_id, COUNT(*) AS published_article_count
+           FROM knowledge_articles
+           WHERE status = 'published'
+           GROUP BY organization_id
+         ) art ON art.organization_id = o.id
+         LEFT JOIN (
+           SELECT organization_id, COUNT(*) AS published_faq_count
+           FROM knowledge_faqs
+           WHERE status = 'published'
+           GROUP BY organization_id
+         ) faq ON faq.organization_id = o.id
+         WHERE o.is_active = 1 AND o.onboarding_status = 'published'
+         ORDER BY o.created_at ASC, o.name ASC`
       )
-      .all<OrgRow>();
+      .all<OrgWithSettingsRow>();
 
-    const summaries: PublicPortalSummary[] = [];
-
-    for (const org of orgs) {
-      const [base, artCountRow, faqCountRow] = await Promise.all([
-        this.loadBaseSettingsForOrg(org),
-        this.db
-          .prepare(
-            `SELECT COUNT(*) AS cnt FROM knowledge_articles
-             WHERE organization_id = ? AND status = 'published'`
-          )
-          .bind(org.id)
-          .first<{ cnt: number }>(),
-        this.db
-          .prepare(
-            `SELECT COUNT(*) AS cnt FROM knowledge_faqs
-             WHERE organization_id = ? AND status = 'published'`
-          )
-          .bind(org.id)
-          .first<{ cnt: number }>(),
-      ]);
-
-      summaries.push({
-        organizationId: org.id,
-        slug: org.slug,
+    return rows.map((row) => {
+      const base = this.parseSettingsJsonForOrg(row, row.settings_json);
+      return {
+        organizationId: row.id,
+        slug: row.slug,
         displayName: base.branding.displayName,
         portalSubtitle: base.branding.portalSubtitle,
         welcomeHeadline: base.welcomeHeadline,
         accentTheme: base.branding.accentTheme,
-        verifiedHostname: base.verifiedHostnames[0] ?? `${org.slug}.getcustomcare.xyz`,
-        publishedArticleCount: Number(artCountRow?.cnt ?? 0),
-        publishedFaqCount: Number(faqCountRow?.cnt ?? 0),
-      });
-    }
-
-    return summaries;
+        verifiedHostname: base.verifiedHostnames[0] ?? `${row.slug}.getcustomcare.xyz`,
+        publishedArticleCount: Number(row.published_article_count ?? 0),
+        publishedFaqCount: Number(row.published_faq_count ?? 0),
+      };
+    });
   }
 
   async getWorkspaceSettings(organizationId: string): Promise<BusinessPortalConfig> {
@@ -636,9 +715,12 @@ export class D1WorkspaceRepository {
   ========================================================================= */
   async answerPortalQuestion(
     slug: string,
-    rawQuestion: string
+    rawQuestion: string,
+    options?: PortalResolutionAccessOptions
   ): Promise<PortalAssistantResponseDto | null> {
-    const portal = await this.resolvePortalBySlug(slug);
+    const portal =
+      (await this.resolvePortalBySlug(slug, options)) ??
+      (slug.includes('.') ? await this.resolvePortalByHostname(slug, options) : null);
     if (!portal) {
       return null;
     }
@@ -1044,54 +1126,78 @@ export class D1WorkspaceRepository {
   }
 
   async listCustomers(organizationId: string, search?: string): Promise<WorkspaceCustomerRecord[]> {
-    const conversations = await this.listConversations(organizationId);
-    const byEmail = new Map<string, WorkspaceCustomerRecord>();
-
-    for (const conv of conversations) {
-      const key = conv.customerEmail.toLowerCase();
-      const existing = byEmail.get(key);
-      const isOpen =
-        conv.status !== ConversationStatus.Resolved && conv.status !== ConversationStatus.Closed;
-
-      if (!existing) {
-        byEmail.set(key, {
-          id: `cust_${key.replace(/[^a-z0-9]/g, '').slice(0, 12)}`,
-          organizationId,
-          displayName: conv.customerName,
-          email: conv.customerEmail,
-          externalRef: conv.customerExternalRef,
-          preferredChannel: conv.channel,
-          totalConversations: 1,
-          openConversations: isOpen ? 1 : 0,
-          lastInteractionAt: conv.updatedAt,
-        });
-      } else {
-        existing.totalConversations += 1;
-        if (isOpen) existing.openConversations += 1;
-        if (conv.updatedAt > existing.lastInteractionAt) {
-          existing.lastInteractionAt = conv.updatedAt;
-        }
-        if (!existing.externalRef && conv.customerExternalRef) {
-          existing.externalRef = conv.customerExternalRef;
-        }
-      }
+    interface AggregatedCustomerRow {
+      email_key: string;
+      customer_name: string;
+      customer_email: string;
+      customer_external_ref: string;
+      preferred_channel: string;
+      total_conversations: number;
+      open_conversations: number;
+      last_interaction_at: string;
     }
 
-    let records = Array.from(byEmail.values()).sort((a, b) =>
-      b.lastInteractionAt.localeCompare(a.lastInteractionAt)
-    );
+    const havingClauses: string[] = [];
+    const params: unknown[] = [organizationId];
 
     if (search && search.trim().length > 0) {
-      const q = search.trim().toLowerCase();
-      records = records.filter(
-        (r) =>
-          r.displayName.toLowerCase().includes(q) ||
-          r.email.toLowerCase().includes(q) ||
-          r.externalRef.toLowerCase().includes(q)
+      const q = `%${search.trim().toLowerCase()}%`;
+      havingClauses.push(
+        `(LOWER(MAX(c.customer_name)) LIKE ? OR LOWER(MIN(c.customer_email)) LIKE ? OR LOWER(COALESCE(MAX(CASE WHEN c.customer_external_ref != '' THEN c.customer_external_ref ELSE NULL END), '')) LIKE ?)`
       );
+      params.push(q, q, q);
     }
 
-    return records;
+    const havingSql = havingClauses.length > 0 ? `HAVING ${havingClauses.join(' AND ')}` : '';
+
+    const { results } = await this.db
+      .prepare(
+        `SELECT
+           LOWER(c.customer_email) AS email_key,
+           (
+             SELECT c2.customer_name
+             FROM support_conversations c2
+             WHERE c2.organization_id = c.organization_id
+               AND LOWER(c2.customer_email) = LOWER(c.customer_email)
+             ORDER BY c2.updated_at DESC
+             LIMIT 1
+           ) AS customer_name,
+           MIN(c.customer_email) AS customer_email,
+           COALESCE(
+             MAX(CASE WHEN c.customer_external_ref != '' THEN c.customer_external_ref ELSE NULL END),
+             ''
+           ) AS customer_external_ref,
+           (
+             SELECT c3.channel
+             FROM support_conversations c3
+             WHERE c3.organization_id = c.organization_id
+               AND LOWER(c3.customer_email) = LOWER(c.customer_email)
+             ORDER BY c3.updated_at DESC
+             LIMIT 1
+           ) AS preferred_channel,
+           COUNT(*) AS total_conversations,
+           SUM(CASE WHEN c.status NOT IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS open_conversations,
+           MAX(c.updated_at) AS last_interaction_at
+         FROM support_conversations c
+         WHERE c.organization_id = ?
+         GROUP BY c.organization_id, LOWER(c.customer_email)
+         ${havingSql}
+         ORDER BY last_interaction_at DESC`
+      )
+      .bind(...params)
+      .all<AggregatedCustomerRow>();
+
+    return results.map((row) => ({
+      id: `cust_${row.email_key.replace(/[^a-z0-9]/g, '').slice(0, 12)}`,
+      organizationId,
+      displayName: row.customer_name,
+      email: row.customer_email,
+      externalRef: row.customer_external_ref ?? '',
+      preferredChannel: (row.preferred_channel as SupportChannel) || SupportChannel.Portal,
+      totalConversations: Number(row.total_conversations ?? 0),
+      openConversations: Number(row.open_conversations ?? 0),
+      lastInteractionAt: row.last_interaction_at,
+    }));
   }
 
   async listAgents(organizationId: string): Promise<WorkspaceAgentRecord[]> {
@@ -1175,6 +1281,8 @@ export class D1WorkspaceRepository {
     organizationId: string,
     agentId: string,
     patch: {
+      displayName?: string;
+      email?: string;
       role?: UserRole.Agent | UserRole.Supervisor | UserRole.Admin;
       specialty?: string;
       availability?: AgentAvailability;
@@ -1193,10 +1301,12 @@ export class D1WorkspaceRepository {
     await this.db
       .prepare(
         `UPDATE support_agents
-         SET role = ?, specialty = ?, availability = ?, updated_at = ?
+         SET display_name = ?, email = ?, role = ?, specialty = ?, availability = ?, updated_at = ?
          WHERE id = ? AND organization_id = ?`
       )
       .bind(
+        patch.displayName?.trim() || existing.display_name,
+        patch.email ? patch.email.trim().toLowerCase() : existing.email,
         patch.role ?? existing.role,
         patch.specialty ?? existing.specialty,
         patch.availability ?? existing.availability,
@@ -1541,6 +1651,8 @@ export class D1WorkspaceRepository {
       .first<UserRow>();
 
     if (!userRow) {
+      // Mitigate timing-oracle account enumeration by running scrypt verification against a dummy hash
+      verifyPassword(passwordInput, DUMMY_TIMING_PASSWORD_HASH);
       return null;
     }
 

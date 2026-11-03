@@ -188,6 +188,15 @@ export async function sendTransactionalEmail(
   }
 }
 
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function sendEmailVerificationMessage(
   params: {
     to: string;
@@ -201,6 +210,8 @@ export async function sendEmailVerificationMessage(
   const verifyUrl = `${cfg.authCallbackUrl}?action=verify-email&token=${encodeURIComponent(
     params.rawToken
   )}`;
+  const safeName = escapeHtml(params.fullName);
+  const safeToken = escapeHtml(params.rawToken);
 
   const subject = 'Verify your CustomCare account email';
   const text = [
@@ -217,7 +228,7 @@ export async function sendEmailVerificationMessage(
   const html = `
     <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
       <h2 style="margin: 0 0 12px; font-size: 20px;">Verify your CustomCare account</h2>
-      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${params.fullName},</p>
+      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${safeName},</p>
       <p style="font-size: 14px; line-height: 1.6; color: #334155;">
         Please confirm your email address to unlock full workspace publishing and security operations on CustomCare.
       </p>
@@ -227,7 +238,7 @@ export async function sendEmailVerificationMessage(
         </a>
       </p>
       <p style="font-size: 12px; color: #64748b;">
-        Or enter this single-use verification token in your dashboard: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${params.rawToken}</code>
+        Or enter this single-use verification token in your dashboard: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${safeToken}</code>
       </p>
       <p style="font-size: 12px; color: #94a3b8; margin-top: 24px;">
         This link expires in 24 hours and can only be used once.
@@ -262,6 +273,8 @@ export async function sendPasswordResetMessage(
   const resetUrl = `${cfg.authCallbackUrl}?action=reset-password&token=${encodeURIComponent(
     params.rawToken
   )}`;
+  const safeName = escapeHtml(params.fullName);
+  const safeToken = escapeHtml(params.rawToken);
 
   const subject = 'Reset your CustomCare account password';
   const text = [
@@ -277,7 +290,7 @@ export async function sendPasswordResetMessage(
   const html = `
     <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
       <h2 style="margin: 0 0 12px; font-size: 20px;">Reset your CustomCare password</h2>
-      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${params.fullName},</p>
+      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${safeName},</p>
       <p style="font-size: 14px; line-height: 1.6; color: #334155;">
         Use the button below to choose a new password for your CustomCare account. All existing sessions will be signed out when your password is changed.
       </p>
@@ -287,7 +300,7 @@ export async function sendPasswordResetMessage(
         </a>
       </p>
       <p style="font-size: 12px; color: #64748b;">
-        Single-use reset token: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${params.rawToken}</code>
+        Single-use reset token: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${safeToken}</code>
       </p>
       <p style="font-size: 12px; color: #94a3b8; margin-top: 24px;">
         This token expires in 1 hour. If you did not request this reset, you can safely ignore this email.
@@ -320,6 +333,10 @@ export async function sendPasswordChangedAlert(
   envSource?: Record<string, unknown>
 ): Promise<EmailDeliveryResult> {
   const timestamp = new Date().toUTCString();
+  const safeName = escapeHtml(params.fullName);
+  const safeIp = escapeHtml(params.ipAddress || 'Unknown');
+  const safeUa = escapeHtml(params.userAgent || 'Unknown');
+
   const subject = 'Security alert: Your CustomCare password was changed';
   const text = [
     `Hello ${params.fullName},`,
@@ -334,13 +351,13 @@ export async function sendPasswordChangedAlert(
   const html = `
     <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
       <h2 style="margin: 0 0 12px; font-size: 20px;">Your CustomCare password was changed</h2>
-      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${params.fullName},</p>
+      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${safeName},</p>
       <p style="font-size: 14px; line-height: 1.6; color: #334155;">
         This is an automated security notification confirming that your CustomCare password was updated on <strong>${timestamp}</strong>.
       </p>
       <ul style="font-size: 13px; color: #475569; line-height: 1.6;">
-        <li><strong>IP address:</strong> ${params.ipAddress || 'Unknown'}</li>
-        <li><strong>Device:</strong> ${params.userAgent || 'Unknown'}</li>
+        <li><strong>IP address:</strong> ${safeIp}</li>
+        <li><strong>Device:</strong> ${safeUa}</li>
       </ul>
     </div>
   `;
@@ -369,6 +386,11 @@ export async function sendNewLoginSecurityAlert(
   envSource?: Record<string, unknown>
 ): Promise<EmailDeliveryResult> {
   const timestamp = new Date().toUTCString();
+  const safeName = escapeHtml(params.fullName);
+  const safeOrg = params.organizationName ? escapeHtml(params.organizationName) : '';
+  const safeIp = escapeHtml(params.ipAddress || 'Unknown');
+  const safeUa = escapeHtml(params.userAgent || 'Unknown');
+
   const subject = 'New sign-in to your CustomCare account';
   const text = [
     `Hello ${params.fullName},`,
@@ -384,14 +406,14 @@ export async function sendNewLoginSecurityAlert(
   const html = `
     <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
       <h2 style="margin: 0 0 12px; font-size: 20px;">New sign-in to CustomCare</h2>
-      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${params.fullName},</p>
+      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello ${safeName},</p>
       <p style="font-size: 14px; line-height: 1.6; color: #334155;">
         We noticed a new sign-in to your CustomCare account on <strong>${timestamp}</strong>.
       </p>
       <ul style="font-size: 13px; color: #475569; line-height: 1.6;">
-        ${params.organizationName ? `<li><strong>Workspace:</strong> ${params.organizationName}</li>` : ''}
-        <li><strong>IP address:</strong> ${params.ipAddress || 'Unknown'}</li>
-        <li><strong>Device:</strong> ${params.userAgent || 'Unknown'}</li>
+        ${safeOrg ? `<li><strong>Workspace:</strong> ${safeOrg}</li>` : ''}
+        <li><strong>IP address:</strong> ${safeIp}</li>
+        <li><strong>Device:</strong> ${safeUa}</li>
       </ul>
     </div>
   `;
@@ -407,3 +429,4 @@ export async function sendNewLoginSecurityAlert(
     envSource
   );
 }
+

@@ -244,7 +244,7 @@ async function main() {
   );
 
   if (databaseId) {
-    console.log(`Applying remote D1 SQL migrations (0001, 0002, 0003) to "${resolvedDbName}"...`);
+    console.log(`Applying remote D1 SQL migrations (0001, 0002, 0003, 0004) to "${resolvedDbName}"...`);
     execSync(`npx wrangler d1 migrations apply ${resolvedDbName} --remote`, {
       stdio: 'inherit',
       env: { ...process.env, CI: 'true' },

@@ -1,4 +1,5 @@
 import { PortalAssistantQuerySchema } from '@careflow/validation';
+import { resolveServerAdminSession } from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -24,8 +25,16 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const input = PortalAssistantQuerySchema.parse(rawBody);
-    const repo = await getWorkspaceRepository();
-    const result = await repo.answerPortalQuestion(businessSlug, input.message);
+    const [repo, session] = await Promise.all([
+      getWorkspaceRepository(),
+      resolveServerAdminSession(),
+    ]);
+
+    const result = await repo.answerPortalQuestion(businessSlug, input.message, {
+      requirePublished: true,
+      viewerUserId: session.identity?.userId,
+      viewerOrganizationId: session.identity?.organizationId,
+    });
 
     if (!result) {
       return jsonApiError('NOT_FOUND', 'Business support portal not found.', 404);
@@ -36,3 +45,4 @@ export async function POST(request: Request, context: RouteContext) {
     return handleKnowledgeApiException(err);
   }
 }
+

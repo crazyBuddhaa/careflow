@@ -1,45 +1,23 @@
-import { CreateOnboardingWorkspaceSchema } from '@careflow/validation';
-import {
-  handleKnowledgeApiException,
-  jsonApiError,
-  jsonApiSuccess,
-} from '@/lib/api-response';
-import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
+import { verifyRequestOriginCsrf } from '@/lib/admin-auth';
+import { jsonApiError } from '@/lib/api-response';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Legacy unauthenticated workspace provisioning endpoint is permanently disabled.
+ * Organization creation requires either:
+ * 1. Full account registration via POST /api/auth/register
+ * 2. Authenticated workspace creation via POST /api/auth/workspaces/create
+ */
 export async function POST(request: Request) {
-  try {
-    let rawBody: unknown;
-    try {
-      rawBody = await request.json();
-    } catch {
-      return jsonApiError('INVALID_JSON', 'Request body must be valid JSON.', 400);
-    }
-
-    const input = CreateOnboardingWorkspaceSchema.parse(rawBody);
-    const repo = await getWorkspaceRepository();
-
-    try {
-      const created = await repo.provisionNewBusinessWorkspace(input);
-      return jsonApiSuccess(
-        {
-          organizationId: created.organizationId,
-          slug: created.slug,
-          displayName: created.displayName,
-          portalPath: `/portal/${created.slug}`,
-          verifiedHostname: `${created.slug}.getcustomcare.xyz`,
-        },
-        201
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to provision workspace.';
-      if (message.includes('already exists') || message.includes('reserved')) {
-        return jsonApiError('CONFLICT', message, 409);
-      }
-      throw err;
-    }
-  } catch (err) {
-    return handleKnowledgeApiException(err);
+  const csrf = verifyRequestOriginCsrf(request);
+  if (!csrf.allowed) {
+    return jsonApiError('CSRF_REJECTED', csrf.reason || 'Forbidden cross-origin request.', 403);
   }
+
+  return jsonApiError(
+    'LEGACY_ENDPOINT_DISABLED',
+    'Unauthenticated workspace provisioning is disabled. Register an account via /api/auth/register or create an additional workspace from an authenticated session via /api/auth/workspaces/create.',
+    410
+  );
 }

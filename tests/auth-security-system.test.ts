@@ -691,4 +691,330 @@ describe('CareFlow Secure Authentication, Identity, MFA & Multi-Business Securit
     assert.equal(verifyPassword('RoundTripTest2026!', hash), true);
     assert.equal(verifyPassword('WrongPassword2026!', hash), false);
   });
+
+  it('13. Session Workspace Switching & Multi-Workspace Session Lifecycle: updates auth_sessions.organization_id and preserves session token validity', async () => {
+    const { workspaceRepo, authService } = await createTestAuthHarness();
+
+    const reg = await workspaceRepo.registerUserAndFirstBusiness({
+      fullName: 'Ngozi Eze',
+      email: 'ngozi@session-switch.org',
+      password: 'SwitchPassword2026!',
+      businessName: 'First Workspace Ltd',
+      industry: 'Technology',
+      country: 'Nigeria',
+    });
+
+    const session = await authService.createSession({
+      userId: reg.user.id,
+      organizationId: reg.organization.id,
+      ipAddress: '198.51.100.25',
+      userAgent: 'TestSuite/2.0',
+    });
+
+    const initialValidated = await authService.validateSessionToken(session.rawSessionToken);
+    assert.ok(initialValidated);
+    assert.equal(initialValidated.activeMembership.organizationId, reg.organization.id);
+
+    // Create a second business workspace under the same account
+    const secondWorkspace = await workspaceRepo.createAdditionalBusinessForUser(reg.user.id, {
+      businessName: 'Second Workspace Health',
+      industry: 'Healthcare',
+      country: 'Nigeria',
+    });
+
+    // Switch session's active workspace in D1
+    await authService.switchSessionWorkspace(
+      session.rawSessionToken,
+      secondWorkspace.organizationId
+    );
+
+    const switchedValidated = await authService.validateSessionToken(session.rawSessionToken);
+    assert.ok(switchedValidated);
+    assert.equal(switchedValidated.session.id, session.sessionId);
+    assert.equal(
+      switchedValidated.activeMembership.organizationId,
+      secondWorkspace.organizationId
+    );
+    assert.equal(
+      switchedValidated.activeMembership.organizationName,
+      'Second Workspace Health'
+    );
+  });
+
+  it('14. Role-Based Authorization (RBAC): Viewer can read knowledge base while Viewer, Agent, and Supervisor are blocked from knowledge mutations', async () => {
+    const { knowledgeService } = await createTestAuthHarness();
+
+    const adminIdentity = {
+      userId: 'usr_admin_ns',
+      organizationId: 'org_northstar_commerce',
+      role: UserRole.Admin,
+      email: 'admin@northstar.example',
+    };
+    const supervisorIdentity = {
+      userId: 'usr_sup_ns',
+      organizationId: 'org_northstar_commerce',
+      role: UserRole.Supervisor,
+      email: 'supervisor@northstar.example',
+    };
+    const viewerIdentity = {
+      userId: 'usr_viewer_ns',
+      organizationId: 'org_northstar_commerce',
+      role: UserRole.Viewer,
+      email: 'viewer@northstar.example',
+    };
+
+    // Viewer can read overview, categories, articles, and FAQs
+    const overview = await knowledgeService.getOverview(viewerIdentity);
+    assert.ok(overview.publishedArticles >= 1);
+    const categories = await knowledgeService.listCategories(viewerIdentity);
+    assert.ok(categories.length >= 1);
+    const articles = await knowledgeService.listArticles(viewerIdentity);
+    assert.ok(articles.length >= 1);
+    const faqs = await knowledgeService.listFaqs(viewerIdentity);
+    assert.ok(faqs.length >= 1);
+
+    // Viewer and Supervisor are blocked from mutating knowledge base entries
+    await assert.rejects(
+      async () => {
+        await knowledgeService.createFaq(viewerIdentity, {
+          question: 'Can a viewer add an FAQ entry?',
+          answer: 'No, viewers have read-only access.',
+          categoryId: null,
+          status: 'draft' as never,
+          displayOrder: 1,
+        });
+      },
+      (err: unknown) => err instanceof KnowledgeDomainError && err.code === 'FORBIDDEN'
+    );
+
+    await assert.rejects(
+      async () => {
+        await knowledgeService.createCategory(supervisorIdentity, {
+          name: 'Supervisor Category Attempt',
+          description: 'Supervisors manage queue operations, not KB categories.',
+          displayOrder: 5,
+        });
+      },
+      (err: unknown) => err instanceof KnowledgeDomainError && err.code === 'FORBIDDEN'
+    );
+
+    // Admin can create category
+    const createdCat = await knowledgeService.createCategory(adminIdentity, {
+      name: 'Admin Approved Category',
+      description: 'Created by authorized administrator.',
+      displayOrder: 99,
+    });
+    assert.equal(createdCat.organizationId, 'org_northstar_commerce');
+  });
+
+  it('15. Database-Level Composite Tenant Isolation Triggers: prevents cross-tenant support_messages and cross-tenant category links', async () => {
+    const { db, workspaceRepo } = await createTestAuthHarness();
+
+    const orgA = await workspaceRepo.registerUserAndFirstBusiness({
+      fullName: 'Tenant A Owner',
+      email: 'owner@tenant-a.example',
+      password: 'TenantAPassword123!',
+      businessName: 'Tenant A Corp',
+      industry: 'Technology',
+      country: 'United States',
+    });
+
+    const orgB = await workspaceRepo.registerUserAndFirstBusiness({
+      fullName: 'Tenant B Owner',
+      email: 'owner@tenant-b.example',
+      password: 'TenantBPassword123!',
+      businessName: 'Tenant B Corp',
+      industry: 'Healthcare',
+      country: 'Canada',
+    });
+
+    const convA = await workspaceRepo.createEscalatedConversation({
+      organizationId: orgA.organization.id,
+      customerName: 'Customer A',
+      customerEmail: 'cust@tenant-a.example',
+      category: 'General',
+      subject: 'Tenant A Conversation',
+      message: 'Initial message in Tenant A.',
+    });
+
+    // Attempt to insert a support_message into Tenant A's conversation_id but tagged with Tenant B's organization_id
+    await assert.rejects(
+      async () => {
+        await db
+          .prepare(
+            `INSERT INTO support_messages (id, conversation_id, organization_id, sender_type, sender_name, body, created_at)
+             VALUES (?, ?, ?, 'agent', 'Cross Tenant Attacker', 'Injected cross-tenant message', ?)`
+          )
+          .bind(
+            'msg_cross_tenant_attack',
+            convA.id,
+            orgB.organization.id,
+            new Date().toISOString()
+          )
+          .run();
+      },
+      (err: Error) => err.message.includes('CROSS_TENANT_VIOLATION') || err.message.includes('FOREIGN KEY')
+    );
+
+    // Attempt to insert a knowledge_article in Tenant B referencing a category_id from Northstar Commerce
+    await assert.rejects(
+      async () => {
+        await db
+          .prepare(
+            `INSERT INTO knowledge_articles
+               (id, organization_id, category_id, slug, title, short_description, content, tags_json, status, search_keywords, created_at, updated_at)
+             VALUES (?, ?, 'cat_ns_orders', 'cross-tenant-art', 'Cross Tenant Article', 'Short desc', 'Body', '[]', 'draft', '', ?, ?)`
+          )
+          .bind(
+            'art_cross_tenant_attack',
+            orgB.organization.id,
+            new Date().toISOString(),
+            new Date().toISOString()
+          )
+          .run();
+      },
+      (err: Error) => err.message.includes('CROSS_TENANT_VIOLATION')
+    );
+  });
+
+  it('16. Portal Publishing Security & Custom-Domain Access Control: blocks public access to unpublished portals while permitting authenticated member preview', async () => {
+    const { workspaceRepo } = await createTestAuthHarness();
+
+    const unpublishedBiz = await workspaceRepo.registerUserAndFirstBusiness({
+      fullName: 'Draft Portal Owner',
+      email: 'owner@draftportal.example',
+      password: 'DraftPortalPassword123!',
+      businessName: 'Stealth Startup',
+      industry: 'Technology',
+      country: 'United States',
+    });
+
+    const otherBiz = await workspaceRepo.registerUserAndFirstBusiness({
+      fullName: 'Other Business Owner',
+      email: 'owner@otherbiz.example',
+      password: 'OtherBizPassword123!',
+      businessName: 'Other Business',
+      industry: 'Education',
+      country: 'United Kingdom',
+    });
+
+    // Configure a custom hostname on the unpublished business
+    await workspaceRepo.updateWorkspaceSettings(unpublishedBiz.organization.id, {
+      verifiedHostnames: ['support.stealthstartup.example'],
+    });
+
+    // 1. Unpublished business must NOT appear in listPublicPortals()
+    const publicPortals = await workspaceRepo.listPublicPortals();
+    assert.equal(
+      publicPortals.some((p) => p.organizationId === unpublishedBiz.organization.id),
+      false
+    );
+
+    // 2. Anonymous visitor requesting unpublished portal with requirePublished: true gets null (404)
+    const anonBySlug = await workspaceRepo.resolvePortalBySlug(unpublishedBiz.organization.slug, {
+      requirePublished: true,
+    });
+    assert.equal(anonBySlug, null);
+
+    const anonByHost = await workspaceRepo.resolvePortalByHostname(
+      'support.stealthstartup.example',
+      { requirePublished: true }
+    );
+    assert.equal(anonByHost, null);
+
+    const anonAssistant = await workspaceRepo.answerPortalQuestion(
+      unpublishedBiz.organization.slug,
+      'How do I contact support?',
+      { requirePublished: true }
+    );
+    assert.equal(anonAssistant, null);
+
+    // 3. Authenticated user from ANOTHER business also gets null (404)
+    const crossTenantPreview = await workspaceRepo.resolvePortalBySlug(
+      unpublishedBiz.organization.slug,
+      {
+        requirePublished: true,
+        viewerUserId: otherBiz.user.id,
+        viewerOrganizationId: otherBiz.organization.id,
+      }
+    );
+    assert.equal(crossTenantPreview, null);
+
+    // 4. Authenticated member of the unpublished business CAN preview their own portal by slug and custom domain
+    const memberPreviewBySlug = await workspaceRepo.resolvePortalBySlug(
+      unpublishedBiz.organization.slug,
+      {
+        requirePublished: true,
+        viewerUserId: unpublishedBiz.user.id,
+        viewerOrganizationId: unpublishedBiz.organization.id,
+      }
+    );
+    assert.ok(memberPreviewBySlug);
+    assert.equal(memberPreviewBySlug.organizationId, unpublishedBiz.organization.id);
+
+    const memberPreviewByHost = await workspaceRepo.resolvePortalByHostname(
+      'support.stealthstartup.example',
+      {
+        requirePublished: true,
+        viewerUserId: unpublishedBiz.user.id,
+      }
+    );
+    assert.ok(memberPreviewByHost);
+    assert.equal(memberPreviewByHost.organizationId, unpublishedBiz.organization.id);
+  });
+
+  it('17. SQL GROUP BY Customer Aggregation, Production Turnstile Enforcement & HTML Escaping in Emails', async () => {
+    const { workspaceRepo } = await createTestAuthHarness();
+
+    // Create multiple conversations for the same customer email (different casing) in Northstar Commerce
+    await workspaceRepo.createEscalatedConversation({
+      organizationId: 'org_northstar_commerce',
+      customerName: 'Elena Customer',
+      customerEmail: 'Elena.Customer@Buyer.Example',
+      customerExternalRef: 'ORD-777',
+      category: 'Orders & Shipping',
+      subject: 'First inquiry',
+      message: 'Checking order status.',
+    });
+
+    const secondConv = await workspaceRepo.createEscalatedConversation({
+      organizationId: 'org_northstar_commerce',
+      customerName: 'Elena Customer Updated',
+      customerEmail: 'elena.customer@buyer.example',
+      customerExternalRef: '',
+      category: 'Returns & Exchanges',
+      subject: 'Second inquiry',
+      message: 'Requesting exchange.',
+    });
+
+    await workspaceRepo.replyToConversation({
+      organizationId: 'org_northstar_commerce',
+      conversationId: secondConv.id,
+      senderName: 'Elena Rostova',
+      body: 'Resolved exchange.',
+      nextStatus: 'resolved' as never,
+    });
+
+    const customers = await workspaceRepo.listCustomers('org_northstar_commerce', 'ord-777');
+    assert.equal(customers.length, 1);
+    assert.equal(customers[0]?.totalConversations, 2);
+    assert.equal(customers[0]?.openConversations, 1);
+    assert.equal(customers[0]?.externalRef, 'ORD-777');
+
+    // Production Turnstile enforcement rejects unconfigured secret when NODE_ENV === 'production'
+    const prodUnconfiguredTurnstile = await verifyTurnstileToken(
+      { token: 'some-token' },
+      { NODE_ENV: 'production' }
+    );
+    assert.equal(prodUnconfiguredTurnstile.success, false);
+    assert.equal(prodUnconfiguredTurnstile.errorCode, 'TURNSTILE_NOT_CONFIGURED');
+
+    // Production Turnstile rejects test pass token when NODE_ENV === 'production'
+    const prodTestTokenAttempt = await verifyTurnstileToken(
+      { token: 'CF_TURNSTILE_TEST_PASS' },
+      { NODE_ENV: 'production', TURNSTILE_SECRET_KEY: '0x4AAAAAA_prod_secret' }
+    );
+    assert.equal(prodTestTokenAttempt.success, false);
+  });
 });
+

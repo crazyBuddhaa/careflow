@@ -76,17 +76,6 @@ function getSigningSecret(): string {
   return 'careflow-stage1-local-dev-hmac-secret-key-do-not-use-in-prod';
 }
 
-export function getExpectedAdminPasscode(): {
-  passcode: string;
-  isDefaultDevPasscode: boolean;
-} {
-  const configured = readRuntimeSecret('CAREFLOW_ADMIN_PASSCODE');
-  if (configured && configured.length >= 4) {
-    return { passcode: configured, isDefaultDevPasscode: false };
-  }
-  return { passcode: 'careflow-dev-admin', isDefaultDevPasscode: true };
-}
-
 function signBase64Payload(payloadBase64Url: string): string {
   return createHmac('sha256', getSigningSecret())
     .update(payloadBase64Url)
@@ -217,11 +206,11 @@ export async function listAvailableAdminWorkspaces(): Promise<RegisteredWorkspac
 
 /**
  * Resolves and validates the current server-side session.
- * When a D1-backed `sessionToken` is present in the signed cookie, verifies that:
+ * Strictly requires a D1-backed `sessionToken` in the signed cookie and verifies that:
  * 1. The session exists in `auth_sessions`, is not revoked (`revoked_at IS NULL`), and has not expired.
  * 2. The user still belongs to the active organization (`organization_members.is_active = 1`).
  * 3. The organization is active (`organizations.is_active = 1`).
- * 4. Returns the authoritative server-side role from D1.
+ * 4. Returns the authoritative server-side role and organization from D1.
  */
 export async function resolveServerAdminSession(): Promise<{
   identity: AuthSessionIdentity | null;
@@ -237,81 +226,35 @@ export async function resolveServerAdminSession(): Promise<{
   const rawCookie = cookieStore.get(ADMIN_SESSION_COOKIE_NAME)?.value;
   const verified = verifySignedAdminSessionToken(rawCookie);
 
-  if (!verified) {
+  if (!verified || !verified.sessionToken) {
     return { identity: null };
   }
 
-  // If backed by a server-side D1 session token, validate against D1 auth_sessions + organization_members
-  if (verified.sessionToken) {
-    try {
-      const authService = await getAuthIdentityService();
-      const dbValidated = await authService.validateSessionToken(verified.sessionToken);
-      if (!dbValidated) {
-        return { identity: null };
-      }
-
-      return {
-        identity: {
-          userId: dbValidated.user.id,
-          email: dbValidated.user.email,
-          organizationId: dbValidated.activeMembership.organizationId,
-          role: dbValidated.activeMembership.role,
-        },
-        organizationName: dbValidated.activeMembership.organizationName,
-        organizationSlug: dbValidated.activeMembership.organizationSlug,
-        userName: dbValidated.user.fullName,
-        sessionId: dbValidated.session.id,
-        sessionToken: verified.sessionToken,
-        emailVerified: dbValidated.user.emailVerified,
-        mfaEnabled: Boolean(dbValidated.user.mfaEnabled),
-      };
-    } catch {
+  try {
+    const authService = await getAuthIdentityService();
+    const dbValidated = await authService.validateSessionToken(verified.sessionToken);
+    if (!dbValidated) {
       return { identity: null };
     }
-  }
 
-  // Fallback for legacy/passcode sessions: verify user membership in DB if real userId (`usr_...`)
-  if (verified.userId.startsWith('usr_')) {
-    try {
-      const authService = await getAuthIdentityService();
-      const membership = await authService.verifyOrganizationMembership(
-        verified.userId,
-        verified.organizationId
-      );
-      if (!membership) {
-        return { identity: null };
-      }
-      return {
-        identity: {
-          userId: verified.userId,
-          email: verified.email,
-          organizationId: membership.organizationId,
-          role: membership.role,
-        },
-        organizationName: membership.organizationName,
-        organizationSlug: membership.organizationSlug,
-        userName: verified.userName,
-        emailVerified: verified.emailVerified ?? true,
-        mfaEnabled: verified.mfaEnabled ?? false,
-      };
-    } catch {
-      return { identity: null };
-    }
+    return {
+      identity: {
+        userId: dbValidated.user.id,
+        email: dbValidated.user.email,
+        organizationId: dbValidated.activeMembership.organizationId,
+        role: dbValidated.activeMembership.role,
+      },
+      organizationName: dbValidated.activeMembership.organizationName,
+      organizationSlug: dbValidated.activeMembership.organizationSlug,
+      userName: dbValidated.user.fullName,
+      sessionId: dbValidated.session.id,
+      sessionToken: verified.sessionToken,
+      emailVerified: dbValidated.user.emailVerified,
+      mfaEnabled: Boolean(dbValidated.user.mfaEnabled),
+    };
+  } catch {
+    return { identity: null };
   }
-
-  return {
-    identity: {
-      userId: verified.userId,
-      email: verified.email,
-      organizationId: verified.organizationId,
-      role: verified.role,
-    },
-    organizationName: verified.organizationName,
-    organizationSlug: verified.organizationSlug,
-    userName: verified.userName,
-    emailVerified: true,
-    mfaEnabled: false,
-  };
 }
 
 /**
@@ -360,16 +303,6 @@ export async function requireAuthorizedWorkspaceSession(
   };
 }
 
-export function verifyPasscodeConstantTime(inputPasscode: string): boolean {
-  const { passcode } = getExpectedAdminPasscode();
-  const a = Buffer.from(inputPasscode);
-  const b = Buffer.from(passcode);
-  if (a.length !== b.length) {
-    return false;
-  }
-  return timingSafeEqual(a, b);
-}
-
 export function getAdminCookieOptions() {
   return {
     httpOnly: true,
@@ -377,6 +310,7 @@ export function getAdminCookieOptions() {
     secure: process.env.NODE_ENV === 'production',
     path: '/',
     maxAge: SESSION_TTL_SECONDS,
+    priority: 'high' as const,
   };
 }
 
@@ -401,7 +335,9 @@ export function getConfiguredAllowedRedirectOrigins(): string[] {
       // ignore invalid URL
     }
   }
-  const rawAllowed = readRuntimeSecret('CAREFLOW_ALLOWED_REDIRECT_URLS');
+  const rawAllowed =
+    readRuntimeSecret('CAREFLOW_ALLOWED_REDIRECT_URLS') ||
+    readRuntimeSecret('CAREFLOW_ALLOWED_REDIRECT_ORIGINS');
   if (rawAllowed) {
     for (const part of rawAllowed.split(',')) {
       const trimmed = part.trim();
@@ -438,38 +374,41 @@ export function verifyRequestOriginCsrf(request: Request): {
   }
 
   const originHeader = request.headers.get('origin')?.trim();
-  if (!originHeader) {
-    // Non-browser API clients or same-origin requests omitting Origin are allowed
+  const refererHeader = request.headers.get('referer')?.trim();
+  const sourceHeader = originHeader || refererHeader;
+
+  if (!sourceHeader) {
+    // Non-browser API clients or same-origin requests omitting Origin/Referer are allowed
     return { allowed: true };
   }
 
   try {
     const requestUrl = new URL(request.url);
-    const originUrl = new URL(originHeader);
-    if (originUrl.host.toLowerCase() === requestUrl.host.toLowerCase()) {
+    const sourceUrl = new URL(sourceHeader);
+    if (sourceUrl.host.toLowerCase() === requestUrl.host.toLowerCase()) {
       return { allowed: true };
     }
 
     const hostHeader =
       request.headers.get('x-forwarded-host')?.trim() ||
       request.headers.get('host')?.trim();
-    if (hostHeader && originUrl.host.toLowerCase() === hostHeader.toLowerCase()) {
+    if (hostHeader && sourceUrl.host.toLowerCase() === hostHeader.toLowerCase()) {
       return { allowed: true };
     }
 
     const allowedOrigins = getConfiguredAllowedRedirectOrigins().map((o) => o.toLowerCase());
-    if (allowedOrigins.includes(originUrl.origin.toLowerCase())) {
+    if (allowedOrigins.includes(sourceUrl.origin.toLowerCase())) {
       return { allowed: true };
     }
 
     return {
       allowed: false,
-      reason: `Cross-origin state-changing request from ${originUrl.origin} was blocked by CSRF protection.`,
+      reason: `Cross-origin state-changing request from ${sourceUrl.origin} was blocked by CSRF protection.`,
     };
   } catch {
     return {
       allowed: false,
-      reason: 'Malformed Origin header blocked by CSRF protection.',
+      reason: 'Malformed Origin or Referer header blocked by CSRF protection.',
     };
   }
 }

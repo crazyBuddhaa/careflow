@@ -1,5 +1,8 @@
 import { UpdateKnowledgeArticleSchema } from '@careflow/validation';
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import {
+  resolveServerAdminSession,
+  verifyRequestOriginCsrf,
+} from '@/lib/admin-auth';
 import { getKnowledgeManagementService } from '@/lib/knowledge-runtime';
 import {
   handleKnowledgeApiException,
@@ -27,6 +30,11 @@ export async function GET(_request: Request, context: RouteContext) {
 
 export async function PATCH(request: Request, context: RouteContext) {
   try {
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
     const { identity } = await resolveServerAdminSession();
     const { articleId } = await context.params;
 
@@ -46,8 +54,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   try {
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
     const { identity } = await resolveServerAdminSession();
     const { articleId } = await context.params;
     const service = await getKnowledgeManagementService();
@@ -57,3 +70,4 @@ export async function DELETE(_request: Request, context: RouteContext) {
     return handleKnowledgeApiException(err);
   }
 }
+

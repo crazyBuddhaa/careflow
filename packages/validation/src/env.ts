@@ -1,9 +1,8 @@
 import { z } from 'zod';
 
 const PlaceholderValues = new Set([
-  'https://your-project-ref.supabase.co',
-  'your-supabase-anon-public-key',
-  'your-supabase-service-role-secret-key',
+  'replace-with-at-least-32-character-random-secret',
+  'careflow-dev-only-hmac-session-secret-change-in-production',
   '',
 ]);
 
@@ -15,19 +14,23 @@ export const PublicEnvSchema = z.object({
   NEXT_PUBLIC_APP_NAME: z.string().min(1).default('CustomCare'),
   NEXT_PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
   NEXT_PUBLIC_INITIAL_CLIENT: z.string().min(1).default('CustomCare'),
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1).optional(),
 });
 
 export const ServerEnvSchema = PublicEnvSchema.extend({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
-  DATABASE_URL: z.string().min(1).optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
   CAREFLOW_ADMIN_SESSION_SECRET: z.string().min(16).optional(),
-  CAREFLOW_ADMIN_PASSCODE: z.string().min(4).optional(),
   CAREFLOW_SQLITE_PATH: z.string().min(1).optional(),
+  CAREFLOW_APP_BASE_URL: z.string().url().optional(),
+  CAREFLOW_AUTH_CALLBACK_URL: z.string().url().optional(),
+  CAREFLOW_ALLOWED_REDIRECT_URLS: z.string().optional(),
+  CAREFLOW_ENFORCE_ADMIN_MFA: z.enum(['true', 'false']).optional(),
+  RESEND_API_KEY: z.string().min(1).optional(),
+  CAREFLOW_EMAIL_FROM_ADDRESS: z.string().email().optional(),
+  CAREFLOW_EMAIL_FROM_NAME: z.string().min(1).optional(),
+  TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
 });
 
 export type PublicEnv = z.infer<typeof PublicEnvSchema>;
@@ -35,8 +38,9 @@ export type ServerEnv = z.infer<typeof ServerEnvSchema>;
 
 export interface ValidatedEnvStatus {
   publicEnv: PublicEnv;
-  isSupabasePublicConfigured: boolean;
-  isSupabaseServerConfigured: boolean;
+  isSessionSecretConfigured: boolean;
+  isTurnstileConfigured: boolean;
+  isResendConfigured: boolean;
   validationErrors: string[];
 }
 
@@ -47,11 +51,8 @@ export function validatePublicEnv(rawEnv: Record<string, string | undefined>): P
       ? rawEnv.NEXT_PUBLIC_APP_URL
       : 'http://localhost:3000',
     NEXT_PUBLIC_INITIAL_CLIENT: rawEnv.NEXT_PUBLIC_INITIAL_CLIENT || 'CustomCare',
-    NEXT_PUBLIC_SUPABASE_URL: isConfiguredValue(rawEnv.NEXT_PUBLIC_SUPABASE_URL)
-      ? rawEnv.NEXT_PUBLIC_SUPABASE_URL
-      : undefined,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: isConfiguredValue(rawEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-      ? rawEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    NEXT_PUBLIC_TURNSTILE_SITE_KEY: isConfiguredValue(rawEnv.NEXT_PUBLIC_TURNSTILE_SITE_KEY)
+      ? rawEnv.NEXT_PUBLIC_TURNSTILE_SITE_KEY
       : undefined,
   };
 
@@ -78,21 +79,48 @@ export function validateServerEnv(rawEnv: Record<string, string | undefined>): {
       ? rawEnv.NEXT_PUBLIC_APP_URL
       : 'http://localhost:3000',
     NEXT_PUBLIC_INITIAL_CLIENT: rawEnv.NEXT_PUBLIC_INITIAL_CLIENT || 'CustomCare',
-    NEXT_PUBLIC_SUPABASE_URL: isConfiguredValue(rawEnv.NEXT_PUBLIC_SUPABASE_URL)
-      ? rawEnv.NEXT_PUBLIC_SUPABASE_URL
+    NEXT_PUBLIC_TURNSTILE_SITE_KEY: isConfiguredValue(rawEnv.NEXT_PUBLIC_TURNSTILE_SITE_KEY)
+      ? rawEnv.NEXT_PUBLIC_TURNSTILE_SITE_KEY
       : undefined,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: isConfiguredValue(rawEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-      ? rawEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      : undefined,
-    SUPABASE_SERVICE_ROLE_KEY: isConfiguredValue(rawEnv.SUPABASE_SERVICE_ROLE_KEY)
-      ? rawEnv.SUPABASE_SERVICE_ROLE_KEY
-      : undefined,
-    DATABASE_URL: isConfiguredValue(rawEnv.DATABASE_URL) ? rawEnv.DATABASE_URL : undefined,
     TELEGRAM_BOT_TOKEN: isConfiguredValue(rawEnv.TELEGRAM_BOT_TOKEN)
       ? rawEnv.TELEGRAM_BOT_TOKEN
       : undefined,
     TELEGRAM_WEBHOOK_SECRET: isConfiguredValue(rawEnv.TELEGRAM_WEBHOOK_SECRET)
       ? rawEnv.TELEGRAM_WEBHOOK_SECRET
+      : undefined,
+    CAREFLOW_ADMIN_SESSION_SECRET: isConfiguredValue(rawEnv.CAREFLOW_ADMIN_SESSION_SECRET)
+      ? rawEnv.CAREFLOW_ADMIN_SESSION_SECRET
+      : undefined,
+    CAREFLOW_SQLITE_PATH: isConfiguredValue(rawEnv.CAREFLOW_SQLITE_PATH)
+      ? rawEnv.CAREFLOW_SQLITE_PATH
+      : undefined,
+    CAREFLOW_APP_BASE_URL: isConfiguredValue(rawEnv.CAREFLOW_APP_BASE_URL)
+      ? rawEnv.CAREFLOW_APP_BASE_URL
+      : undefined,
+    CAREFLOW_AUTH_CALLBACK_URL: isConfiguredValue(rawEnv.CAREFLOW_AUTH_CALLBACK_URL)
+      ? rawEnv.CAREFLOW_AUTH_CALLBACK_URL
+      : undefined,
+    CAREFLOW_ALLOWED_REDIRECT_URLS: isConfiguredValue(rawEnv.CAREFLOW_ALLOWED_REDIRECT_URLS)
+      ? rawEnv.CAREFLOW_ALLOWED_REDIRECT_URLS
+      : isConfiguredValue(rawEnv.CAREFLOW_ALLOWED_REDIRECT_ORIGINS)
+        ? rawEnv.CAREFLOW_ALLOWED_REDIRECT_ORIGINS
+        : undefined,
+    CAREFLOW_ENFORCE_ADMIN_MFA:
+      rawEnv.CAREFLOW_ENFORCE_ADMIN_MFA === 'true' ||
+      rawEnv.CAREFLOW_ENFORCE_ADMIN_MFA === 'false'
+        ? rawEnv.CAREFLOW_ENFORCE_ADMIN_MFA
+        : undefined,
+    RESEND_API_KEY: isConfiguredValue(rawEnv.RESEND_API_KEY)
+      ? rawEnv.RESEND_API_KEY
+      : undefined,
+    CAREFLOW_EMAIL_FROM_ADDRESS: isConfiguredValue(rawEnv.CAREFLOW_EMAIL_FROM_ADDRESS)
+      ? rawEnv.CAREFLOW_EMAIL_FROM_ADDRESS
+      : undefined,
+    CAREFLOW_EMAIL_FROM_NAME: isConfiguredValue(rawEnv.CAREFLOW_EMAIL_FROM_NAME)
+      ? rawEnv.CAREFLOW_EMAIL_FROM_NAME
+      : undefined,
+    TURNSTILE_SECRET_KEY: isConfiguredValue(rawEnv.TURNSTILE_SECRET_KEY)
+      ? rawEnv.TURNSTILE_SECRET_KEY
       : undefined,
   };
 
@@ -115,19 +143,23 @@ export function validateServerEnv(rawEnv: Record<string, string | undefined>): {
       },
       status: {
         publicEnv: fallbackPublic,
-        isSupabasePublicConfigured: false,
-        isSupabaseServerConfigured: false,
+        isSessionSecretConfigured: false,
+        isTurnstileConfigured: false,
+        isResendConfigured: false,
         validationErrors: errors,
       },
     };
   }
 
   const data = parsed.data;
-  const isSupabasePublicConfigured = Boolean(
-    data.NEXT_PUBLIC_SUPABASE_URL && data.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const isSessionSecretConfigured = Boolean(
+    data.CAREFLOW_ADMIN_SESSION_SECRET && data.CAREFLOW_ADMIN_SESSION_SECRET.length >= 16
   );
-  const isSupabaseServerConfigured = Boolean(
-    isSupabasePublicConfigured && data.SUPABASE_SERVICE_ROLE_KEY
+  const isTurnstileConfigured = Boolean(
+    data.TURNSTILE_SECRET_KEY && data.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+  );
+  const isResendConfigured = Boolean(
+    data.RESEND_API_KEY && data.CAREFLOW_EMAIL_FROM_ADDRESS
   );
 
   return {
@@ -137,12 +169,13 @@ export function validateServerEnv(rawEnv: Record<string, string | undefined>): {
         NEXT_PUBLIC_APP_NAME: data.NEXT_PUBLIC_APP_NAME,
         NEXT_PUBLIC_APP_URL: data.NEXT_PUBLIC_APP_URL,
         NEXT_PUBLIC_INITIAL_CLIENT: data.NEXT_PUBLIC_INITIAL_CLIENT,
-        NEXT_PUBLIC_SUPABASE_URL: data.NEXT_PUBLIC_SUPABASE_URL,
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: data.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: data.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
       },
-      isSupabasePublicConfigured,
-      isSupabaseServerConfigured,
+      isSessionSecretConfigured,
+      isTurnstileConfigured,
+      isResendConfigured,
       validationErrors: [],
     },
   };
 }
+

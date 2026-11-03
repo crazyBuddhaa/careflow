@@ -65,7 +65,7 @@ async function handleIssueAndSendVerificationEmail() {
     message,
     expiresAt,
     emailDelivery,
-    devToken: !sent || emailDelivery.devToken ? rawToken : undefined,
+    devToken: emailDelivery.devToken,
   });
 }
 

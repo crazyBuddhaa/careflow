@@ -38,9 +38,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(rewriteUrl);
   }
 
+  if (tenant.kind === 'unknown-domain' && tenant.hostname) {
+    const rewriteUrl = request.nextUrl.clone();
+    rewriteUrl.pathname = `/portal/${tenant.hostname}${pathname === '/' ? '' : pathname}`;
+    return NextResponse.rewrite(rewriteUrl);
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
+

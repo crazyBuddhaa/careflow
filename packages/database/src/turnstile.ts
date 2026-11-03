@@ -47,14 +47,18 @@ export async function verifyTurnstileToken(
       ? envSource.TURNSTILE_SITE_KEY.trim()
       : '');
 
-  // In full application runtime (where NEXT_PUBLIC_APP_NAME or CAREFLOW_APP_BASE_URL is set),
+  const isProduction = envSource.NODE_ENV === 'production';
+
+  // In non-production development runtime (where NEXT_PUBLIC_APP_NAME or CAREFLOW_APP_BASE_URL is set),
   // only enforce Turnstile when the frontend also has a Site Key to render the widget.
-  const isAppRuntimeWithoutSiteKey =
+  // In production, Turnstile is strictly enforced.
+  const isDevAppRuntimeWithoutSiteKey =
+    !isProduction &&
     Boolean(envSource.NEXT_PUBLIC_APP_NAME || envSource.CAREFLOW_APP_BASE_URL) &&
     !configuredSiteKey &&
     !options.secretKey?.trim();
 
-  const configuredSecret = isAppRuntimeWithoutSiteKey ? '' : rawConfiguredSecret;
+  const configuredSecret = isDevAppRuntimeWithoutSiteKey ? '' : rawConfiguredSecret;
 
   // Explicit test failure token is always rejected
   if (token === DUMMY_FAIL_TOKEN) {
@@ -66,19 +70,30 @@ export async function verifyTurnstileToken(
     };
   }
 
-  // Explicit test pass token is accepted in non-production or test runs
-  if (token === DUMMY_PASS_TOKEN && envSource.NODE_ENV !== 'production') {
+  // Explicit test pass token is accepted only in non-production or test runs
+  if (token === DUMMY_PASS_TOKEN && !isProduction) {
     return {
       success: true,
       configured: Boolean(configuredSecret),
     };
   }
 
-  if (!configuredSecret && !options.requireToken) {
-    return {
-      success: true,
-      configured: false,
-    };
+  if (!configuredSecret) {
+    if (isProduction && (options.requireToken ?? Boolean(configuredSiteKey || envSource.CAREFLOW_ENFORCE_TURNSTILE !== 'false'))) {
+      return {
+        success: false,
+        configured: false,
+        errorCode: 'TURNSTILE_NOT_CONFIGURED',
+        errorMessage: 'Bot protection is required in production (TURNSTILE_SECRET_KEY is not configured).',
+      };
+    }
+
+    if (!options.requireToken) {
+      return {
+        success: true,
+        configured: false,
+      };
+    }
   }
 
   if (!token) {

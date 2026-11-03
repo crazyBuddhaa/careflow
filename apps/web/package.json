@@ -14,8 +14,6 @@
     "@careflow/support-engine": "workspace:*",
     "@careflow/validation": "workspace:*",
     "@opennextjs/cloudflare": "^1.20.15",
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.118.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "next": "^16.4.3",

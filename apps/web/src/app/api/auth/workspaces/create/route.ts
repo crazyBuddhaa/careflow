@@ -5,20 +5,29 @@ import {
   createSignedAdminSessionToken,
   getAdminCookieOptions,
   resolveServerAdminSession,
+  verifyRequestOriginCsrf,
 } from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
   jsonApiSuccess,
 } from '@/lib/api-response';
-import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
+import {
+  getAuthIdentityService,
+  getWorkspaceRepository,
+} from '@/lib/knowledge-runtime';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('CSRF_REJECTED', csrf.reason || 'Forbidden cross-origin request.', 403);
+    }
+
     const session = await resolveServerAdminSession();
-    if (!session.identity) {
+    if (!session.identity || !session.sessionToken) {
       return jsonApiError('UNAUTHORIZED', 'Authentication required to create a workspace.', 401);
     }
 
@@ -31,13 +40,20 @@ export async function POST(request: Request) {
 
     const input = CreateAdditionalBusinessSchema.parse(rawBody);
     const repo = await getWorkspaceRepository();
+    const authService = await getAuthIdentityService();
 
     const createdMembership = await repo.createAdditionalBusinessForUser(
       session.identity.userId,
       input
     );
 
-    // Switch active session to the newly created business workspace
+    // Update the active organization_id on the server-side D1 session
+    await authService.switchSessionWorkspace(
+      session.sessionToken,
+      createdMembership.organizationId
+    );
+
+    // Switch active session cookie to the newly created business workspace while preserving sessionToken
     const token = createSignedAdminSessionToken({
       userId: session.identity.userId,
       email: session.identity.email || 'admin@careflow.local',
@@ -46,6 +62,10 @@ export async function POST(request: Request) {
       organizationName: createdMembership.organizationName,
       organizationSlug: createdMembership.organizationSlug,
       role: createdMembership.role,
+      sessionId: session.sessionId,
+      sessionToken: session.sessionToken,
+      emailVerified: session.emailVerified,
+      mfaEnabled: session.mfaEnabled,
     });
 
     const cookieStore = await cookies();

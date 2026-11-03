@@ -249,4 +249,16 @@ export interface HealthCheckReport {
   version: string;
   status: 'operational' | 'degraded';
   timestamp: string;
+  database?: {
+    connected: boolean;
+    engine: 'd1-sqlite';
+    latencyMs: number;
+    errorMessage?: string;
+  };
+  security?: {
+    sessionSecretConfigured: boolean;
+    turnstileConfigured: boolean;
+    resendConfigured: boolean;
+  };
 }
+

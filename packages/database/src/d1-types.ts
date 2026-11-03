@@ -60,6 +60,8 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_organizations_active_status
+    ON organizations (is_active, onboarding_status, created_at ASC)`,
   `CREATE TABLE IF NOT EXISTS organization_members (
     id TEXT PRIMARY KEY NOT NULL,
     organization_id TEXT NOT NULL,
@@ -140,8 +142,11 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    UNIQUE (organization_id, slug)
+    UNIQUE (organization_id, slug),
+    UNIQUE (id, organization_id)
   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_categories_id_org
+    ON knowledge_categories (id, organization_id)`,
   `CREATE INDEX IF NOT EXISTS idx_knowledge_categories_org
     ON knowledge_categories (organization_id, display_order, name)`,
   `CREATE TABLE IF NOT EXISTS knowledge_articles (
@@ -165,6 +170,32 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     ON knowledge_articles (organization_id, status, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_knowledge_articles_org_category
     ON knowledge_articles (organization_id, category_id)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_knowledge_articles_category_tenant_insert
+    BEFORE INSERT ON knowledge_articles
+    FOR EACH ROW
+    WHEN NEW.category_id IS NOT NULL
+    BEGIN
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM knowledge_categories
+          WHERE id = NEW.category_id AND organization_id = NEW.organization_id
+        )
+        THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: knowledge_articles.category_id must belong to the same organization_id')
+      END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_knowledge_articles_category_tenant_update
+    BEFORE UPDATE ON knowledge_articles
+    FOR EACH ROW
+    WHEN NEW.category_id IS NOT NULL
+    BEGIN
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM knowledge_categories
+          WHERE id = NEW.category_id AND organization_id = NEW.organization_id
+        )
+        THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: knowledge_articles.category_id must belong to the same organization_id')
+      END;
+    END`,
   `CREATE TABLE IF NOT EXISTS knowledge_faqs (
     id TEXT PRIMARY KEY NOT NULL,
     organization_id TEXT NOT NULL,
@@ -183,6 +214,32 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     ON knowledge_faqs (organization_id, status, display_order)`,
   `CREATE INDEX IF NOT EXISTS idx_knowledge_faqs_org_category
     ON knowledge_faqs (organization_id, category_id)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_knowledge_faqs_category_tenant_insert
+    BEFORE INSERT ON knowledge_faqs
+    FOR EACH ROW
+    WHEN NEW.category_id IS NOT NULL
+    BEGIN
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM knowledge_categories
+          WHERE id = NEW.category_id AND organization_id = NEW.organization_id
+        )
+        THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: knowledge_faqs.category_id must belong to the same organization_id')
+      END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_knowledge_faqs_category_tenant_update
+    BEFORE UPDATE ON knowledge_faqs
+    FOR EACH ROW
+    WHEN NEW.category_id IS NOT NULL
+    BEGIN
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM knowledge_categories
+          WHERE id = NEW.category_id AND organization_id = NEW.organization_id
+        )
+        THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: knowledge_faqs.category_id must belong to the same organization_id')
+      END;
+    END`,
   `CREATE TABLE IF NOT EXISTS organization_portal_settings (
     organization_id TEXT PRIMARY KEY NOT NULL,
     settings_json TEXT NOT NULL,
@@ -219,10 +276,15 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     diagnostic_summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    UNIQUE (id, organization_id)
   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_support_conversations_id_org
+    ON support_conversations (id, organization_id)`,
   `CREATE INDEX IF NOT EXISTS idx_support_conversations_org_status
     ON support_conversations (organization_id, status, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_conversations_org_customer
+    ON support_conversations (organization_id, customer_email, updated_at DESC)`,
   `CREATE TABLE IF NOT EXISTS support_messages (
     id TEXT PRIMARY KEY NOT NULL,
     conversation_id TEXT NOT NULL,
@@ -232,13 +294,41 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     body TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (conversation_id) REFERENCES support_conversations(id) ON DELETE CASCADE,
-    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id, organization_id) REFERENCES support_conversations(id, organization_id) ON DELETE CASCADE
   )`,
   `CREATE INDEX IF NOT EXISTS idx_support_messages_conv
     ON support_messages (conversation_id, created_at ASC)`,
+  `CREATE INDEX IF NOT EXISTS idx_support_messages_org_conv
+    ON support_messages (organization_id, conversation_id, created_at ASC)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_support_messages_tenant_insert
+    BEFORE INSERT ON support_messages
+    FOR EACH ROW
+    BEGIN
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM support_conversations
+          WHERE id = NEW.conversation_id AND organization_id = NEW.organization_id
+        )
+        THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: support_messages.organization_id must match parent support_conversations.organization_id')
+      END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_support_messages_tenant_update
+    BEFORE UPDATE ON support_messages
+    FOR EACH ROW
+    BEGIN
+      SELECT CASE
+        WHEN NOT EXISTS (
+          SELECT 1 FROM support_conversations
+          WHERE id = NEW.conversation_id AND organization_id = NEW.organization_id
+        )
+        THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: support_messages.organization_id must match parent support_conversations.organization_id')
+      END;
+    END`,
 ];
 
 export const KNOWLEDGE_D1_MIGRATION_SQL = [
   'PRAGMA foreign_keys = ON;',
   ...KNOWLEDGE_D1_SCHEMA_STATEMENTS.map((stmt) => `${stmt};`),
 ].join('\n\n');
+

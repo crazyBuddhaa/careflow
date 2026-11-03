@@ -1,4 +1,5 @@
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import { UserRole } from '@careflow/shared';
+import { requireAuthorizedWorkspaceSession } from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -10,21 +11,21 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const { identity } = await resolveServerAdminSession();
-    if (!identity) {
-      return jsonApiError(
-        'UNAUTHORIZED',
-        'Authorized business administrator session is required.',
-        401
-      );
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Viewer);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     const url = new URL(request.url);
     const search = url.searchParams.get('search') ?? undefined;
     const repo = await getWorkspaceRepository();
-    const customers = await repo.listCustomers(identity.organizationId, search);
+    const customers = await repo.listCustomers(
+      auth.session.identity.organizationId,
+      search
+    );
     return jsonApiSuccess(customers);
   } catch (err) {
     return handleKnowledgeApiException(err);
   }
 }
+

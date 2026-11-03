@@ -1,4 +1,5 @@
 import { UserRole } from '@careflow/shared';
+import { hasMinimumRole } from '@careflow/support-engine';
 import {
   ReplyConversationSchema,
   UpdateConversationStatusSchema,
@@ -78,6 +79,24 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const input = UpdateConversationStatusSchema.parse(rawBody);
+
+    // Agents can claim unassigned conversations for themselves or update status,
+    // but reassigning conversations to other specialists requires Supervisor+ role.
+    if (
+      input.assignedAgentName !== undefined &&
+      !hasMinimumRole(auth.session.identity, UserRole.Supervisor)
+    ) {
+      const currentUserName = (auth.session.userName || '').trim().toLowerCase();
+      const targetName = (input.assignedAgentName || '').trim().toLowerCase();
+      if (targetName && targetName !== currentUserName) {
+        return jsonApiError(
+          'FORBIDDEN',
+          'Supervisor, Administrator, or Owner permissions are required to assign conversations to other specialists.',
+          403
+        );
+      }
+    }
+
     const repo = await getWorkspaceRepository();
     const updated = await repo.updateConversationStatus({
       organizationId: auth.session.identity.organizationId,
@@ -91,3 +110,4 @@ export async function PATCH(request: Request, context: RouteContext) {
     return handleKnowledgeApiException(err);
   }
 }
+
