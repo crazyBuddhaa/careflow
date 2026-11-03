@@ -171,7 +171,7 @@ export async function ensureTelegramBotIdentityAndWebhook(): Promise<{
     (typeof env?.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME === 'string' &&
       env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME.trim()) ||
     process.env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME?.trim() ||
-    'CustomCareBot';
+    'getcustomcarebot';
 
   if (!botToken) {
     return {
@@ -262,7 +262,7 @@ export async function getChannelIntegrationService(): Promise<D1ChannelIntegrati
     (typeof env?.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME === 'string' &&
       env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME.trim()) ||
     process.env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME?.trim() ||
-    'CustomCareBot';
+    'getcustomcarebot';
 
   const hasBotToken = Boolean(
     (typeof env?.TELEGRAM_BOT_TOKEN === 'string' && env.TELEGRAM_BOT_TOKEN.trim()) ||

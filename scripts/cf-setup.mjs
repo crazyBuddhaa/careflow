@@ -72,7 +72,7 @@ function buildWranglerConfig({ databaseName, databaseId, enableCustomDomainRoute
       CAREFLOW_EMAIL_FROM_ADDRESS: 'support@getcustomcare.xyz',
       CAREFLOW_ENFORCE_ADMIN_MFA: 'false',
       CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME:
-        loadRuntimeSecret('CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME') || 'CustomCareBot',
+        loadRuntimeSecret('CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME') || 'getcustomcarebot',
     },
   };
 
