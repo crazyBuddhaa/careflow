@@ -21,6 +21,7 @@ export enum EscalationPriority {
 
 export enum UserRole {
   Customer = 'customer',
+  Viewer = 'viewer',
   Agent = 'agent',
   Supervisor = 'supervisor',
   Admin = 'admin',
@@ -45,7 +46,85 @@ export interface CareFlowUserRecord {
   email: string;
   fullName: string;
   emailVerified: boolean;
+  mfaEnabled?: boolean;
   createdAt: string;
+}
+
+export interface AuthSessionRecord {
+  id: string;
+  userId: string;
+  organizationId: string;
+  userAgent: string;
+  ipAddress: string;
+  mfaVerified: boolean;
+  createdAt: string;
+  lastActiveAt: string;
+  expiresAt: string;
+  revokedAt?: string | null;
+  isCurrent?: boolean;
+}
+
+export interface AuthSecurityEventRecord {
+  id: string;
+  userId: string;
+  organizationId?: string | null;
+  eventType:
+    | 'account_registered'
+    | 'email_verification_requested'
+    | 'email_verified'
+    | 'login_succeeded'
+    | 'login_failed'
+    | 'login_mfa_challenged'
+    | 'password_reset_requested'
+    | 'password_reset_completed'
+    | 'password_changed'
+    | 'session_revoked'
+    | 'all_sessions_revoked'
+    | 'mfa_enrolled'
+    | 'mfa_disabled';
+  ipAddress: string;
+  userAgent: string;
+  metadataJson?: string;
+  createdAt: string;
+}
+
+export interface MfaEnrollmentSetupDto {
+  secret: string;
+  otpauthUri: string;
+  qrCodeSvgDataUrl: string;
+  issuer: string;
+  accountName: string;
+}
+
+export interface EmailDeliveryResult {
+  sent: boolean;
+  provider: 'resend' | 'unconfigured';
+  fromAddress?: string;
+  messageId?: string;
+  errorMessage?: string;
+  /**
+   * Populated only in local development/test mode when Resend or a custom domain
+   * is not configured, allowing end-to-end verification and password reset testing
+   * on the Cloudflare Workers deployment URL without owning a custom domain.
+   */
+  devPreviewUrl?: string;
+  devToken?: string;
+}
+
+export interface AccountSecurityOverviewDto {
+  user: CareFlowUserRecord;
+  mfaEnabled: boolean;
+  mfaRequiredForRole: boolean;
+  mfaEnforcementActive: boolean;
+  recoveryCodesRemaining: number;
+  activeSessions: AuthSessionRecord[];
+  recentEvents: AuthSecurityEventRecord[];
+  infrastructure: {
+    resendConfigured: boolean;
+    customSenderDomainConfigured: boolean;
+    turnstileConfigured: boolean;
+    appBaseUrl: string;
+  };
 }
 
 export interface UserWorkspaceMembership {

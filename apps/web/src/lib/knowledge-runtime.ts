@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import {
+  D1AuthIdentityService,
   D1KnowledgeRepository,
   D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
@@ -128,4 +129,9 @@ export async function getKnowledgeManagementService(): Promise<KnowledgeManageme
 export async function getWorkspaceRepository(): Promise<D1WorkspaceRepository> {
   const db = await getKnowledgeDatabase();
   return new D1WorkspaceRepository(db);
+}
+
+export async function getAuthIdentityService(): Promise<D1AuthIdentityService> {
+  const db = await getKnowledgeDatabase();
+  return new D1AuthIdentityService(db);
 }

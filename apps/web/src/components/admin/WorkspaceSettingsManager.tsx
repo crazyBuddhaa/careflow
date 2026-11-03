@@ -244,7 +244,7 @@ export function WorkspaceSettingsManager({
         contactEmail: contactEmail.trim() || undefined,
         supportHours: supportHours.trim(),
         verifiedHostnames:
-          parsedHosts.length > 0 ? parsedHosts : [`${organizationSlug}.careflow.com`],
+          parsedHosts.length > 0 ? parsedHosts : [`${organizationSlug}.getcustomcare.xyz`],
         branding: {
           ...config.branding,
           displayName: displayName.trim(),
@@ -543,7 +543,7 @@ export function WorkspaceSettingsManager({
                 Support Portal Address
               </label>
               <p className="mt-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-mono text-slate-600">
-                {config?.slug}.careflow.com
+                {config?.slug}.getcustomcare.xyz
               </p>
             </div>
 
@@ -1039,7 +1039,7 @@ export function WorkspaceSettingsManager({
             <div className="pt-6 border-t border-slate-100">
               <h2 className="text-sm font-bold text-slate-900">Resolution Order</h2>
               <p className="mt-1 text-xs text-slate-500">
-                CareFlow resolves customer enquiries in this order across your support portal.
+                CustomCare resolves customer enquiries in this order across your support portal.
               </p>
 
               <div className="mt-4 divide-y divide-slate-100 border-y border-slate-100">
@@ -1122,9 +1122,9 @@ export function WorkspaceSettingsManager({
                     onChange={(e) => setAiProvider(e.target.value as ExternalAiProviderKey)}
                     className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
                   >
-                    <option value="gemini">CareFlow Standard</option>
-                    <option value="groq">CareFlow Fast Response</option>
-                    <option value="openrouter">CareFlow Extended Reasoning</option>
+                    <option value="gemini">CustomCare Standard</option>
+                    <option value="groq">CustomCare Fast Response</option>
+                    <option value="openrouter">CustomCare Extended Reasoning</option>
                   </select>
                 </div>
 

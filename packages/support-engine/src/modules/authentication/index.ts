@@ -14,6 +14,7 @@ export interface AuthenticationPort {
 
 const ROLE_WEIGHT: Record<UserRole, number> = {
   [UserRole.Customer]: 10,
+  [UserRole.Viewer]: 15,
   [UserRole.Agent]: 20,
   [UserRole.Supervisor]: 30,
   [UserRole.Admin]: 40,

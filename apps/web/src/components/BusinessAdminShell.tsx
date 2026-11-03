@@ -24,6 +24,7 @@ import {
   Check,
   CheckCircle2,
   X,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   CAREFLOW_NAME,
@@ -46,6 +47,7 @@ import {
   type OperationsSubView,
 } from '@/components/admin/WorkspaceOperationsManager';
 import { WorkspaceOnboardingGuide } from '@/components/admin/WorkspaceOnboardingGuide';
+import { AccountSecurityManager } from '@/components/admin/AccountSecurityManager';
 
 interface AdminModuleDescriptor {
   key: AdminModuleSectionKey;
@@ -133,6 +135,12 @@ const ADMIN_MODULES: AdminModuleDescriptor[] = [
     group: 'Operations',
     icon: BarChart3,
   },
+  {
+    key: 'account-security',
+    title: 'Account & Security',
+    group: 'Configuration',
+    icon: ShieldCheck,
+  },
 ];
 
 const KNOWLEDGE_KEYS = new Set<AdminModuleSectionKey>([
@@ -168,9 +176,11 @@ export function BusinessAdminShell() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Sign-in gate form state
-  const [authTab, setAuthTab] = useState<'account' | 'workspace_code'>('account');
+  const [authTab, setAuthTab] = useState<'account' | 'mfa' | 'workspace_code'>('account');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [mfaChallengeToken, setMfaChallengeToken] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
   const [workspaceIdentifier, setWorkspaceIdentifier] = useState('');
   const [passcode, setPasscode] = useState('');
   const [signingIn, setSigningIn] = useState(false);
@@ -270,10 +280,50 @@ export function BusinessAdminShell() {
         return;
       }
 
+      if (body.data?.mfaRequired && body.data?.mfaChallengeToken) {
+        setMfaChallengeToken(body.data.mfaChallengeToken);
+        setMfaCode('');
+        setAuthTab('mfa');
+        return;
+      }
+
       setLoginPassword('');
       await loadSession();
     } catch {
       setAuthError('Unable to reach account authentication service.');
+    } finally {
+      setSigningIn(false);
+    }
+  }
+
+  async function handleMfaChallengeSignIn(event: React.FormEvent) {
+    event.preventDefault();
+    setSigningIn(true);
+    setAuthError(null);
+
+    try {
+      const res = await fetch('/api/auth/mfa/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mfaChallengeToken,
+          code: mfaCode.trim(),
+        }),
+      });
+
+      const body = await res.json();
+      if (!body.ok) {
+        setAuthError(body.error?.message || 'Invalid MFA verification code.');
+        return;
+      }
+
+      setMfaChallengeToken('');
+      setMfaCode('');
+      setLoginPassword('');
+      setAuthTab('account');
+      await loadSession();
+    } catch {
+      setAuthError('Unable to verify MFA security code.');
     } finally {
       setSigningIn(false);
     }
@@ -469,7 +519,7 @@ export function BusinessAdminShell() {
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed">
-              Provision a new isolated workspace under your current CareFlow account. Each business
+              Provision a new isolated workspace under your current CustomCare account. Each business
               maintains its own distinct knowledge base, support configurations, branding, and team.
             </p>
 
@@ -585,7 +635,7 @@ export function BusinessAdminShell() {
                 Sign In to Your Workspace
               </h1>
               <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Sign in with your CareFlow account email and password, or use a workspace passcode.
+                Sign in with your CustomCare account email and password, or use a workspace passcode.
               </p>
             </div>
 
@@ -670,6 +720,40 @@ export function BusinessAdminShell() {
                   className="w-full py-2.5 px-5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-60 rounded-xl transition-colors cursor-pointer"
                 >
                   {signingIn ? 'Signing In...' : 'Sign In to Dashboard'}
+                </button>
+              </form>
+            ) : authTab === 'mfa' ? (
+              <form onSubmit={handleMfaChallengeSignIn} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="mfaCodeAdmin"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
+                  >
+                    6-Digit Authenticator or Recovery Code
+                  </label>
+                  <input
+                    id="mfaCodeAdmin"
+                    type="text"
+                    required
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="123456 or ABCD-EFGH"
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-mono text-slate-900 focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
+
+                {authError && (
+                  <p role="alert" className="text-xs font-semibold text-rose-700">
+                    {authError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={signingIn || mfaCode.trim().length < 6}
+                  className="w-full py-2.5 px-5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-60 rounded-xl transition-colors cursor-pointer"
+                >
+                  {signingIn ? 'Verifying...' : 'Verify MFA & Sign In'}
                 </button>
               </form>
             ) : (
@@ -791,6 +875,11 @@ export function BusinessAdminShell() {
                 organizationSlug={activeSession.organizationSlug}
                 onNavigateSection={(sec) => setSelectedKey(sec)}
                 onPortalPublished={() => void loadSession()}
+              />
+            ) : selectedKey === 'account-security' ? (
+              <AccountSecurityManager
+                key={activeSession.userId}
+                onSessionUpdated={() => void loadSession()}
               />
             ) : KNOWLEDGE_KEYS.has(selectedKey) ? (
               <KnowledgeAdminManager

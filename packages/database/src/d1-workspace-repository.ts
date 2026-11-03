@@ -30,7 +30,12 @@ import {
   ULTIMATE_TECH_APP_PRESET,
   buildDefaultPortalConfigForNewBusiness,
 } from './d1-portal-presets';
-import { hashPassword, verifyPassword } from './password-auth';
+import {
+  generateSecureToken,
+  hashPassword,
+  hashTokenSha256,
+  verifyPassword,
+} from './password-auth';
 
 interface OrgRow {
   id: string;
@@ -51,6 +56,7 @@ interface UserRow {
   full_name: string;
   password_hash: string;
   email_verified: number;
+  mfa_enabled?: number;
   created_at: string;
   updated_at: string;
 }
@@ -321,6 +327,7 @@ export class D1WorkspaceRepository {
       const base = await this.loadBaseSettingsForOrg(org);
       if (
         base.verifiedHostnames.some((h) => h.toLowerCase() === normalizedHost) ||
+        normalizedHost === `${org.slug}.getcustomcare.xyz` ||
         normalizedHost === `${org.slug}.careflow.com` ||
         normalizedHost === `${org.slug}.localhost`
       ) {
@@ -368,7 +375,7 @@ export class D1WorkspaceRepository {
         portalSubtitle: base.branding.portalSubtitle,
         welcomeHeadline: base.welcomeHeadline,
         accentTheme: base.branding.accentTheme,
-        verifiedHostname: base.verifiedHostnames[0] ?? `${org.slug}.careflow.com`,
+        verifiedHostname: base.verifiedHostnames[0] ?? `${org.slug}.getcustomcare.xyz`,
         publishedArticleCount: Number(artCountRow?.cnt ?? 0),
         publishedFaqCount: Number(faqCountRow?.cnt ?? 0),
       });
@@ -494,7 +501,7 @@ export class D1WorkspaceRepository {
     const slug = input.slug.trim().toLowerCase();
     const reservedSlugs = new Set(['www', 'app', 'admin', 'api', 'portal', 'portals', 'login', 'onboarding']);
     if (reservedSlugs.has(slug)) {
-      throw new Error(`The portal slug "${slug}" is reserved by CareFlow.`);
+      throw new Error(`The portal slug "${slug}" is reserved by CustomCare.`);
     }
 
     const existing = await this.db
@@ -1326,6 +1333,9 @@ export class D1WorkspaceRepository {
     industry: string;
     country: string;
     website?: string;
+    requireEmailVerification?: boolean;
+    ipAddress?: string;
+    userAgent?: string;
   }): Promise<{
     user: CareFlowUserRecord;
     organization: {
@@ -1338,6 +1348,8 @@ export class D1WorkspaceRepository {
       website?: string;
       onboardingStatus: BusinessOnboardingStatus;
     };
+    verificationToken: string;
+    verificationExpiresAt: string;
   }> {
     const email = input.email.trim().toLowerCase();
     const existingUser = await this.db
@@ -1349,16 +1361,30 @@ export class D1WorkspaceRepository {
       throw new Error('An account with this email address already exists. Please sign in.');
     }
 
-    const now = new Date().toISOString();
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
     const userId = `usr_${Math.random().toString(36).slice(2, 10)}`;
     const passwordHash = hashPassword(input.password);
+    const initialVerifiedFlag = input.requireEmailVerification ? 0 : 1;
 
     await this.db
       .prepare(
-        `INSERT INTO users (id, email, full_name, password_hash, email_verified, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 1, ?, ?)`
+        `INSERT INTO users (id, email, full_name, password_hash, email_verified, mfa_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?)`
       )
-      .bind(userId, email, input.fullName.trim(), passwordHash, now, now)
+      .bind(userId, email, input.fullName.trim(), passwordHash, initialVerifiedFlag, now, now)
+      .run();
+
+    // Generate cryptographically random single-use email verification token (store only SHA-256 hash)
+    const { rawToken: verificationToken, tokenHash } = generateSecureToken(32);
+    const verificationExpiresAt = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
+
+    await this.db
+      .prepare(
+        `INSERT INTO auth_tokens (id, user_id, token_hash, token_type, expires_at, used_at, created_at)
+         VALUES (?, ?, ?, 'email_verification', ?, NULL, ?)`
+      )
+      .bind(createId('tok'), userId, tokenHash, verificationExpiresAt, now)
       .run();
 
     // Generate unique slug
@@ -1415,6 +1441,24 @@ export class D1WorkspaceRepository {
       .bind(memberId, organizationId, userId, now, now)
       .run();
 
+    // Record account registration security event
+    await this.db
+      .prepare(
+        `INSERT INTO auth_security_events
+           (id, user_id, organization_id, event_type, ip_address, user_agent, metadata_json, created_at)
+         VALUES (?, ?, ?, 'account_registered', ?, ?, ?, ?)`
+      )
+      .bind(
+        createId('sec'),
+        userId,
+        organizationId,
+        input.ipAddress ?? '',
+        input.userAgent ?? '',
+        JSON.stringify({ businessName: input.businessName.trim() }),
+        now
+      )
+      .run();
+
     // Initialize default portal settings
     const portalConfig = buildDefaultPortalConfigForNewBusiness({
       organizationId,
@@ -1464,7 +1508,8 @@ export class D1WorkspaceRepository {
         id: userId,
         email,
         fullName: input.fullName.trim(),
-        emailVerified: true,
+        emailVerified: Boolean(initialVerifiedFlag),
+        mfaEnabled: false,
         createdAt: now,
       },
       organization: {
@@ -1477,6 +1522,8 @@ export class D1WorkspaceRepository {
         website,
         onboardingStatus: 'incomplete',
       },
+      verificationToken,
+      verificationExpiresAt,
     };
   }
 
@@ -1490,7 +1537,10 @@ export class D1WorkspaceRepository {
   } | null> {
     const email = emailInput.trim().toLowerCase();
     const userRow = await this.db
-      .prepare(`SELECT id, email, full_name, password_hash, email_verified, created_at, updated_at FROM users WHERE email = ?`)
+      .prepare(
+        `SELECT id, email, full_name, password_hash, email_verified, mfa_enabled, created_at, updated_at
+         FROM users WHERE email = ?`
+      )
       .bind(email)
       .first<UserRow>();
 
@@ -1514,6 +1564,7 @@ export class D1WorkspaceRepository {
         email: userRow.email,
         fullName: userRow.full_name,
         emailVerified: Boolean(userRow.email_verified),
+        mfaEnabled: Boolean(userRow.mfa_enabled),
         createdAt: userRow.created_at,
       },
       activeMembership: workspaces[0],

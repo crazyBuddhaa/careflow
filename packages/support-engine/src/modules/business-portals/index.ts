@@ -13,6 +13,10 @@ export interface BusinessPortalRegistryPort {
 }
 
 const DEFAULT_PLATFORM_DOMAINS = [
+  'getcustomcare.xyz',
+  'www.getcustomcare.xyz',
+  'customcare.com',
+  'www.customcare.com',
   'careflow.com',
   'www.careflow.com',
   'localhost',
@@ -21,7 +25,7 @@ const DEFAULT_PLATFORM_DOMAINS = [
 
 /**
  * Normalizes an incoming HTTP Host header (stripping port and lowercasing)
- * and determines whether the request targets the central CareFlow platform
+ * and determines whether the request targets the central CustomCare platform
  * or a tenant subdomain / custom hostname.
  *
  * Security rule: Tenant resolution is derived strictly from the server-verified
@@ -52,8 +56,8 @@ export function classifyTenantHostname(
     return { kind: 'central-platform', hostname: cleaned };
   }
 
-  // Subdomain of *.careflow.com or *.localhost (e.g., ultimatetechapp.careflow.com or ultimatetechapp.localhost)
-  for (const base of ['careflow.com', 'localhost']) {
+  // Subdomain of *.getcustomcare.xyz, *.customcare.com, *.careflow.com, or *.localhost
+  for (const base of ['getcustomcare.xyz', 'customcare.com', 'careflow.com', 'localhost']) {
     const suffix = `.${base}`;
     if (cleaned.endsWith(suffix)) {
       const sub = cleaned.slice(0, -suffix.length);

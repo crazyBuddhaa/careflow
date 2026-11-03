@@ -24,13 +24,13 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CareFlow — Smarter Support. Better Experiences.',
+  title: 'CustomCare — Smarter Support. Better Experiences.',
   description:
-    'CareFlow helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
+    'CustomCare helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
   openGraph: {
-    title: 'CareFlow — Smarter Support. Better Experiences.',
+    title: 'CustomCare — Smarter Support. Better Experiences.',
     description:
-      'CareFlow helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
+      'CustomCare helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
     type: 'website',
   },
 };

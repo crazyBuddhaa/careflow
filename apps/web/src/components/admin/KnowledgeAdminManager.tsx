@@ -574,7 +574,7 @@ export function KnowledgeAdminManager({
                 </h1>
                 <p className="mt-2 text-sm text-slate-600 max-w-2xl">
                   Organize your categories, help articles, and approved FAQs. Published items
-                  immediately power answers across your CareFlow support portal.
+                  immediately power answers across your CustomCare support portal.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3 shrink-0">

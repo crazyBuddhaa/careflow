@@ -45,7 +45,7 @@ const DEMO_SCENARIOS: DemoIndustryScenario[] = [
     id: 'fintech',
     label: 'Fintech & Payments',
     companyExample: 'Aurelia Pay',
-    portalDomain: 'aureliapay.careflow.com',
+    portalDomain: 'aureliapay.getcustomcare.xyz',
     summary: 'Resolve payment confirmation, payout schedules, and account verification without queue bottlenecks.',
     prompts: [
       {
@@ -85,7 +85,7 @@ const DEMO_SCENARIOS: DemoIndustryScenario[] = [
     id: 'ecommerce',
     label: 'E-Commerce & Retail',
     companyExample: 'Northstar Goods',
-    portalDomain: 'northstar.careflow.com',
+    portalDomain: 'northstar.getcustomcare.xyz',
     summary: 'Turn "Where is my order?", size exchanges, and invoice requests into effortless self-service.',
     prompts: [
       {
@@ -125,7 +125,7 @@ const DEMO_SCENARIOS: DemoIndustryScenario[] = [
     id: 'software',
     label: 'Software & Digital Services',
     companyExample: 'Veloce Cloud',
-    portalDomain: 'veloce.careflow.com',
+    portalDomain: 'veloce.getcustomcare.xyz',
     summary: 'Guide users through product setup, team permissions, and billing questions around the clock.',
     prompts: [
       {
@@ -167,7 +167,7 @@ const CORE_FEATURES = [
   {
     title: 'Branded Customer Support Portals',
     description:
-      'Launch a polished support center on your own CareFlow subdomain with your company name, accent theme, welcome headline, and support hours.',
+      'Launch a polished support center on your own CustomCare subdomain with your company name, accent theme, welcome headline, and support hours.',
     icon: Globe,
   },
   {
@@ -207,7 +207,7 @@ const LAUNCH_STEPS = [
     step: '01',
     title: 'Customize your brand & portal',
     description:
-      'Set your company name, CareFlow subdomain, visual theme, welcome message, and assistant tone in a guided setup flow.',
+      'Set your company name, CustomCare subdomain, visual theme, welcome message, and assistant tone in a guided setup flow.',
   },
   {
     step: '02',
@@ -219,34 +219,34 @@ const LAUNCH_STEPS = [
     step: '03',
     title: 'Share your portal & resolve faster',
     description:
-      'Customers get instant, accurate answers 24/7—and your team handles complex requests from one organized CareFlow inbox.',
+      'Customers get instant, accurate answers 24/7—and your team handles complex requests from one organized CustomCare inbox.',
   },
 ];
 
 const BUYER_FAQS = [
   {
     id: 'faq-1',
-    question: 'How quickly can we launch a CareFlow portal for our customers?',
+    question: 'How quickly can we launch a CustomCare portal for our customers?',
     answer:
-      'You can create your workspace and launch a live, branded customer support portal in minutes. CareFlow sets up your starter categories, welcome experience, and assistant immediately so you can refine articles and FAQs at your own pace.',
+      'You can create your workspace and launch a live, branded customer support portal in minutes. CustomCare sets up your starter categories, welcome experience, and assistant immediately so you can refine articles and FAQs at your own pace.',
   },
   {
     id: 'faq-2',
     question: 'Will the assistant ever make up policies, prices, or promises?',
     answer:
-      'No. CareFlow prioritizes your approved FAQs, published help articles, and step-by-step procedures first, and enforces your out-of-scope topic rules so unrelated or sensitive questions are declined cleanly rather than guessed.',
+      'No. CustomCare prioritizes your approved FAQs, published help articles, and step-by-step procedures first, and enforces your out-of-scope topic rules so unrelated or sensitive questions are declined cleanly rather than guessed.',
   },
   {
     id: 'faq-3',
     question: 'What happens when a customer needs a real person on our team?',
     answer:
-      'At any point, customers can request human support. CareFlow captures their name, email, order or transaction reference, selected category, and recent conversation steps—placing the complete thread directly into your workspace inbox.',
+      'At any point, customers can request human support. CustomCare captures their name, email, order or transaction reference, selected category, and recent conversation steps—placing the complete thread directly into your workspace inbox.',
   },
   {
     id: 'faq-4',
     question: 'Can we update our branding, articles, and assistant rules anytime?',
     answer:
-      'Yes. Sign in to your CareFlow workspace anytime to publish or unpublish articles, update FAQs, adjust troubleshooting steps, refine assistant tone, and reply to customer conversations with zero engineering work.',
+      'Yes. Sign in to your CustomCare workspace anytime to publish or unpublish articles, update FAQs, adjust troubleshooting steps, refine assistant tone, and reply to customer conversations with zero engineering work.',
   },
 ];
 
@@ -281,7 +281,7 @@ export function CentralPlatformHome() {
 
           {/* Zone 2: Concise single-line navigation links */}
           <nav
-            aria-label="CareFlow Navigation"
+            aria-label="CustomCare Navigation"
             className="hidden md:flex items-center gap-7 text-sm font-semibold text-slate-600"
           >
             <a
@@ -454,7 +454,7 @@ export function CentralPlatformHome() {
                   <div className="aspect-[4/3] w-full overflow-hidden">
                     <img
                       src="/images/careflow-hero.jpg"
-                      alt="Customer support director welcoming customers in a sunlit CareFlow studio"
+                      alt="Customer support director welcoming customers in a sunlit CustomCare studio"
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                     />

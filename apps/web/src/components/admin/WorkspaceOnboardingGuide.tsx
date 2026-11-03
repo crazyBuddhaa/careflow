@@ -514,7 +514,7 @@ export function WorkspaceOnboardingGuide({
                     className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
                   />
                   <p className="mt-1 text-[11px] text-slate-500">
-                    Public support contact email shown to customers (separate from your CareFlow account login email).
+                    Public support contact email shown to customers (separate from your CustomCare account login email).
                   </p>
                 </div>
 
@@ -980,7 +980,7 @@ export function WorkspaceOnboardingGuide({
             <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900 leading-relaxed flex items-start gap-3">
               <HelpCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold">Knowledge Coverage Notice:</span> CareFlow does not require a
+                <span className="font-bold">Knowledge Coverage Notice:</span> CustomCare does not require a
                 minimum number of articles to complete registration, and never invents policies or
                 prices. However, an empty knowledge base limits the assistant’s ability to provide
                 accurate business-specific answers.
@@ -1085,7 +1085,7 @@ export function WorkspaceOnboardingGuide({
                     className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
                   />
                   <p className="mt-1 text-[11px] text-slate-500">
-                    Must be defined by your business. CareFlow never invents response-time guarantees.
+                    Must be defined by your business. CustomCare never invents response-time guarantees.
                   </p>
                 </div>
 
@@ -1252,7 +1252,7 @@ export function WorkspaceOnboardingGuide({
                     type="text"
                     value={assistantName}
                     onChange={(e) => setAssistantName(e.target.value)}
-                    placeholder="e.g. CareFlow Guide"
+                    placeholder="e.g. CustomCare Guide"
                     className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
                   />
                 </div>

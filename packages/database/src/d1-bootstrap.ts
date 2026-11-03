@@ -68,21 +68,76 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     await db.prepare(statement).run();
   }
 
-  // Safe migrations for pre-existing databases that had an older organizations schema
-  const orgColumnAdditions = [
+  // Safe migrations for pre-existing databases that had an older organizations or users schema
+  const schemaAlterations = [
     `ALTER TABLE organizations ADD COLUMN country TEXT NOT NULL DEFAULT 'United States'`,
     `ALTER TABLE organizations ADD COLUMN industry TEXT NOT NULL DEFAULT 'Technology'`,
     `ALTER TABLE organizations ADD COLUMN website TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE organizations ADD COLUMN onboarding_status TEXT NOT NULL DEFAULT 'incomplete'`,
     `ALTER TABLE organizations ADD COLUMN onboarding_step INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE organizations ADD COLUMN created_by_user_id TEXT`,
+    `ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN mfa_secret TEXT`,
+    `ALTER TABLE users ADD COLUMN mfa_pending_secret TEXT`,
+    `ALTER TABLE users ADD COLUMN mfa_recovery_codes_json TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE users ADD COLUMN mfa_verified_at TEXT`,
+    `ALTER TABLE users ADD COLUMN password_changed_at TEXT`,
   ];
-  for (const alterSql of orgColumnAdditions) {
+  for (const alterSql of schemaAlterations) {
     try {
       await db.prepare(alterSql).run();
     } catch {
       // Column already exists or already upgraded
     }
+  }
+
+  try {
+    const memberTableMeta = await db
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'organization_members'`
+      )
+      .first<{ sql: string }>();
+    if (memberTableMeta?.sql && !memberTableMeta.sql.includes("'viewer'")) {
+      await db
+        .prepare(
+          `CREATE TABLE organization_members_v2 (
+            id TEXT PRIMARY KEY NOT NULL,
+            organization_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('owner', 'admin', 'supervisor', 'agent', 'viewer')),
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE (organization_id, user_id)
+          )`
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO organization_members_v2
+           SELECT id, organization_id, user_id, role, is_active, created_at, updated_at
+           FROM organization_members`
+        )
+        .run();
+      await db.prepare(`DROP TABLE organization_members`).run();
+      await db
+        .prepare(`ALTER TABLE organization_members_v2 RENAME TO organization_members`)
+        .run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members (user_id, is_active)`
+        )
+        .run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members (organization_id, is_active)`
+        )
+        .run();
+    }
+  } catch {
+    // Table already upgraded
   }
 
   const now = new Date().toISOString();

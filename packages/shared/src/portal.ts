@@ -262,7 +262,8 @@ export type AdminModuleSectionKey =
   | 'agents'
   | 'conversations'
   | 'customers'
-  | 'analytics';
+  | 'analytics'
+  | 'account-security';
 
 export interface OnboardingStepItemStatus {
   step: number;

@@ -5,12 +5,16 @@ import type {
 } from '@careflow/shared';
 
 const ULTIMATE_TECH_APP_GREETING =
-  'Hi! 👋 Welcome to CareFlow. What can I help you with today?';
+  'Hi! 👋 Welcome to CustomCare. What can I help you with today?';
 
 export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
   organizationId: 'org_ultimatetechapp',
   slug: 'ultimatetechapp',
-  verifiedHostnames: ['ultimatetechapp.careflow.com', 'ultimatetechapp.localhost'],
+  verifiedHostnames: [
+    'ultimatetechapp.getcustomcare.xyz',
+    'ultimatetechapp.careflow.com',
+    'ultimatetechapp.localhost',
+  ],
   contactEmail: 'support@ultimatetechapp.example',
   supportHours: 'Monday – Saturday · 08:00 – 20:00 UTC',
   branding: {
@@ -148,7 +152,7 @@ export const ULTIMATE_TECH_APP_PRESET: BusinessPortalConfig = {
     },
   ],
   chatbot: {
-    assistantName: 'CareFlow Assistant',
+    assistantName: 'CustomCare Assistant',
     assistantSubtitle: 'UltimateTechApp · Guided & Knowledge Support',
     initialGreeting: ULTIMATE_TECH_APP_GREETING,
     supportedTopics: [
@@ -452,7 +456,11 @@ const NORTHSTAR_GREETING =
 export const NORTHSTAR_COMMERCE_PRESET: BusinessPortalConfig = {
   organizationId: 'org_northstar_commerce',
   slug: 'northstar-commerce',
-  verifiedHostnames: ['northstar-commerce.careflow.com', 'northstar-commerce.localhost'],
+  verifiedHostnames: [
+    'northstar-commerce.getcustomcare.xyz',
+    'northstar-commerce.careflow.com',
+    'northstar-commerce.localhost',
+  ],
   contactEmail: 'care@northstar-commerce.example',
   supportHours: 'Daily · 07:00 – 22:00 UTC',
   branding: {
@@ -726,7 +734,7 @@ export function buildDefaultPortalConfigForNewBusiness(params: {
   return {
     organizationId,
     slug,
-    verifiedHostnames: [`${slug}.careflow.com`, `${slug}.localhost`],
+    verifiedHostnames: [`${slug}.getcustomcare.xyz`, `${slug}.localhost`],
     contactEmail,
     supportHours: '',
     branding: {

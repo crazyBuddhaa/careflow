@@ -28,7 +28,7 @@ export async function POST(request: Request) {
           slug: created.slug,
           displayName: created.displayName,
           portalPath: `/portal/${created.slug}`,
-          verifiedHostname: `${created.slug}.careflow.com`,
+          verifiedHostname: `${created.slug}.getcustomcare.xyz`,
         },
         201
       );

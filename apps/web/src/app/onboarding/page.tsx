@@ -6,8 +6,8 @@ import { CAREFLOW_NAME } from '@careflow/shared';
 import { BusinessOnboardingFlow } from '@/components/BusinessOnboardingFlow';
 
 export const metadata: Metadata = {
-  title: 'Get Started — CareFlow',
-  description: 'Launch your branded customer support portal and workspace on CareFlow.',
+  title: 'Get Started — CustomCare',
+  description: 'Launch your branded customer support portal and workspace on CustomCare.',
 };
 
 export default function OnboardingPage() {
@@ -42,7 +42,7 @@ export default function OnboardingPage() {
         <div className="max-w-2xl mb-10">
           <p className="text-xs font-semibold text-teal-700">{CAREFLOW_NAME} Workspace Setup</p>
           <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 text-balance">
-            Launch your dedicated support portal on CareFlow
+            Launch your dedicated support portal on CustomCare
           </h1>
           <p className="mt-3 text-base text-slate-600 leading-relaxed">
             Set up your branded customer support portal, organized knowledge base, and guided

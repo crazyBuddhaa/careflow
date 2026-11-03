@@ -1,8 +1,12 @@
+import { UserRole } from '@careflow/shared';
 import {
   ReplyConversationSchema,
   UpdateConversationStatusSchema,
 } from '@careflow/validation';
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import {
+  requireAuthorizedWorkspaceSession,
+  verifyRequestOriginCsrf,
+} from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -18,13 +22,14 @@ interface RouteContext {
 
 export async function POST(request: Request, context: RouteContext) {
   try {
-    const { identity, organizationName } = await resolveServerAdminSession();
-    if (!identity) {
-      return jsonApiError(
-        'UNAUTHORIZED',
-        'Authorized business administrator session is required.',
-        401
-      );
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Agent);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     const { conversationId } = await context.params;
@@ -38,9 +43,10 @@ export async function POST(request: Request, context: RouteContext) {
     const input = ReplyConversationSchema.parse(rawBody);
     const repo = await getWorkspaceRepository();
     const updated = await repo.replyToConversation({
-      organizationId: identity.organizationId,
+      organizationId: auth.session.identity.organizationId,
       conversationId,
-      senderName: input.senderName ?? `${organizationName ?? 'Workspace'} Support`,
+      senderName:
+        input.senderName ?? `${auth.session.organizationName ?? 'Workspace'} Support`,
       body: input.body,
       nextStatus: input.nextStatus,
     });
@@ -53,13 +59,14 @@ export async function POST(request: Request, context: RouteContext) {
 
 export async function PATCH(request: Request, context: RouteContext) {
   try {
-    const { identity } = await resolveServerAdminSession();
-    if (!identity) {
-      return jsonApiError(
-        'UNAUTHORIZED',
-        'Authorized business administrator session is required.',
-        401
-      );
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Agent);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     const { conversationId } = await context.params;
@@ -73,7 +80,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const input = UpdateConversationStatusSchema.parse(rawBody);
     const repo = await getWorkspaceRepository();
     const updated = await repo.updateConversationStatus({
-      organizationId: identity.organizationId,
+      organizationId: auth.session.identity.organizationId,
       conversationId,
       status: input.status,
       assignedAgentName: input.assignedAgentName,

@@ -1,5 +1,9 @@
+import { UserRole } from '@careflow/shared';
 import { UpdateWorkspaceSettingsSchema } from '@careflow/validation';
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import {
+  requireAuthorizedWorkspaceSession,
+  verifyRequestOriginCsrf,
+} from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -11,17 +15,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const { identity } = await resolveServerAdminSession();
-    if (!identity) {
-      return jsonApiError(
-        'UNAUTHORIZED',
-        'Authorized business administrator session is required.',
-        401
-      );
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Viewer);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     const repo = await getWorkspaceRepository();
-    const settings = await repo.getWorkspaceSettings(identity.organizationId);
+    const settings = await repo.getWorkspaceSettings(auth.session.identity.organizationId);
     return jsonApiSuccess(settings);
   } catch (err) {
     return handleKnowledgeApiException(err);
@@ -30,13 +30,14 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const { identity } = await resolveServerAdminSession();
-    if (!identity) {
-      return jsonApiError(
-        'UNAUTHORIZED',
-        'Authorized business administrator session is required.',
-        401
-      );
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Admin);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     let rawBody: unknown;
@@ -48,7 +49,7 @@ export async function PATCH(request: Request) {
 
     const patch = UpdateWorkspaceSettingsSchema.parse(rawBody);
     const repo = await getWorkspaceRepository();
-    const updated = await repo.updateWorkspaceSettings(identity.organizationId, patch);
+    const updated = await repo.updateWorkspaceSettings(auth.session.identity.organizationId, patch);
     return jsonApiSuccess(updated);
   } catch (err) {
     return handleKnowledgeApiException(err);

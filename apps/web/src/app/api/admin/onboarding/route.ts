@@ -1,5 +1,9 @@
+import { UserRole } from '@careflow/shared';
 import { SaveOnboardingStepSchema } from '@careflow/validation';
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import {
+  requireAuthorizedWorkspaceSession,
+  verifyRequestOriginCsrf,
+} from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -11,13 +15,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const session = await resolveServerAdminSession();
-    if (!session.identity) {
-      return jsonApiError('UNAUTHORIZED', 'Authentication required.', 401);
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Viewer);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     const repo = await getWorkspaceRepository();
-    const progress = await repo.getOnboardingProgress(session.identity.organizationId);
+    const progress = await repo.getOnboardingProgress(auth.session.identity.organizationId);
 
     return jsonApiSuccess(progress);
   } catch (err) {
@@ -27,9 +31,14 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const session = await resolveServerAdminSession();
-    if (!session.identity) {
-      return jsonApiError('UNAUTHORIZED', 'Authentication required.', 401);
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Admin);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     let rawBody: unknown;
@@ -43,7 +52,7 @@ export async function PATCH(request: Request) {
     const repo = await getWorkspaceRepository();
 
     const updated = await repo.saveOnboardingStep(
-      session.identity.organizationId,
+      auth.session.identity.organizationId,
       input.step,
       input
     );

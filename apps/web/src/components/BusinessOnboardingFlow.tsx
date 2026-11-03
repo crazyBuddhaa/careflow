@@ -211,7 +211,7 @@ export function BusinessOnboardingFlow() {
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500 font-sans">Portal URL:</span>
-            <span className="font-bold">{successInfo.slug}.careflow.com</span>
+            <span className="font-bold">{successInfo.slug}.getcustomcare.xyz</span>
           </div>
         </div>
 
@@ -285,7 +285,7 @@ export function BusinessOnboardingFlow() {
           <div>
             <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
               <User className="w-6 h-6 text-teal-600" aria-hidden="true" />
-              <span>Create your CareFlow account</span>
+              <span>Create your CustomCare account</span>
             </h2>
             <p className="mt-1.5 text-xs sm:text-sm text-slate-600 leading-relaxed">
               One account allows you to create and manage multiple businesses with isolated portals,
@@ -432,7 +432,7 @@ export function BusinessOnboardingFlow() {
                   className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
                 />
                 <span className="text-xs text-slate-600 leading-relaxed">
-                  I agree to the <span className="font-semibold text-slate-900">CareFlow Terms of Service</span> and{' '}
+                  I agree to the <span className="font-semibold text-slate-900">CustomCare Terms of Service</span> and{' '}
                   <span className="font-semibold text-slate-900">Privacy Policy</span>.
                 </span>
               </label>
@@ -494,7 +494,7 @@ export function BusinessOnboardingFlow() {
               <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500 font-mono">
                 <Globe className="w-3.5 h-3.5 text-slate-400" />
                 <span>Portal preview URL:</span>
-                <span className="font-semibold text-teal-700">{generatedSlugPreview}.careflow.com</span>
+                <span className="font-semibold text-teal-700">{generatedSlugPreview}.getcustomcare.xyz</span>
               </div>
             </div>
 

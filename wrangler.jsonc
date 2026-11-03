@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "careflow",
+  "name": "customcare",
   "main": "apps/web/.open-next/worker.js",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": [
@@ -17,22 +17,18 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "careflow"
+      "service": "customcare"
     }
-  ]
-  // ---------------------------------------------------------------------------
-  // Cloudflare D1 Database Binding (Required for persistent Stage 1 Knowledge Base)
-  // 1. Create database: npx wrangler d1 create careflow-db
-  // 2. Apply schema (optional — CareFlow also auto-bootstraps tables on first request):
-  //    npx wrangler d1 migrations apply careflow-db --remote
-  // 3. Uncomment `d1_databases` below (or bind `DB` in Cloudflare Dashboard -> Worker -> Settings -> Bindings):
-  // ---------------------------------------------------------------------------
-  // "d1_databases": [
-  //   {
-  //     "binding": "DB",
-  //     "database_name": "careflow-db",
-  //     "database_id": "<YOUR_D1_DATABASE_UUID>",
-  //     "migrations_dir": "cloudflare/d1/migrations"
-  //   }
-  // ]
+  ],
+  "vars": {
+    "NEXT_PUBLIC_APP_NAME": "CustomCare",
+    "NEXT_PUBLIC_APP_URL": "https://getcustomcare.xyz",
+    "NEXT_PUBLIC_INITIAL_CLIENT": "UltimateTechApp",
+    "CAREFLOW_APP_BASE_URL": "https://getcustomcare.xyz",
+    "CAREFLOW_AUTH_CALLBACK_URL": "https://getcustomcare.xyz/login",
+    "CAREFLOW_ALLOWED_REDIRECT_URLS": "https://getcustomcare.xyz,https://www.getcustomcare.xyz,https://customcare.cloud111.workers.dev",
+    "CAREFLOW_EMAIL_FROM_NAME": "CustomCare Security",
+    "CAREFLOW_EMAIL_FROM_ADDRESS": "security@getcustomcare.xyz",
+    "CAREFLOW_ENFORCE_ADMIN_MFA": "false"
+  }
 }

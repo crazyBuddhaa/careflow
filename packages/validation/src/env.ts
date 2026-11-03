@@ -12,7 +12,7 @@ function isConfiguredValue(val: string | undefined): val is string {
 }
 
 export const PublicEnvSchema = z.object({
-  NEXT_PUBLIC_APP_NAME: z.string().min(1).default('CareFlow'),
+  NEXT_PUBLIC_APP_NAME: z.string().min(1).default('CustomCare'),
   NEXT_PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
   NEXT_PUBLIC_INITIAL_CLIENT: z.string().min(1).default('UltimateTechApp'),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
@@ -42,7 +42,7 @@ export interface ValidatedEnvStatus {
 
 export function validatePublicEnv(rawEnv: Record<string, string | undefined>): PublicEnv {
   const normalized = {
-    NEXT_PUBLIC_APP_NAME: rawEnv.NEXT_PUBLIC_APP_NAME || 'CareFlow',
+    NEXT_PUBLIC_APP_NAME: rawEnv.NEXT_PUBLIC_APP_NAME || 'CustomCare',
     NEXT_PUBLIC_APP_URL: isConfiguredValue(rawEnv.NEXT_PUBLIC_APP_URL)
       ? rawEnv.NEXT_PUBLIC_APP_URL
       : 'http://localhost:3000',
@@ -73,7 +73,7 @@ export function validateServerEnv(rawEnv: Record<string, string | undefined>): {
       rawEnv.NODE_ENV === 'production' || rawEnv.NODE_ENV === 'test'
         ? rawEnv.NODE_ENV
         : 'development',
-    NEXT_PUBLIC_APP_NAME: rawEnv.NEXT_PUBLIC_APP_NAME || 'CareFlow',
+    NEXT_PUBLIC_APP_NAME: rawEnv.NEXT_PUBLIC_APP_NAME || 'CustomCare',
     NEXT_PUBLIC_APP_URL: isConfiguredValue(rawEnv.NEXT_PUBLIC_APP_URL)
       ? rawEnv.NEXT_PUBLIC_APP_URL
       : 'http://localhost:3000',
@@ -103,7 +103,7 @@ export function validateServerEnv(rawEnv: Record<string, string | undefined>): {
       (issue) => `${issue.path.join('.')}: ${issue.message}`
     );
     const fallbackPublic = PublicEnvSchema.parse({
-      NEXT_PUBLIC_APP_NAME: 'CareFlow',
+      NEXT_PUBLIC_APP_NAME: 'CustomCare',
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
       NEXT_PUBLIC_INITIAL_CLIENT: 'UltimateTechApp',
     });

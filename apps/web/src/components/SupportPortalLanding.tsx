@@ -1037,7 +1037,7 @@ export function SupportPortalLanding({
             <span>Customer Support Center</span>
             <span aria-hidden="true">·</span>
             <Link href="/" className="text-slate-500 hover:text-blue-600 transition-colors">
-              Powered by CareFlow
+              Powered by CustomCare
             </Link>
           </div>
 

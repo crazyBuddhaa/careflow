@@ -1,6 +1,9 @@
-import { ConversationStatus } from '@careflow/shared';
+import { ConversationStatus, UserRole } from '@careflow/shared';
 import { CreateDemoConversationSchema } from '@careflow/validation';
-import { resolveServerAdminSession } from '@/lib/admin-auth';
+import {
+  requireAuthorizedWorkspaceSession,
+  verifyRequestOriginCsrf,
+} from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
@@ -12,13 +15,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const { identity } = await resolveServerAdminSession();
-    if (!identity) {
-      return jsonApiError(
-        'UNAUTHORIZED',
-        'Authorized business administrator session is required.',
-        401
-      );
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Viewer);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     const url = new URL(request.url);
@@ -26,7 +25,7 @@ export async function GET(request: Request) {
     const search = url.searchParams.get('search') ?? undefined;
 
     const repo = await getWorkspaceRepository();
-    const conversations = await repo.listConversations(identity.organizationId, {
+    const conversations = await repo.listConversations(auth.session.identity.organizationId, {
       status,
       search,
     });
@@ -38,13 +37,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { identity } = await resolveServerAdminSession();
-    if (!identity) {
-      return jsonApiError(
-        'UNAUTHORIZED',
-        'Authorized business administrator session is required.',
-        401
-      );
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Agent);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
     }
 
     let rawBody: unknown;
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     const input = CreateDemoConversationSchema.parse(rawBody);
     const repo = await getWorkspaceRepository();
     const created = await repo.createEscalatedConversation({
-      organizationId: identity.organizationId,
+      organizationId: auth.session.identity.organizationId,
       customerName: input.customerName,
       customerEmail: input.customerEmail,
       channel: input.channel,

@@ -21,7 +21,7 @@ export async function generateMetadata({
 
   if (!portal) {
     return {
-      title: 'Support Portal Not Found — CareFlow',
+      title: 'Support Portal Not Found — CustomCare',
     };
   }
 

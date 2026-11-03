@@ -1,22 +1,25 @@
 import { cookies } from 'next/headers';
-import { UserRole } from '@careflow/shared';
+import { UserRole, type UserWorkspaceMembership } from '@careflow/shared';
 import { DevAdminSessionSignInSchema } from '@careflow/validation';
 import {
   ADMIN_SESSION_COOKIE_NAME,
   createSignedAdminSessionToken,
+  extractRequestClientMeta,
   getAdminCookieOptions,
   listAvailableAdminWorkspaces,
   resolveServerAdminSession,
   verifyPasscodeConstantTime,
+  verifyRequestOriginCsrf,
 } from '@/lib/admin-auth';
 import {
   handleKnowledgeApiException,
   jsonApiError,
   jsonApiSuccess,
 } from '@/lib/api-response';
-
-import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
-import type { UserWorkspaceMembership } from '@careflow/shared';
+import {
+  getAuthIdentityService,
+  getWorkspaceRepository,
+} from '@/lib/knowledge-runtime';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +33,9 @@ export interface AdminSessionStatusDto {
     organizationName: string;
     organizationSlug: string;
     role: UserRole;
+    sessionId?: string;
+    emailVerified?: boolean;
+    mfaEnabled?: boolean;
   } | null;
   workspaces?: UserWorkspaceMembership[];
 }
@@ -54,7 +60,7 @@ export async function GET() {
         const repo = await getWorkspaceRepository();
         userWorkspaces = await repo.getUserWorkspaces(resolved.identity.userId);
       } catch {
-        // Fallback for isolated tests or dev session
+        // Fallback for isolated dev session
       }
     }
 
@@ -69,6 +75,9 @@ export async function GET() {
             organizationName: resolved.organizationName ?? resolved.identity.organizationId,
             organizationSlug: resolved.organizationSlug ?? '',
             role: resolved.identity.role,
+            sessionId: resolved.sessionId,
+            emailVerified: resolved.emailVerified,
+            mfaEnabled: resolved.mfaEnabled,
           }
         : null,
       workspaces: userWorkspaces,
@@ -82,6 +91,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('CSRF_REJECTED', csrf.reason || 'Forbidden cross-origin request.', 403);
+    }
+
     let rawBody: unknown;
     try {
       rawBody = await request.json();
@@ -90,8 +104,20 @@ export async function POST(request: Request) {
     }
 
     const input = DevAdminSessionSignInSchema.parse(rawBody);
+    const { ipAddress } = extractRequestClientMeta(request);
+    const authService = await getAuthIdentityService();
+
+    const rateCheck = await authService.checkRateLimit('login', `passcode:${ipAddress}`);
+    if (!rateCheck.allowed) {
+      return jsonApiError(
+        'RATE_LIMITED',
+        `Too many sign-in attempts. Please wait ${rateCheck.retryAfterSeconds} seconds.`,
+        429
+      );
+    }
 
     if (!verifyPasscodeConstantTime(input.accessPasscode)) {
+      await authService.recordRateLimitAttempt('login', `passcode:${ipAddress}`);
       return jsonApiError(
         'INVALID_CREDENTIALS',
         'Invalid workspace identifier or access passcode.',
@@ -111,12 +137,15 @@ export async function POST(request: Request) {
     );
 
     if (!targetOrg) {
+      await authService.recordRateLimitAttempt('login', `passcode:${ipAddress}`);
       return jsonApiError(
         'INVALID_CREDENTIALS',
         'Invalid workspace identifier or access passcode.',
         401
       );
     }
+
+    await authService.resetRateLimit('login', `passcode:${ipAddress}`);
 
     const token = createSignedAdminSessionToken({
       userId: `admin_${targetOrg.slug}`,
@@ -146,8 +175,18 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
+    const resolved = await resolveServerAdminSession();
+    if (resolved.sessionToken) {
+      const { ipAddress, userAgent } = extractRequestClientMeta(request);
+      const authService = await getAuthIdentityService();
+      await authService.revokeSessionByToken(resolved.sessionToken, {
+        ipAddress,
+        userAgent,
+      });
+    }
+
     const cookieStore = await cookies();
     cookieStore.delete(ADMIN_SESSION_COOKIE_NAME);
     return jsonApiSuccess({ authenticated: false });

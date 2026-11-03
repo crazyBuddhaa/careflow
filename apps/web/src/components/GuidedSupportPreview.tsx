@@ -95,7 +95,7 @@ export function GuidedSupportPreview({
           'business-rules': 'Verified FAQ',
           'knowledge-base': 'Help Center',
           'guided-troubleshooting': 'Guided Check',
-          'ai-fallback': 'CareFlow Assistant',
+          'ai-fallback': 'CustomCare Assistant',
           'human-escalation': 'Specialist Support',
         };
         const sourceText = body.data.matchedSourceTitle

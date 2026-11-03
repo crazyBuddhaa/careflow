@@ -5,8 +5,8 @@ import { CAREFLOW_NAME } from '@careflow/shared';
 import { WorkspaceLoginForm } from '@/components/WorkspaceLoginForm';
 
 export const metadata: Metadata = {
-  title: 'Workspace Sign In — CareFlow',
-  description: 'Sign in to manage your business support workspace on CareFlow.',
+  title: 'Workspace Sign In — CustomCare',
+  description: 'Sign in to manage your business support workspace on CustomCare.',
 };
 
 export default function LoginPage() {

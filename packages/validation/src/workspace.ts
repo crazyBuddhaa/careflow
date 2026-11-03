@@ -181,22 +181,26 @@ export const BusinessCategoryEnum = z.enum([
   'Other',
 ]);
 
+export const StrongPasswordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters long.')
+  .max(128, 'Password must not exceed 128 characters.')
+  .regex(/[A-Za-z]/, 'Password must contain at least one letter.')
+  .regex(
+    /^(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
+    'Password must contain at least one number or special character.'
+  );
+
 export const RegisterUserAccountSchema = z
   .object({
     fullName: z.string().trim().min(2, 'Full name must be at least 2 characters.').max(100),
     email: z.string().trim().email('Please provide a valid email address.').max(160),
-    password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters long.')
-      .max(128)
-      .regex(
-        /^(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
-        'Password must contain at least one number or special character.'
-      ),
+    password: StrongPasswordSchema,
     confirmPassword: z.string(),
     agreeToTerms: z
       .boolean()
       .refine((val) => val === true, 'You must accept the Terms of Service and Privacy Policy.'),
+    turnstileToken: z.string().trim().max(2048).optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match.',
@@ -214,14 +218,7 @@ export const FullRegistrationSchema = z
   .object({
     fullName: z.string().trim().min(2, 'Full name must be at least 2 characters.').max(100),
     email: z.string().trim().email('Please provide a valid email address.').max(160),
-    password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters long.')
-      .max(128)
-      .regex(
-        /^(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
-        'Password must contain at least one number or special character.'
-      ),
+    password: StrongPasswordSchema,
     confirmPassword: z.string(),
     agreeToTerms: z
       .boolean()
@@ -230,6 +227,8 @@ export const FullRegistrationSchema = z
     industry: z.string().trim().min(2, 'Please select or enter an industry.').max(60),
     country: z.string().trim().min(2, 'Please select a country of operation.').max(80),
     website: z.string().trim().max(180).optional().default(''),
+    turnstileToken: z.string().trim().max(2048).optional(),
+    redirectTo: z.string().trim().max(300).optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match.',
@@ -239,7 +238,116 @@ export const FullRegistrationSchema = z
 export const UserLoginSchema = z.object({
   email: z.string().trim().email('Please enter a valid email.').max(160),
   password: z.string().min(1, 'Please enter your password.').max(128),
+  mfaCode: z.string().trim().max(32).optional(),
+  turnstileToken: z.string().trim().max(2048).optional(),
+  redirectTo: z.string().trim().max(300).optional(),
 });
+
+export const VerifyEmailTokenSchema = z.object({
+  token: z.string().trim().min(16, 'Invalid verification token.').max(256),
+});
+
+export const RequestPasswordResetSchema = z.object({
+  email: z.string().trim().email('Please enter a valid email address.').max(160),
+  turnstileToken: z.string().trim().max(2048).optional(),
+});
+
+export const ConfirmPasswordResetSchema = z
+  .object({
+    token: z.string().trim().min(16, 'Invalid password reset token.').max(256),
+    newPassword: StrongPasswordSchema,
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+
+export const ChangePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required.').max(128),
+    newPassword: StrongPasswordSchema,
+    confirmPassword: z.string(),
+    revokeOtherSessions: z.boolean().optional().default(true),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'New passwords do not match.',
+    path: ['confirmPassword'],
+  })
+  .refine((data) => data.currentPassword !== data.newPassword, {
+    message: 'New password must be different from your current password.',
+    path: ['newPassword'],
+  });
+
+export const RevokeSessionSchema = z.object({
+  sessionId: z.string().trim().min(4).max(120).optional(),
+  revokeAllOther: z.boolean().optional().default(false),
+  revokeAllIncludingCurrent: z.boolean().optional().default(false),
+});
+
+export const MfaVerifyEnrollmentSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, 'Enter the 6-digit code from your authenticator app.'),
+});
+
+export const MfaLoginChallengeSchema = z.object({
+  challengeToken: z.string().trim().min(16).max(512),
+  code: z.string().trim().min(6, 'Enter your 6-digit authenticator code or recovery code.').max(32),
+  redirectTo: z.string().trim().max(300).optional(),
+});
+
+export const MfaDisableSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required to disable MFA.').max(128),
+  code: z.string().trim().min(6, 'Enter a valid 6-digit authenticator code or recovery code.').max(32),
+});
+
+/**
+ * Validates and sanitizes a redirect target to prevent open-redirect vulnerabilities.
+ * Allows safe internal paths starting with a single `/` (and not `//` or `/\`)
+ * or URLs matching an explicitly configured allowlist of origins.
+ */
+export function validateSafeRedirectUrl(
+  rawUrl: string | undefined | null,
+  allowedOrigins: string[] = [],
+  fallback = '/admin'
+): { valid: boolean; sanitizedUrl: string } {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return { valid: true, sanitizedUrl: fallback };
+  }
+
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return { valid: true, sanitizedUrl: fallback };
+  }
+
+  // Block dangerous schemes or control characters
+  if (/[\r\n\0]/.test(trimmed) || /^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { valid: false, sanitizedUrl: fallback };
+      }
+      const normalizedAllowed = allowedOrigins
+        .map((o) => o.trim().replace(/\/+$/, '').toLowerCase())
+        .filter(Boolean);
+      if (normalizedAllowed.includes(parsed.origin.toLowerCase())) {
+        return { valid: true, sanitizedUrl: parsed.toString() };
+      }
+      return { valid: false, sanitizedUrl: fallback };
+    } catch {
+      return { valid: false, sanitizedUrl: fallback };
+    }
+  }
+
+  // Relative path must begin with a single `/` and never `//` or `/\`
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
+    return { valid: true, sanitizedUrl: trimmed };
+  }
+
+  return { valid: false, sanitizedUrl: fallback };
+}
 
 export const SwitchWorkspaceSchema = z.object({
   organizationId: z.string().trim().min(2).max(100),
