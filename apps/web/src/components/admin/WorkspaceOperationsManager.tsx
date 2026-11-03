@@ -10,13 +10,19 @@ import {
   Trash2,
   X,
   MessageSquare,
+  Lock,
+  Bookmark,
+  History,
+  UserCheck,
 } from 'lucide-react';
 import {
   ConversationStatus,
+  EscalationPriority,
   SupportChannel,
   UserRole,
   type AgentAvailability,
   type ApiResponse,
+  type SavedReplyRecord,
   type WorkspaceAgentRecord,
   type WorkspaceAnalyticsSummary,
   type WorkspaceConversationItem,
@@ -28,6 +34,8 @@ export type OperationsSubView = 'conversations' | 'customers' | 'agents' | 'anal
 interface WorkspaceOperationsManagerProps {
   activeSubView: OperationsSubView;
   organizationName: string;
+  currentUserName?: string;
+  currentUserRole?: UserRole;
 }
 
 function formatDateTime(iso: string): string {
@@ -46,18 +54,32 @@ function formatDateTime(iso: string): string {
 export function WorkspaceOperationsManager({
   activeSubView,
   organizationName,
+  currentUserName,
+  currentUserRole = UserRole.Owner,
 }: WorkspaceOperationsManagerProps) {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // Conversations state
+  // Conversations state & unified inbox filters
   const [conversations, setConversations] = useState<WorkspaceConversationItem[]>([]);
-  const [convStatusFilter, setConvStatusFilter] = useState<string>('all');
+  const [inboxPreset, setInboxPreset] = useState<
+    'all' | 'my' | 'unassigned' | 'escalated' | 'open' | 'pending' | 'priority' | 'resolved'
+  >('all');
+  const [channelFilter, setChannelFilter] = useState<string>('all');
   const [convSearch, setConvSearch] = useState('');
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState('');
+  const [isInternalNote, setIsInternalNote] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
+  const [showActivityLog, setShowActivityLog] = useState(false);
+
+  // Saved replies state
+  const [savedReplies, setSavedReplies] = useState<SavedReplyRecord[]>([]);
+  const [savedReplyModalOpen, setSavedReplyModalOpen] = useState(false);
+  const [newSavedReplyTitle, setNewSavedReplyTitle] = useState('');
+  const [newSavedReplyCategory, setNewSavedReplyCategory] = useState('General');
+  const [newSavedReplyBody, setNewSavedReplyBody] = useState('');
 
   // New conversation modal/form
   const [newConvOpen, setNewConvOpen] = useState(false);
@@ -88,6 +110,13 @@ export function WorkspaceOperationsManager({
   const [analytics, setAnalytics] = useState<WorkspaceAnalyticsSummary | null>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
+  const canAssignOthers =
+    currentUserRole === UserRole.Owner ||
+    currentUserRole === UserRole.Admin ||
+    currentUserRole === UserRole.Supervisor;
+
+  const isViewer = currentUserRole === UserRole.Viewer;
+
   const showFeedback = useCallback((msg: string) => {
     setFeedback(msg);
     window.setTimeout(() => {
@@ -100,7 +129,15 @@ export function WorkspaceOperationsManager({
     setErrorBanner(null);
     try {
       const params = new URLSearchParams();
-      if (convStatusFilter !== 'all') params.set('status', convStatusFilter);
+      if (inboxPreset === 'my') params.set('assignedTo', 'me');
+      else if (inboxPreset === 'unassigned') params.set('assignedTo', 'unassigned');
+      else if (inboxPreset === 'priority') params.set('priority', 'high_or_urgent');
+      else if (inboxPreset === 'escalated') params.set('status', ConversationStatus.Escalated);
+      else if (inboxPreset === 'open') params.set('status', ConversationStatus.Open);
+      else if (inboxPreset === 'pending') params.set('status', ConversationStatus.Pending);
+      else if (inboxPreset === 'resolved') params.set('status', ConversationStatus.Resolved);
+
+      if (channelFilter !== 'all') params.set('channel', channelFilter);
       if (convSearch.trim()) params.set('search', convSearch.trim());
       const qs = params.toString() ? `?${params.toString()}` : '';
 
@@ -120,7 +157,19 @@ export function WorkspaceOperationsManager({
     } finally {
       setLoadingConversations(false);
     }
-  }, [convStatusFilter, convSearch]);
+  }, [inboxPreset, channelFilter, convSearch]);
+
+  const loadSavedReplies = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/saved-replies', { cache: 'no-store' });
+      const body = (await res.json()) as ApiResponse<SavedReplyRecord[]>;
+      if (body.ok) {
+        setSavedReplies(body.data);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const loadCustomers = useCallback(async () => {
     setLoadingCustomers(true);
@@ -180,11 +229,22 @@ export function WorkspaceOperationsManager({
   }, []);
 
   useEffect(() => {
-    if (activeSubView === 'conversations') void loadConversations();
+    if (activeSubView === 'conversations') {
+      void loadConversations();
+      void loadSavedReplies();
+      void loadAgents();
+    }
     if (activeSubView === 'customers') void loadCustomers();
     if (activeSubView === 'agents') void loadAgents();
     if (activeSubView === 'analytics') void loadAnalytics();
-  }, [activeSubView, loadConversations, loadCustomers, loadAgents, loadAnalytics]);
+  }, [
+    activeSubView,
+    loadConversations,
+    loadSavedReplies,
+    loadCustomers,
+    loadAgents,
+    loadAnalytics,
+  ]);
 
   const activeConversation =
     conversations.find((c) => c.id === selectedConvId) ?? conversations[0] ?? null;
@@ -206,6 +266,7 @@ export function WorkspaceOperationsManager({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             body: replyBody.trim(),
+            isInternalNote,
             nextStatus,
           }),
         }
@@ -217,9 +278,11 @@ export function WorkspaceOperationsManager({
       }
       setReplyBody('');
       showFeedback(
-        nextStatus === ConversationStatus.Resolved
-          ? 'Sent specialist reply and marked conversation resolved.'
-          : 'Sent specialist reply.'
+        isInternalNote
+          ? 'Saved private internal note (hidden from customer).'
+          : nextStatus === ConversationStatus.Resolved
+            ? 'Sent specialist reply and marked conversation resolved.'
+            : 'Sent specialist reply.'
       );
       await loadConversations();
     } catch {
@@ -229,25 +292,58 @@ export function WorkspaceOperationsManager({
     }
   }
 
-  async function handleUpdateConvStatus(
+  async function handlePatchConversation(
     convId: string,
-    status: ConversationStatus
+    payload: {
+      status?: ConversationStatus;
+      priority?: EscalationPriority;
+      category?: string;
+      assignedAgentName?: string | null;
+    }
   ) {
     try {
       const res = await fetch(`/api/admin/conversations/${encodeURIComponent(convId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(payload),
       });
       const body = (await res.json()) as ApiResponse<WorkspaceConversationItem>;
       if (!body.ok) {
         setErrorBanner(body.error.message);
         return;
       }
-      showFeedback(`Conversation status updated to ${status}.`);
+      showFeedback('Updated conversation metadata.');
       await loadConversations();
     } catch {
-      setErrorBanner('Unable to update conversation status.');
+      setErrorBanner('Unable to update conversation.');
+    }
+  }
+
+  async function handleCreateSavedReply(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newSavedReplyTitle.trim() || !newSavedReplyBody.trim()) return;
+    try {
+      const res = await fetch('/api/admin/saved-replies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newSavedReplyTitle.trim(),
+          category: newSavedReplyCategory.trim() || 'General',
+          body: newSavedReplyBody.trim(),
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<SavedReplyRecord>;
+      if (!body.ok) {
+        setErrorBanner(body.error.message);
+        return;
+      }
+      setSavedReplyModalOpen(false);
+      setNewSavedReplyTitle('');
+      setNewSavedReplyBody('');
+      showFeedback(`Created saved reply "${body.data.title}".`);
+      await loadSavedReplies();
+    } catch {
+      setErrorBanner('Unable to create saved reply.');
     }
   }
 
@@ -394,7 +490,7 @@ export function WorkspaceOperationsManager({
       )}
 
       {/* =====================================================================
-          1. CONVERSATIONS INBOX & ESCALATION QUEUE
+          1. UNIFIED MULTI-CHANNEL CONVERSATIONS INBOX & ESCALATION QUEUE
       ====================================================================== */}
       {activeSubView === 'conversations' && (
         <div className="space-y-6">
@@ -402,65 +498,89 @@ export function WorkspaceOperationsManager({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold text-teal-700">
-                  Operations · {organizationName}
+                  Unified Support Inbox · {organizationName}
                 </p>
                 <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
                   Support Conversations
                 </h1>
                 <p className="mt-1 text-sm text-slate-600">
-                  Review escalated portal enquiries with attached troubleshooting context and reply
-                  directly.
+                  Manage customer conversations across Telegram, Website Chat Widget, and Hosted
+                  Support Portal in one synchronized team workspace.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setNewConvOpen(true)}
-                className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl whitespace-nowrap self-start sm:self-auto cursor-pointer"
-              >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                <span>Log Enquiry</span>
-              </button>
+              {!isViewer && (
+                <button
+                  type="button"
+                  onClick={() => setNewConvOpen(true)}
+                  className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl whitespace-nowrap self-start sm:self-auto cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" aria-hidden="true" />
+                  <span>Log Enquiry</span>
+                </button>
+              )}
             </div>
 
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              {/* Interactive Status Filter Buttons */}
-              <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl self-start">
-                {(
-                  [
-                    ['all', 'All'],
-                    [ConversationStatus.Escalated, 'Escalated'],
-                    [ConversationStatus.Open, 'Open'],
-                    [ConversationStatus.Resolved, 'Resolved'],
-                  ] as const
-                ).map(([val, label]) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setConvStatusFilter(val)}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-                      convStatusFilter === val
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+            <div className="flex flex-col gap-3">
+              {/* Inbox Queue Preset Filter Buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl">
+                  {(
+                    [
+                      ['all', 'All'],
+                      ['my', 'My Assigned'],
+                      ['unassigned', 'Unassigned'],
+                      ['escalated', 'Escalated'],
+                      ['open', 'Open'],
+                      ['pending', 'Pending'],
+                      ['priority', 'High Priority'],
+                      ['resolved', 'Resolved'],
+                    ] as const
+                  ).map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setInboxPreset(val)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                        inboxPreset === val
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
 
-              <div className="w-full md:w-72 relative">
-                <Search
-                  className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  aria-hidden="true"
-                />
-                <input
-                  type="search"
-                  value={convSearch}
-                  onChange={(e) => setConvSearch(e.target.value)}
-                  placeholder="Search subject or customer..."
-                  aria-label="Search conversations"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 py-2 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
-                />
+                {/* Channel Filter + Search */}
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                  <select
+                    aria-label="Filter by channel"
+                    value={channelFilter}
+                    onChange={(e) => setChannelFilter(e.target.value)}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-800"
+                  >
+                    <option value="all">All Channels</option>
+                    <option value={SupportChannel.Telegram}>Telegram</option>
+                    <option value={SupportChannel.Portal}>Customer Portal</option>
+                    <option value={SupportChannel.WebWidget}>Website Widget</option>
+                    <option value={SupportChannel.Email}>Email</option>
+                  </select>
+
+                  <div className="flex-1 md:w-64 relative">
+                    <Search
+                      className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                      aria-hidden="true"
+                    />
+                    <input
+                      type="search"
+                      value={convSearch}
+                      onChange={(e) => setConvSearch(e.target.value)}
+                      placeholder="Search subject, customer, ref..."
+                      aria-label="Search conversations"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 py-2 text-xs text-slate-900 focus:border-blue-600 focus:bg-white focus:outline-none"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -541,6 +661,64 @@ export function WorkspaceOperationsManager({
             </form>
           )}
 
+          {savedReplyModalOpen && (
+            <form
+              onSubmit={handleCreateSavedReply}
+              className="rounded-2xl border border-teal-200 bg-white p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h2 className="text-base font-bold text-slate-900">Create Saved Reply Template</h2>
+                <button
+                  type="button"
+                  onClick={() => setSavedReplyModalOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  required
+                  value={newSavedReplyTitle}
+                  onChange={(e) => setNewSavedReplyTitle(e.target.value)}
+                  placeholder="Template title (e.g. Refund Confirmation)"
+                  className="rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900"
+                />
+                <input
+                  type="text"
+                  value={newSavedReplyCategory}
+                  onChange={(e) => setNewSavedReplyCategory(e.target.value)}
+                  placeholder="Category (e.g. Billing)"
+                  className="rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900"
+                />
+                <textarea
+                  rows={3}
+                  required
+                  value={newSavedReplyBody}
+                  onChange={(e) => setNewSavedReplyBody(e.target.value)}
+                  placeholder="Saved reply message body..."
+                  className="sm:col-span-2 rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSavedReplyModalOpen(false)}
+                  className="py-1.5 px-3 text-xs font-semibold text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-4 text-xs font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-lg cursor-pointer"
+                >
+                  Save Template
+                </button>
+              </div>
+            </form>
+          )}
+
           {loadingConversations ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-8 space-y-3">
               <div className="h-14 rounded-xl bg-slate-100 animate-pulse" />
@@ -553,15 +731,18 @@ export function WorkspaceOperationsManager({
                 No conversations match the current filter
               </h2>
               <p className="text-xs text-slate-500">
-                Escalations submitted by customers on your public portal appear here immediately.
+                Customer conversations from Telegram, your Website Widget, and your Support Portal
+                appear here automatically.
               </p>
-              <button
-                type="button"
-                onClick={() => setNewConvOpen(true)}
-                className="py-2 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
-              >
-                Log First Enquiry
-              </button>
+              {!isViewer && (
+                <button
+                  type="button"
+                  onClick={() => setNewConvOpen(true)}
+                  className="py-2 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
+                >
+                  Log First Enquiry
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
@@ -578,35 +759,47 @@ export function WorkspaceOperationsManager({
                         isSelected ? 'bg-blue-50/50' : 'hover:bg-slate-50'
                       }`}
                     >
-                      <p className="text-xs text-slate-500">
-                        <span
-                          className={
-                            conv.status === ConversationStatus.Escalated
-                              ? 'font-semibold text-red-700'
-                              : conv.status === ConversationStatus.Resolved
-                                ? 'font-semibold text-teal-700'
-                                : 'font-semibold text-blue-700'
-                          }
-                        >
-                          {conv.status.charAt(0).toUpperCase() + conv.status.slice(1)}
-                        </span>
-                        <span className="mx-1.5" aria-hidden="true">
-                          ·
-                        </span>
-                        <span>{conv.category}</span>
-                        <span className="mx-1.5" aria-hidden="true">
-                          ·
-                        </span>
-                        <span className="font-mono tabular-nums">
+                      <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={
+                              conv.status === ConversationStatus.Escalated
+                                ? 'font-bold text-red-700'
+                                : conv.status === ConversationStatus.Resolved
+                                  ? 'font-bold text-teal-700'
+                                  : conv.status === ConversationStatus.Pending
+                                    ? 'font-bold text-amber-700'
+                                    : 'font-bold text-blue-700'
+                            }
+                          >
+                            {conv.status.toUpperCase()}
+                          </span>
+                          <span>·</span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] uppercase">
+                            {conv.channel}
+                          </span>
+                          {(conv.priority === EscalationPriority.High ||
+                            conv.priority === EscalationPriority.Urgent) && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 font-bold text-[10px] uppercase">
+                              {conv.priority}
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono tabular-nums shrink-0">
                           {formatDateTime(conv.updatedAt)}
                         </span>
-                      </p>
-                      <p className="mt-1 text-sm font-bold text-slate-900 line-clamp-1">
+                      </div>
+                      <p className="mt-1.5 text-sm font-bold text-slate-900 line-clamp-1">
                         {conv.subject}
                       </p>
-                      <p className="mt-0.5 text-xs text-slate-600 truncate">
-                        {conv.customerName} · {conv.customerEmail}
-                      </p>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-600">
+                        <span className="truncate">
+                          {conv.customerName} · {conv.customerEmail}
+                        </span>
+                        <span className="text-[11px] text-slate-500 shrink-0">
+                          {conv.assignedAgentName ? `👤 ${conv.assignedAgentName}` : 'Unassigned'}
+                        </span>
+                      </div>
                     </button>
                   );
                 })}
@@ -615,71 +808,213 @@ export function WorkspaceOperationsManager({
               {/* Right Active Thread Inspector */}
               {activeConversation && (
                 <div className="xl:col-span-7 rounded-2xl border border-slate-200 bg-white p-6 space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div>
-                      <p className="text-xs text-slate-500">
-                        {activeConversation.category} · Channel: {activeConversation.channel}
-                        {activeConversation.customerExternalRef && (
-                          <>
-                            {' '}
-                            · Ref:{' '}
-                            <span className="font-mono text-slate-800">
-                              {activeConversation.customerExternalRef}
-                            </span>
-                          </>
-                        )}
-                      </p>
-                      <h2 className="mt-1 text-lg font-bold text-slate-900">
-                        {activeConversation.subject}
-                      </h2>
-                      <p className="mt-0.5 text-xs text-slate-600">
-                        Customer: <strong>{activeConversation.customerName}</strong> (
-                        {activeConversation.customerEmail})
-                        {activeConversation.assignedAgentName && (
-                          <> · Specialist: {activeConversation.assignedAgentName}</>
-                        )}
-                      </p>
+                  <div className="flex flex-col gap-4 border-b border-slate-100 pb-4">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold uppercase text-[11px]">
+                            {activeConversation.channel}
+                          </span>
+                          <span>·</span>
+                          <span>{activeConversation.category}</span>
+                          {activeConversation.customerExternalRef && (
+                            <>
+                              <span>·</span>
+                              <span className="font-mono text-slate-800">
+                                {activeConversation.customerExternalRef}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <h2 className="mt-1.5 text-lg font-bold text-slate-900">
+                          {activeConversation.subject}
+                        </h2>
+                        <p className="mt-0.5 text-xs text-slate-600">
+                          Customer: <strong>{activeConversation.customerName}</strong> (
+                          {activeConversation.customerEmail})
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {/* Accept Quick Button for Unassigned */}
+                        {!isViewer &&
+                          !activeConversation.assignedAgentName &&
+                          currentUserName && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handlePatchConversation(activeConversation.id, {
+                                  assignedAgentName: currentUserName,
+                                })
+                              }
+                              className="inline-flex items-center gap-1 py-1.5 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold cursor-pointer"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>Accept</span>
+                            </button>
+                          )}
+
+                        <button
+                          type="button"
+                          onClick={() => setShowActivityLog((v) => !v)}
+                          className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          <span>Activity ({activeConversation.activityLogs?.length ?? 0})</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <select
-                      aria-label="Conversation status"
-                      value={activeConversation.status}
-                      onChange={(e) =>
-                        handleUpdateConvStatus(
-                          activeConversation.id,
-                          e.target.value as ConversationStatus
-                        )
-                      }
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800 focus:border-blue-600 focus:outline-none shrink-0"
-                    >
-                      <option value={ConversationStatus.Open}>Open</option>
-                      <option value={ConversationStatus.Troubleshooting}>Troubleshooting</option>
-                      <option value={ConversationStatus.Escalated}>Escalated</option>
-                      <option value={ConversationStatus.Resolved}>Resolved</option>
-                    </select>
+                    {/* Metadata Controls: Status, Priority, Assignment */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                          Status
+                        </label>
+                        <select
+                          aria-label="Conversation status"
+                          disabled={isViewer}
+                          value={activeConversation.status}
+                          onChange={(e) =>
+                            void handlePatchConversation(activeConversation.id, {
+                              status: e.target.value as ConversationStatus,
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        >
+                          <option value={ConversationStatus.Open}>Open</option>
+                          <option value={ConversationStatus.Pending}>Pending</option>
+                          <option value={ConversationStatus.Troubleshooting}>
+                            Troubleshooting
+                          </option>
+                          <option value={ConversationStatus.Escalated}>Escalated</option>
+                          <option value={ConversationStatus.Resolved}>Resolved</option>
+                          <option value={ConversationStatus.Closed}>Closed</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                          Priority
+                        </label>
+                        <select
+                          aria-label="Conversation priority"
+                          disabled={isViewer}
+                          value={activeConversation.priority}
+                          onChange={(e) =>
+                            void handlePatchConversation(activeConversation.id, {
+                              priority: e.target.value as EscalationPriority,
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        >
+                          <option value={EscalationPriority.Low}>Low</option>
+                          <option value={EscalationPriority.Normal}>Normal</option>
+                          <option value={EscalationPriority.High}>High</option>
+                          <option value={EscalationPriority.Urgent}>Urgent</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                          Assigned Specialist
+                        </label>
+                        <select
+                          aria-label="Assigned specialist"
+                          disabled={isViewer || (!canAssignOthers && Boolean(activeConversation.assignedAgentName))}
+                          value={activeConversation.assignedAgentName ?? ''}
+                          onChange={(e) =>
+                            void handlePatchConversation(activeConversation.id, {
+                              assignedAgentName: e.target.value || null,
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        >
+                          <option value="">Unassigned</option>
+                          {currentUserName &&
+                            !agents.some((a) => a.displayName === currentUserName) && (
+                              <option value={currentUserName}>{currentUserName} (You)</option>
+                            )}
+                          {agents.map((agt) => (
+                            <option key={agt.id} value={agt.displayName}>
+                              {agt.displayName} ({agt.role})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Optional Activity Log Drawer */}
+                    {showActivityLog && activeConversation.activityLogs && (
+                      <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 space-y-2 max-h-40 overflow-y-auto">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          Conversation Audit &amp; Assignment History
+                        </p>
+                        {activeConversation.activityLogs.length === 0 ? (
+                          <p className="text-xs text-slate-500">No activity recorded yet.</p>
+                        ) : (
+                          activeConversation.activityLogs.map((log) => (
+                            <div
+                              key={log.id}
+                              className="flex items-center justify-between gap-2 text-xs text-slate-700"
+                            >
+                              <span>
+                                <strong>{log.actorName}</strong>: {log.details}
+                              </span>
+                              <span className="font-mono text-[11px] text-slate-400 shrink-0">
+                                {formatDateTime(log.createdAt)}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Message Thread */}
-                  <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
+                  <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
                     {activeConversation.messages.map((m) => {
                       const isSystem = m.senderType === 'system';
+                      const isBot = m.senderType === 'bot';
                       const isAgent = m.senderType === 'agent';
+                      const isNote = Boolean(m.isInternalNote);
                       return (
                         <div
                           key={m.id}
                           className={`rounded-xl p-3.5 text-sm ${
-                            isSystem
-                              ? 'bg-amber-50/70 border border-amber-200/70 text-slate-800 text-xs'
-                              : isAgent
-                                ? 'bg-blue-50/70 border border-blue-100 text-slate-900 ml-6'
-                                : 'bg-slate-50 border border-slate-200/70 text-slate-900 mr-6'
+                            isNote
+                              ? 'bg-amber-50 border border-amber-300 text-amber-950 ml-4'
+                              : isSystem
+                                ? 'bg-slate-100 border border-slate-200 text-slate-700 text-xs'
+                                : isBot
+                                  ? 'bg-teal-50/70 border border-teal-100 text-slate-900 ml-4'
+                                  : isAgent
+                                    ? 'bg-blue-50/70 border border-blue-100 text-slate-900 ml-6'
+                                    : 'bg-slate-50 border border-slate-200/70 text-slate-900 mr-6'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2 text-xs text-slate-500 mb-1">
-                            <span className="font-semibold text-slate-800">{m.senderName}</span>
-                            <span className="font-mono tabular-nums">
-                              {formatDateTime(m.createdAt)}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {isNote && <Lock className="w-3.5 h-3.5 text-amber-700" />}
+                              <span className="font-semibold text-slate-900">{m.senderName}</span>
+                              <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-white/80 text-slate-600 font-semibold">
+                                {isNote ? 'Internal Note' : m.senderType}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 font-mono tabular-nums text-[11px]">
+                              {m.deliveryStatus && m.senderType === 'agent' && !isNote && (
+                                <span
+                                  className={
+                                    m.deliveryStatus === 'failed'
+                                      ? 'text-rose-600 font-bold'
+                                      : 'text-teal-700'
+                                  }
+                                >
+                                  {m.deliveryStatus}
+                                </span>
+                              )}
+                              <span>{formatDateTime(m.createdAt)}</span>
+                            </div>
                           </div>
                           <p className="leading-relaxed whitespace-pre-line">{m.body}</p>
                         </div>
@@ -687,39 +1022,126 @@ export function WorkspaceOperationsManager({
                     })}
                   </div>
 
-                  {/* Agent Reply Composer */}
-                  <form
-                    onSubmit={(e) => handleSendReply(e)}
-                    className="pt-4 border-t border-slate-100 space-y-3"
-                  >
-                    <textarea
-                      rows={3}
-                      value={replyBody}
-                      onChange={(e) => setReplyBody(e.target.value)}
-                      placeholder={`Write a reply to ${activeConversation.customerName}...`}
-                      className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
-                    />
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      {activeConversation.status !== ConversationStatus.Resolved && (
+                  {/* Agent Reply & Internal Note Composer */}
+                  {!isViewer && (
+                    <form
+                      onSubmit={(e) => handleSendReply(e)}
+                      className="pt-4 border-t border-slate-100 space-y-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        {/* Mode Toggle: Public Reply vs Private Internal Note */}
+                        <div className="inline-flex p-1 rounded-xl bg-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => setIsInternalNote(false)}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              !isInternalNote
+                                ? 'bg-white text-slate-900 shadow-2xs'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            Reply to Customer ({activeConversation.channel})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsInternalNote(true)}
+                            className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              isInternalNote
+                                ? 'bg-amber-500 text-white shadow-2xs'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            <Lock className="w-3 h-3" />
+                            <span>Internal Team Note</span>
+                          </button>
+                        </div>
+
+                        {/* Saved Replies Selector */}
+                        <div className="flex items-center gap-1.5">
+                          <Bookmark className="w-3.5 h-3.5 text-slate-400" />
+                          <select
+                            aria-label="Insert saved reply"
+                            value=""
+                            onChange={(e) => {
+                              const found = savedReplies.find((r) => r.id === e.target.value);
+                              if (found) {
+                                setReplyBody((prev) =>
+                                  prev ? `${prev}\n${found.body}` : found.body
+                                );
+                              }
+                            }}
+                            className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700"
+                          >
+                            <option value="">Insert Saved Reply...</option>
+                            {savedReplies.map((sr) => (
+                              <option key={sr.id} value={sr.id}>
+                                {sr.title} ({sr.category})
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setSavedReplyModalOpen(true)}
+                            className="py-1 px-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-xs font-semibold text-slate-700 cursor-pointer"
+                            title="Create saved reply"
+                          >
+                            + Template
+                          </button>
+                        </div>
+                      </div>
+
+                      <textarea
+                        rows={3}
+                        value={replyBody}
+                        onChange={(e) => setReplyBody(e.target.value)}
+                        placeholder={
+                          isInternalNote
+                            ? 'Add a private internal note visible only to your support team...'
+                            : `Write a reply to ${activeConversation.customerName} (delivered via ${activeConversation.channel})...`
+                        }
+                        className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none ${
+                          isInternalNote
+                            ? 'border-amber-300 bg-amber-50/40 focus:border-amber-500'
+                            : 'border-slate-300 focus:border-blue-600'
+                        }`}
+                      />
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {!isInternalNote &&
+                          activeConversation.status !== ConversationStatus.Resolved && (
+                            <button
+                              type="button"
+                              disabled={sendingReply || !replyBody.trim()}
+                              onClick={(e) => handleSendReply(e, ConversationStatus.Resolved)}
+                              className="py-2 px-4 text-xs font-semibold text-teal-900 bg-teal-50 hover:bg-teal-100 disabled:opacity-50 rounded-xl whitespace-nowrap cursor-pointer"
+                            >
+                              Reply &amp; Mark Resolved
+                            </button>
+                          )}
                         <button
-                          type="button"
+                          type="submit"
                           disabled={sendingReply || !replyBody.trim()}
-                          onClick={(e) => handleSendReply(e, ConversationStatus.Resolved)}
-                          className="py-2 px-4 text-xs font-semibold text-teal-900 bg-teal-50 hover:bg-teal-100 disabled:opacity-50 rounded-xl whitespace-nowrap cursor-pointer"
+                          className={`inline-flex items-center gap-1.5 py-2 px-5 text-xs font-semibold text-white disabled:opacity-50 rounded-xl whitespace-nowrap cursor-pointer ${
+                            isInternalNote
+                              ? 'bg-amber-600 hover:bg-amber-700'
+                              : 'bg-blue-600 hover:bg-blue-700'
+                          }`}
                         >
-                          Reply &amp; Mark Resolved
+                          {isInternalNote ? (
+                            <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                          ) : (
+                            <Send className="w-3.5 h-3.5" aria-hidden="true" />
+                          )}
+                          <span>
+                            {sendingReply
+                              ? 'Saving...'
+                              : isInternalNote
+                                ? 'Save Internal Note'
+                                : 'Send Reply'}
+                          </span>
                         </button>
-                      )}
-                      <button
-                        type="submit"
-                        disabled={sendingReply || !replyBody.trim()}
-                        className="inline-flex items-center gap-1.5 py-2 px-5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl whitespace-nowrap cursor-pointer"
-                      >
-                        <Send className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>{sendingReply ? 'Sending...' : 'Send Reply'}</span>
-                      </button>
-                    </div>
-                  </form>
+                      </div>
+                    </form>
+                  )}
                 </div>
               )}
             </div>
@@ -830,18 +1252,20 @@ export function WorkspaceOperationsManager({
                 Human Support Specialists
               </h1>
               <p className="mt-1 text-sm text-slate-600">
-                Manage specialist roles, queue availability, and escalation routing for{' '}
-                {organizationName}.
+                Manage specialist roles, queue availability, Telegram Agent connection status, and
+                escalation routing for {organizationName}.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setAgentFormOpen(true)}
-              className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl whitespace-nowrap self-start sm:self-auto cursor-pointer"
-            >
-              <Plus className="w-4 h-4" aria-hidden="true" />
-              <span>Add Specialist</span>
-            </button>
+            {(currentUserRole === UserRole.Owner || currentUserRole === UserRole.Admin) && (
+              <button
+                type="button"
+                onClick={() => setAgentFormOpen(true)}
+                className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl whitespace-nowrap self-start sm:self-auto cursor-pointer"
+              >
+                <Plus className="w-4 h-4" aria-hidden="true" />
+                <span>Add Specialist</span>
+              </button>
+            )}
           </div>
 
           {agentFormOpen && (
@@ -964,13 +1388,6 @@ export function WorkspaceOperationsManager({
                 <p className="text-sm font-semibold text-slate-900">
                   No support specialists added yet
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setAgentFormOpen(true)}
-                  className="py-2 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
-                >
-                  Add First Specialist
-                </button>
               </div>
             ) : (
               <table className="w-full text-left border-collapse">
@@ -978,6 +1395,7 @@ export function WorkspaceOperationsManager({
                   <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
                     <th className="py-3.5 px-5">Specialist</th>
                     <th className="py-3.5 px-5">Role &amp; Specialty</th>
+                    <th className="py-3.5 px-5">Telegram App</th>
                     <th className="py-3.5 px-5 text-right">Active Load</th>
                     <th className="py-3.5 px-5">Availability</th>
                     <th className="py-3.5 px-5 text-right">Action</th>
@@ -995,6 +1413,15 @@ export function WorkspaceOperationsManager({
                           {agt.role.charAt(0).toUpperCase() + agt.role.slice(1)}
                         </span>{' '}
                         · {agt.specialty}
+                      </td>
+                      <td className="py-3.5 px-5 text-xs">
+                        {agt.telegramLinked ? (
+                          <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 font-semibold">
+                            {agt.telegramUsername ? `@${agt.telegramUsername}` : 'Linked'}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Not Linked</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-5 text-right font-mono tabular-nums text-slate-900">
                         {agt.activeConversations}
@@ -1017,14 +1444,17 @@ export function WorkspaceOperationsManager({
                         </select>
                       </td>
                       <td className="py-3.5 px-5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAgent(agt.id, agt.displayName)}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:underline cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Remove</span>
-                        </button>
+                        {(currentUserRole === UserRole.Owner ||
+                          currentUserRole === UserRole.Admin) && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAgent(agt.id, agt.displayName)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:underline cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Remove</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

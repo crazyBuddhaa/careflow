@@ -5,6 +5,9 @@ import {
   SupportChannel,
   UserRole,
   type BusinessOnboardingStatus,
+  type ChannelIntegrationCategory,
+  type ChannelIntegrationLifecycleStatus,
+  type MessageDeliveryStatus,
 } from './types';
 
 export type PortalIconKey = 'wallet' | 'compass' | 'user-check' | 'help-circle';
@@ -160,7 +163,32 @@ export interface WorkspaceMessageItem {
   conversationId: string;
   senderType: MessageSenderType;
   senderName: string;
+  senderUserId?: string | null;
   body: string;
+  isInternalNote?: boolean;
+  externalMessageId?: string | null;
+  deliveryStatus?: MessageDeliveryStatus;
+  deliveryError?: string | null;
+  createdAt: string;
+}
+
+export interface ConversationActivityLogItem {
+  id: string;
+  conversationId: string;
+  organizationId: string;
+  actorUserId?: string | null;
+  actorName: string;
+  actorType: 'customer' | 'agent' | 'system' | 'bot';
+  actionType:
+    | 'conversation_created'
+    | 'assigned'
+    | 'transferred'
+    | 'status_changed'
+    | 'priority_changed'
+    | 'escalated'
+    | 'internal_note_added'
+    | 'reopened';
+  details: string;
   createdAt: string;
 }
 
@@ -170,16 +198,107 @@ export interface WorkspaceConversationItem {
   customerName: string;
   customerEmail: string;
   customerExternalRef: string;
+  customerIdentityId?: string | null;
+  sourceChannelRef?: string;
   channel: SupportChannel;
   status: ConversationStatus;
   priority: EscalationPriority;
   category: string;
   subject: string;
+  assignedAgentId?: string | null;
   assignedAgentName: string | null;
   diagnosticSummary: string;
+  escalationCount?: number;
   createdAt: string;
   updatedAt: string;
   messages: WorkspaceMessageItem[];
+  activityLogs?: ConversationActivityLogItem[];
+}
+
+export interface SavedReplyRecord {
+  id: string;
+  organizationId: string;
+  title: string;
+  category: string;
+  body: string;
+  shortcut?: string;
+  createdByUserId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TelegramChannelConfig {
+  welcomeMessage: string;
+  supportCategories: string[];
+  allowHumanEscalation: boolean;
+  escalationPriorityDefault: EscalationPriority;
+  notifyAssignedAgentOnTelegram: boolean;
+  offlineMessage: string;
+}
+
+export interface WebWidgetChannelConfig {
+  launcherTitle: string;
+  welcomeGreeting: string;
+  primaryColor: string;
+  position: 'bottom-right' | 'bottom-left';
+  allowedOrigins: string[];
+  allowHumanEscalation: boolean;
+}
+
+export interface EmailChannelConfig {
+  forwardingAddress: string;
+  outboundReplyFromName: string;
+  inboundWebhookVerified: boolean;
+  autoAcknowledgeEnabled: boolean;
+}
+
+export interface ChannelIntegrationRecord {
+  id: string;
+  organizationId: string;
+  channel: ChannelIntegrationCategory;
+  status: ChannelIntegrationLifecycleStatus;
+  isSupportedNow: boolean;
+  availabilityLabel: 'Available' | 'Beta' | 'Planned';
+  publicToken?: string | null;
+  deepLinkUrl?: string | null;
+  qrCodeSvgDataUrl?: string | null;
+  widgetEmbedScript?: string | null;
+  centralBotUsername: string;
+  telegramConfig?: TelegramChannelConfig;
+  widgetConfig?: WebWidgetChannelConfig;
+  emailConfig?: EmailChannelConfig;
+  lastEventAt?: string | null;
+  lastErrorMessage?: string | null;
+  activatedAt?: string | null;
+  updatedAt: string;
+}
+
+export interface TelegramAgentLinkRecord {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userFullName: string;
+  organizationId: string;
+  organizationName: string;
+  role: UserRole;
+  status: 'pending_code' | 'linked' | 'revoked';
+  telegramUserId?: string | null;
+  telegramChatId?: string | null;
+  telegramUsername?: string | null;
+  activeOrganizationId?: string | null;
+  activeConversationId?: string | null;
+  notificationsEnabled: boolean;
+  codeExpiresAt?: string | null;
+  linkedAt?: string | null;
+  updatedAt: string;
+}
+
+export interface TelegramAgentLinkCodeResponse {
+  linkingCode: string;
+  expiresAt: string;
+  centralBotUsername: string;
+  deepLinkUrl: string;
+  instructions: string[];
 }
 
 export interface WorkspaceCustomerRecord {
@@ -199,12 +318,15 @@ export type AgentAvailability = 'available' | 'busy' | 'offline';
 export interface WorkspaceAgentRecord {
   id: string;
   organizationId: string;
+  userId?: string | null;
   displayName: string;
   email: string;
   role: UserRole.Agent | UserRole.Supervisor | UserRole.Admin;
   specialty: string;
   availability: AgentAvailability;
   activeConversations: number;
+  telegramLinked?: boolean;
+  telegramUsername?: string | null;
   createdAt: string;
 }
 
@@ -222,6 +344,7 @@ export interface WorkspaceAnalyticsSummary {
   conversations: {
     total: number;
     open: number;
+    pending?: number;
     troubleshooting: number;
     escalated: number;
     resolved: number;
@@ -251,6 +374,7 @@ export interface PortalAssistantResponseDto {
 
 export type AdminModuleSectionKey =
   | 'onboarding-guide'
+  | 'integrations'
   | 'business-profile'
   | 'branding'
   | 'knowledge-overview'

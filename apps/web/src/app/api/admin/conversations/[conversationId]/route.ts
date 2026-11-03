@@ -1,10 +1,11 @@
-import { UserRole } from '@careflow/shared';
+import { SupportChannel, UserRole } from '@careflow/shared';
 import { hasMinimumRole } from '@careflow/support-engine';
 import {
   ReplyConversationSchema,
   UpdateConversationStatusSchema,
 } from '@careflow/validation';
 import {
+  readRuntimeSecret,
   requireAuthorizedWorkspaceSession,
   verifyRequestOriginCsrf,
 } from '@/lib/admin-auth';
@@ -13,7 +14,10 @@ import {
   jsonApiError,
   jsonApiSuccess,
 } from '@/lib/api-response';
-import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
+import {
+  getChannelIntegrationService,
+  getWorkspaceRepository,
+} from '@/lib/knowledge-runtime';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,15 +46,46 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const input = ReplyConversationSchema.parse(rawBody);
+    const senderDisplayName =
+      input.senderName?.trim() ||
+      auth.session.userName?.trim() ||
+      `${auth.session.organizationName ?? 'Workspace'} Support`;
+
     const repo = await getWorkspaceRepository();
-    const updated = await repo.replyToConversation({
+    let updated = await repo.replyToConversation({
       organizationId: auth.session.identity.organizationId,
       conversationId,
-      senderName:
-        input.senderName ?? `${auth.session.organizationName ?? 'Workspace'} Support`,
+      senderName: senderDisplayName,
+      senderUserId: auth.session.identity.userId,
       body: input.body,
+      isInternalNote: Boolean(input.isInternalNote),
       nextStatus: input.nextStatus,
     });
+
+    // If this is a public agent reply on a Telegram conversation, deliver through the central CustomCare bot
+    if (!input.isInternalNote && updated.channel === SupportChannel.Telegram) {
+      const lastMsg = updated.messages[updated.messages.length - 1];
+      if (lastMsg) {
+        const channelService = await getChannelIntegrationService();
+        await channelService.deliverAgentReplyToExternalChannel({
+          organizationId: auth.session.identity.organizationId,
+          conversation: updated,
+          messageId: lastMsg.id,
+          agentDisplayName: senderDisplayName,
+          body: input.body,
+          isInternalNote: false,
+          botToken: readRuntimeSecret('TELEGRAM_BOT_TOKEN'),
+        });
+        const refreshed = await repo.getConversationById(
+          auth.session.identity.organizationId,
+          conversationId,
+          { includeInternalNotes: true }
+        );
+        if (refreshed) {
+          updated = refreshed;
+        }
+      }
+    }
 
     return jsonApiSuccess(updated);
   } catch (err) {
@@ -80,7 +115,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const input = UpdateConversationStatusSchema.parse(rawBody);
 
-    // Agents can claim unassigned conversations for themselves or update status,
+    // Agents can claim unassigned conversations for themselves or update status/priority/category,
     // but reassigning conversations to other specialists requires Supervisor+ role.
     if (
       input.assignedAgentName !== undefined &&
@@ -102,7 +137,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       organizationId: auth.session.identity.organizationId,
       conversationId,
       status: input.status,
+      priority: input.priority,
+      category: input.category,
       assignedAgentName: input.assignedAgentName,
+      assignedAgentId: input.assignedAgentId,
+      actorUserId: auth.session.identity.userId,
+      actorName: auth.session.userName || auth.session.identity.email,
     });
 
     return jsonApiSuccess(updated);
@@ -110,4 +150,5 @@ export async function PATCH(request: Request, context: RouteContext) {
     return handleKnowledgeApiException(err);
   }
 }
+
 

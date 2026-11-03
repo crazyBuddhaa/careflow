@@ -43,6 +43,17 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     `ALTER TABLE users ADD COLUMN mfa_recovery_codes_json TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE users ADD COLUMN mfa_verified_at TEXT`,
     `ALTER TABLE users ADD COLUMN password_changed_at TEXT`,
+    `ALTER TABLE support_agents ADD COLUMN user_id TEXT`,
+    `ALTER TABLE support_conversations ADD COLUMN customer_identity_id TEXT`,
+    `ALTER TABLE support_conversations ADD COLUMN source_channel_ref TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE support_conversations ADD COLUMN assigned_agent_id TEXT`,
+    `ALTER TABLE support_conversations ADD COLUMN escalation_count INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE support_conversations ADD COLUMN last_message_at TEXT`,
+    `ALTER TABLE support_messages ADD COLUMN sender_user_id TEXT`,
+    `ALTER TABLE support_messages ADD COLUMN is_internal_note INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE support_messages ADD COLUMN external_message_id TEXT`,
+    `ALTER TABLE support_messages ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'delivered'`,
+    `ALTER TABLE support_messages ADD COLUMN delivery_error TEXT`,
   ];
   for (const alterSql of schemaAlterations) {
     try {
@@ -50,6 +61,165 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     } catch {
       // Column already exists or already upgraded
     }
+  }
+
+  // Upgrade support_conversations CHECK constraint to include 'pending' status if pre-existing
+  try {
+    const convMeta = await db
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'support_conversations'`
+      )
+      .first<{ sql: string }>();
+    if (convMeta?.sql && !convMeta.sql.includes("'pending'")) {
+      await db.prepare(`PRAGMA foreign_keys = OFF`).run();
+      await db
+        .prepare(
+          `CREATE TABLE support_conversations_v2 (
+            id TEXT PRIMARY KEY NOT NULL,
+            organization_id TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            customer_email TEXT NOT NULL,
+            customer_external_ref TEXT NOT NULL DEFAULT '',
+            customer_identity_id TEXT,
+            source_channel_ref TEXT NOT NULL DEFAULT '',
+            channel TEXT NOT NULL DEFAULT 'portal',
+            status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'pending', 'troubleshooting', 'escalated', 'resolved', 'closed')),
+            priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+            category TEXT NOT NULL DEFAULT 'General',
+            subject TEXT NOT NULL,
+            assigned_agent_id TEXT,
+            assigned_agent_name TEXT,
+            diagnostic_summary TEXT NOT NULL DEFAULT '',
+            escalation_count INTEGER NOT NULL DEFAULT 0,
+            last_message_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+            UNIQUE (id, organization_id)
+          )`
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO support_conversations_v2
+             (id, organization_id, customer_name, customer_email, customer_external_ref, customer_identity_id, source_channel_ref, channel, status, priority, category, subject, assigned_agent_id, assigned_agent_name, diagnostic_summary, escalation_count, last_message_at, created_at, updated_at)
+           SELECT id, organization_id, customer_name, customer_email, customer_external_ref, customer_identity_id, source_channel_ref, channel, status, priority, category, subject, assigned_agent_id, assigned_agent_name, diagnostic_summary, escalation_count, last_message_at, created_at, updated_at
+           FROM support_conversations`
+        )
+        .run();
+      await db.prepare(`DROP TABLE support_conversations`).run();
+      await db
+        .prepare(`ALTER TABLE support_conversations_v2 RENAME TO support_conversations`)
+        .run();
+      await db
+        .prepare(
+          `CREATE UNIQUE INDEX IF NOT EXISTS idx_support_conversations_id_org ON support_conversations (id, organization_id)`
+        )
+        .run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_support_conversations_org_status ON support_conversations (organization_id, status, updated_at DESC)`
+        )
+        .run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_support_conversations_org_customer ON support_conversations (organization_id, customer_email, updated_at DESC)`
+        )
+        .run();
+      await db.prepare(`PRAGMA foreign_keys = ON`).run();
+    }
+  } catch {
+    // Table already upgraded
+  }
+
+  // Upgrade support_messages CHECK constraint to include 'bot' sender_type if pre-existing
+  try {
+    const msgMeta = await db
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'support_messages'`
+      )
+      .first<{ sql: string }>();
+    if (msgMeta?.sql && !msgMeta.sql.includes("'bot'")) {
+      await db.prepare(`DROP TRIGGER IF EXISTS trg_support_messages_tenant_insert`).run();
+      await db.prepare(`DROP TRIGGER IF EXISTS trg_support_messages_tenant_update`).run();
+      await db
+        .prepare(
+          `CREATE TABLE support_messages_v2 (
+            id TEXT PRIMARY KEY NOT NULL,
+            conversation_id TEXT NOT NULL,
+            organization_id TEXT NOT NULL,
+            sender_type TEXT NOT NULL CHECK (sender_type IN ('customer', 'system', 'agent', 'bot')),
+            sender_name TEXT NOT NULL,
+            sender_user_id TEXT,
+            body TEXT NOT NULL,
+            is_internal_note INTEGER NOT NULL DEFAULT 0 CHECK (is_internal_note IN (0, 1)),
+            external_message_id TEXT,
+            delivery_status TEXT NOT NULL DEFAULT 'delivered' CHECK (delivery_status IN ('pending', 'sent', 'delivered', 'failed', 'internal')),
+            delivery_error TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES support_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id, organization_id) REFERENCES support_conversations(id, organization_id) ON DELETE CASCADE
+          )`
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO support_messages_v2
+             (id, conversation_id, organization_id, sender_type, sender_name, sender_user_id, body, is_internal_note, external_message_id, delivery_status, delivery_error, created_at)
+           SELECT id, conversation_id, organization_id, sender_type, sender_name, sender_user_id, body, is_internal_note, external_message_id, delivery_status, delivery_error, created_at
+           FROM support_messages`
+        )
+        .run();
+      await db.prepare(`DROP TABLE support_messages`).run();
+      await db
+        .prepare(`ALTER TABLE support_messages_v2 RENAME TO support_messages`)
+        .run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_support_messages_conv ON support_messages (conversation_id, created_at ASC)`
+        )
+        .run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_support_messages_org_conv ON support_messages (organization_id, conversation_id, created_at ASC)`
+        )
+        .run();
+      await db
+        .prepare(
+          `CREATE TRIGGER IF NOT EXISTS trg_support_messages_tenant_insert
+            BEFORE INSERT ON support_messages
+            FOR EACH ROW
+            BEGIN
+              SELECT CASE
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM support_conversations
+                  WHERE id = NEW.conversation_id AND organization_id = NEW.organization_id
+                )
+                THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: support_messages.organization_id must match parent support_conversations.organization_id')
+              END;
+            END`
+        )
+        .run();
+      await db
+        .prepare(
+          `CREATE TRIGGER IF NOT EXISTS trg_support_messages_tenant_update
+            BEFORE UPDATE ON support_messages
+            FOR EACH ROW
+            BEGIN
+              SELECT CASE
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM support_conversations
+                  WHERE id = NEW.conversation_id AND organization_id = NEW.organization_id
+                )
+                THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: support_messages.organization_id must match parent support_conversations.organization_id')
+              END;
+            END`
+        )
+        .run();
+    }
+  } catch {
+    // Table already upgraded
   }
 
   try {

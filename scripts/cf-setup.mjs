@@ -71,6 +71,8 @@ function buildWranglerConfig({ databaseName, databaseId, enableCustomDomainRoute
       CAREFLOW_EMAIL_FROM_NAME: 'CustomCare Support',
       CAREFLOW_EMAIL_FROM_ADDRESS: 'support@getcustomcare.xyz',
       CAREFLOW_ENFORCE_ADMIN_MFA: 'false',
+      CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME:
+        loadRuntimeSecret('CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME') || 'CustomCareBot',
     },
   };
 
@@ -244,7 +246,7 @@ async function main() {
   );
 
   if (databaseId) {
-    console.log(`Applying remote D1 SQL migrations (0001, 0002, 0003, 0004) to "${resolvedDbName}"...`);
+    console.log(`Applying remote D1 SQL migrations (0001, 0002, 0003, 0004, 0005) to "${resolvedDbName}"...`);
     execSync(`npx wrangler d1 migrations apply ${resolvedDbName} --remote`, {
       stdio: 'inherit',
       env: { ...process.env, CI: 'true' },

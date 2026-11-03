@@ -9,6 +9,8 @@ import {
   type BusinessPortalConfig,
   type CareFlowUserRecord,
   type CommunicationStyle,
+  type ConversationActivityLogItem,
+  type MessageDeliveryStatus,
   type OnboardingProgressReport,
   type OnboardingStepItemStatus,
   type PortalAccentTheme,
@@ -16,6 +18,7 @@ import {
   type PortalFaqItem,
   type PortalKnowledgePreviewItem,
   type PublicPortalSummary,
+  type SavedReplyRecord,
   type SupportProcedureItem,
   type UserWorkspaceMembership,
   type WorkspaceAgentRecord,
@@ -117,13 +120,17 @@ interface ConversationRow {
   customer_name: string;
   customer_email: string;
   customer_external_ref: string;
+  customer_identity_id?: string | null;
+  source_channel_ref?: string;
   channel: string;
   status: string;
   priority: string;
   category: string;
   subject: string;
+  assigned_agent_id?: string | null;
   assigned_agent_name: string | null;
   diagnostic_summary: string;
+  escalation_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -133,14 +140,32 @@ interface MessageRow {
   conversation_id: string;
   organization_id: string;
   sender_type: string;
+  sender_user_id?: string | null;
   sender_name: string;
   body: string;
+  is_internal_note?: number;
+  external_message_id?: string | null;
+  delivery_status?: string;
+  delivery_error?: string | null;
+  created_at: string;
+}
+
+interface ActivityLogRow {
+  id: string;
+  conversation_id: string;
+  organization_id: string;
+  actor_user_id: string | null;
+  actor_name: string;
+  actor_type: 'customer' | 'agent' | 'system' | 'bot';
+  action_type: ConversationActivityLogItem['actionType'];
+  details: string;
   created_at: string;
 }
 
 interface AgentRow {
   id: string;
   organization_id: string;
+  user_id?: string | null;
   display_name: string;
   email: string;
   role: string;
@@ -856,9 +881,47 @@ export class D1WorkspaceRepository {
      Workspace Operations: Conversations, Messages, Customers, Agents, Analytics
   ========================================================================= */
 
+  async logConversationActivity(params: {
+    conversationId: string;
+    organizationId: string;
+    actorUserId?: string | null;
+    actorName: string;
+    actorType: 'customer' | 'agent' | 'system' | 'bot';
+    actionType: ConversationActivityLogItem['actionType'];
+    details: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `INSERT INTO conversation_activity_logs
+           (id, conversation_id, organization_id, actor_user_id, actor_name, actor_type, action_type, details, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        createId('act'),
+        params.conversationId,
+        params.organizationId,
+        params.actorUserId ?? null,
+        params.actorName,
+        params.actorType,
+        params.actionType,
+        params.details,
+        now
+      )
+      .run();
+  }
+
   async listConversations(
     organizationId: string,
-    filters?: { status?: string; search?: string }
+    filters?: {
+      status?: string;
+      search?: string;
+      assignedAgentName?: string;
+      unassignedOnly?: boolean;
+      priority?: string;
+      channel?: string;
+      includeInternalNotes?: boolean;
+    }
   ): Promise<WorkspaceConversationItem[]> {
     const clauses = ['organization_id = ?'];
     const params: unknown[] = [organizationId];
@@ -868,12 +931,33 @@ export class D1WorkspaceRepository {
       params.push(filters.status);
     }
 
+    if (filters?.unassignedOnly) {
+      clauses.push('(assigned_agent_name IS NULL OR TRIM(assigned_agent_name) = \'\')');
+    } else if (filters?.assignedAgentName && filters.assignedAgentName.trim().length > 0) {
+      clauses.push('LOWER(assigned_agent_name) = ?');
+      params.push(filters.assignedAgentName.trim().toLowerCase());
+    }
+
+    if (filters?.priority && filters.priority !== 'all') {
+      if (filters.priority === 'high_or_urgent') {
+        clauses.push(`priority IN ('high', 'urgent')`);
+      } else {
+        clauses.push('priority = ?');
+        params.push(filters.priority);
+      }
+    }
+
+    if (filters?.channel && filters.channel !== 'all') {
+      clauses.push('channel = ?');
+      params.push(filters.channel);
+    }
+
     if (filters?.search && filters.search.trim().length > 0) {
       const q = `%${filters.search.trim().toLowerCase()}%`;
       clauses.push(
-        '(LOWER(subject) LIKE ? OR LOWER(customer_name) LIKE ? OR LOWER(customer_email) LIKE ? OR LOWER(category) LIKE ?)'
+        '(LOWER(subject) LIKE ? OR LOWER(customer_name) LIKE ? OR LOWER(customer_email) LIKE ? OR LOWER(category) LIKE ? OR LOWER(customer_external_ref) LIKE ?)'
       );
-      params.push(q, q, q, q);
+      params.push(q, q, q, q, q);
     }
 
     const { results: convRows } = await this.db
@@ -890,15 +974,28 @@ export class D1WorkspaceRepository {
       return [];
     }
 
-    const { results: msgRows } = await this.db
-      .prepare(
-        `SELECT *
-         FROM support_messages
-         WHERE organization_id = ?
-         ORDER BY created_at ASC`
-      )
-      .bind(organizationId)
-      .all<MessageRow>();
+    const includeInternal = filters?.includeInternalNotes !== false;
+
+    const [{ results: msgRows }, { results: activityRows }] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT *
+           FROM support_messages
+           WHERE organization_id = ?${includeInternal ? '' : ' AND COALESCE(is_internal_note, 0) = 0'}
+           ORDER BY created_at ASC`
+        )
+        .bind(organizationId)
+        .all<MessageRow>(),
+      this.db
+        .prepare(
+          `SELECT *
+           FROM conversation_activity_logs
+           WHERE organization_id = ?
+           ORDER BY created_at ASC`
+        )
+        .bind(organizationId)
+        .all<ActivityLogRow>(),
+    ]);
 
     const messagesByConv = new Map<string, WorkspaceMessageItem[]>();
     for (const m of msgRows) {
@@ -908,10 +1005,32 @@ export class D1WorkspaceRepository {
         conversationId: m.conversation_id,
         senderType: m.sender_type as MessageSenderType,
         senderName: m.sender_name,
+        senderUserId: m.sender_user_id ?? null,
         body: m.body,
+        isInternalNote: Boolean(m.is_internal_note),
+        externalMessageId: m.external_message_id ?? null,
+        deliveryStatus: (m.delivery_status as MessageDeliveryStatus) ?? 'delivered',
+        deliveryError: m.delivery_error ?? null,
         createdAt: m.created_at,
       });
       messagesByConv.set(m.conversation_id, list);
+    }
+
+    const activityByConv = new Map<string, ConversationActivityLogItem[]>();
+    for (const a of activityRows) {
+      const list = activityByConv.get(a.conversation_id) ?? [];
+      list.push({
+        id: a.id,
+        conversationId: a.conversation_id,
+        organizationId: a.organization_id,
+        actorUserId: a.actor_user_id,
+        actorName: a.actor_name,
+        actorType: a.actor_type as ConversationActivityLogItem['actorType'],
+        actionType: a.action_type as ConversationActivityLogItem['actionType'],
+        details: a.details,
+        createdAt: a.created_at,
+      });
+      activityByConv.set(a.conversation_id, list);
     }
 
     return convRows.map((c) => ({
@@ -920,17 +1039,33 @@ export class D1WorkspaceRepository {
       customerName: c.customer_name,
       customerEmail: c.customer_email,
       customerExternalRef: c.customer_external_ref,
+      customerIdentityId: c.customer_identity_id ?? null,
+      sourceChannelRef: c.source_channel_ref ?? '',
       channel: c.channel as SupportChannel,
       status: c.status as ConversationStatus,
       priority: c.priority as EscalationPriority,
       category: c.category,
       subject: c.subject,
+      assignedAgentId: c.assigned_agent_id ?? null,
       assignedAgentName: c.assigned_agent_name,
       diagnosticSummary: c.diagnostic_summary,
+      escalationCount: Number(c.escalation_count ?? 0),
       createdAt: c.created_at,
       updatedAt: c.updated_at,
       messages: messagesByConv.get(c.id) ?? [],
+      activityLogs: activityByConv.get(c.id) ?? [],
     }));
+  }
+
+  async getConversationById(
+    organizationId: string,
+    conversationId: string,
+    options?: { includeInternalNotes?: boolean }
+  ): Promise<WorkspaceConversationItem | null> {
+    const list = await this.listConversations(organizationId, {
+      includeInternalNotes: options?.includeInternalNotes,
+    });
+    return list.find((c) => c.id === conversationId) ?? null;
   }
 
   async createEscalatedConversation(params: {
@@ -938,6 +1073,8 @@ export class D1WorkspaceRepository {
     customerName: string;
     customerEmail: string;
     customerExternalRef?: string;
+    customerIdentityId?: string | null;
+    sourceChannelRef?: string;
     channel?: SupportChannel;
     status?: ConversationStatus;
     priority?: EscalationPriority;
@@ -945,6 +1082,7 @@ export class D1WorkspaceRepository {
     subject: string;
     message: string;
     transcriptSummary?: string;
+    externalMessageId?: string;
   }): Promise<WorkspaceConversationItem> {
     const now = new Date().toISOString();
     const convId = createId('conv');
@@ -952,23 +1090,25 @@ export class D1WorkspaceRepository {
     // Auto-assign an available specialist if one exists in this organization
     const availableAgent = await this.db
       .prepare(
-        `SELECT display_name FROM support_agents
+        `SELECT id, display_name FROM support_agents
          WHERE organization_id = ? AND availability = 'available'
          ORDER BY created_at ASC LIMIT 1`
       )
       .bind(params.organizationId)
-      .first<{ display_name: string }>();
+      .first<{ id: string; display_name: string }>();
 
     const status = params.status ?? ConversationStatus.Escalated;
     const channel = params.channel ?? SupportChannel.Portal;
     const priority = params.priority ?? EscalationPriority.Normal;
+    const assignedAgentId = availableAgent?.id ?? null;
     const assignedAgentName = availableAgent?.display_name ?? null;
+    const isEscalated = status === ConversationStatus.Escalated ? 1 : 0;
 
     await this.db
       .prepare(
         `INSERT INTO support_conversations
-           (id, organization_id, customer_name, customer_email, customer_external_ref, channel, status, priority, category, subject, assigned_agent_name, diagnostic_summary, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, customer_name, customer_email, customer_external_ref, customer_identity_id, source_channel_ref, channel, status, priority, category, subject, assigned_agent_id, assigned_agent_name, diagnostic_summary, escalation_count, last_message_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         convId,
@@ -976,13 +1116,18 @@ export class D1WorkspaceRepository {
         params.customerName,
         params.customerEmail,
         params.customerExternalRef ?? '',
+        params.customerIdentityId ?? null,
+        params.sourceChannelRef ?? '',
         channel,
         status,
         priority,
         params.category,
         params.subject,
+        assignedAgentId,
         assignedAgentName,
         params.transcriptSummary ?? '',
+        isEscalated,
+        now,
         now,
         now
       )
@@ -992,8 +1137,8 @@ export class D1WorkspaceRepository {
       await this.db
         .prepare(
           `INSERT INTO support_messages
-             (id, conversation_id, organization_id, sender_type, sender_name, body, created_at)
-           VALUES (?, ?, ?, 'system', 'CustomCare Handoff Context', ?, ?)`
+             (id, conversation_id, organization_id, sender_type, sender_name, body, is_internal_note, delivery_status, created_at)
+           VALUES (?, ?, ?, 'system', 'CustomCare Handoff Context', ?, 0, 'delivered', ?)`
         )
         .bind(
           createId('msg'),
@@ -1008,8 +1153,8 @@ export class D1WorkspaceRepository {
     await this.db
       .prepare(
         `INSERT INTO support_messages
-           (id, conversation_id, organization_id, sender_type, sender_name, body, created_at)
-         VALUES (?, ?, ?, 'customer', ?, ?, ?)`
+           (id, conversation_id, organization_id, sender_type, sender_name, body, is_internal_note, external_message_id, delivery_status, created_at)
+         VALUES (?, ?, ?, 'customer', ?, ?, 0, ?, 'delivered', ?)`
       )
       .bind(
         createId('msg'),
@@ -1017,12 +1162,21 @@ export class D1WorkspaceRepository {
         params.organizationId,
         params.customerName,
         params.message,
+        params.externalMessageId ?? null,
         now
       )
       .run();
 
-    const list = await this.listConversations(params.organizationId);
-    const created = list.find((c) => c.id === convId);
+    await this.logConversationActivity({
+      conversationId: convId,
+      organizationId: params.organizationId,
+      actorName: params.customerName,
+      actorType: 'customer',
+      actionType: 'conversation_created',
+      details: `Opened via ${channel} (${params.category})${assignedAgentName ? ` · Auto-assigned to ${assignedAgentName}` : ''}`,
+    });
+
+    const created = await this.getConversationById(params.organizationId, convId);
     if (!created) {
       throw new Error('Failed to load newly created support conversation.');
     }
@@ -1033,96 +1187,352 @@ export class D1WorkspaceRepository {
     organizationId: string;
     conversationId: string;
     senderName: string;
+    senderUserId?: string | null;
+    senderType?: MessageSenderType;
     body: string;
+    isInternalNote?: boolean;
+    externalMessageId?: string | null;
+    deliveryStatus?: MessageDeliveryStatus;
+    deliveryError?: string | null;
     nextStatus?: ConversationStatus;
   }): Promise<WorkspaceConversationItem> {
     const existing = await this.db
       .prepare(
-        `SELECT id, status FROM support_conversations
+        `SELECT id, status, assigned_agent_name FROM support_conversations
          WHERE id = ? AND organization_id = ?`
       )
       .bind(params.conversationId, params.organizationId)
-      .first<{ id: string; status: string }>();
+      .first<{ id: string; status: string; assigned_agent_name: string | null }>();
 
     if (!existing) {
       throw new Error('Conversation not found in this business workspace.');
     }
 
     const now = new Date().toISOString();
+    const isInternal = Boolean(params.isInternalNote);
+    const senderType = params.senderType ?? MessageSenderType.Agent;
+    const deliveryStatus: MessageDeliveryStatus = isInternal
+      ? 'internal'
+      : (params.deliveryStatus ?? 'delivered');
     const targetStatus = params.nextStatus ?? (existing.status as ConversationStatus);
+    const messageId = createId('msg');
 
     await this.db
       .prepare(
         `INSERT INTO support_messages
-           (id, conversation_id, organization_id, sender_type, sender_name, body, created_at)
-         VALUES (?, ?, ?, 'agent', ?, ?, ?)`
+           (id, conversation_id, organization_id, sender_type, sender_name, sender_user_id, body, is_internal_note, external_message_id, delivery_status, delivery_error, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
-        createId('msg'),
+        messageId,
         params.conversationId,
         params.organizationId,
+        senderType,
         params.senderName,
+        params.senderUserId ?? null,
         params.body,
+        isInternal ? 1 : 0,
+        params.externalMessageId ?? null,
+        deliveryStatus,
+        params.deliveryError ?? null,
         now
       )
       .run();
 
-    await this.db
-      .prepare(
-        `UPDATE support_conversations
-         SET status = ?, assigned_agent_name = COALESCE(assigned_agent_name, ?), updated_at = ?
-         WHERE id = ? AND organization_id = ?`
-      )
-      .bind(targetStatus, params.senderName, now, params.conversationId, params.organizationId)
-      .run();
+    if (isInternal) {
+      await this.db
+        .prepare(
+          `UPDATE support_conversations
+           SET updated_at = ?
+           WHERE id = ? AND organization_id = ?`
+        )
+        .bind(now, params.conversationId, params.organizationId)
+        .run();
 
-    const list = await this.listConversations(params.organizationId);
-    const updated = list.find((c) => c.id === params.conversationId);
+      await this.logConversationActivity({
+        conversationId: params.conversationId,
+        organizationId: params.organizationId,
+        actorUserId: params.senderUserId ?? null,
+        actorName: params.senderName,
+        actorType: 'agent',
+        actionType: 'internal_note_added',
+        details: 'Added private internal team note',
+      });
+    } else {
+      const nextAssigned =
+        senderType === MessageSenderType.Agent
+          ? existing.assigned_agent_name ?? params.senderName
+          : existing.assigned_agent_name;
+
+      await this.db
+        .prepare(
+          `UPDATE support_conversations
+           SET status = ?, assigned_agent_name = ?, last_message_at = ?, updated_at = ?
+           WHERE id = ? AND organization_id = ?`
+        )
+        .bind(targetStatus, nextAssigned, now, now, params.conversationId, params.organizationId)
+        .run();
+
+      if (targetStatus !== existing.status) {
+        await this.logConversationActivity({
+          conversationId: params.conversationId,
+          organizationId: params.organizationId,
+          actorUserId: params.senderUserId ?? null,
+          actorName: params.senderName,
+          actorType: senderType === MessageSenderType.Bot ? 'bot' : senderType === MessageSenderType.Customer ? 'customer' : 'agent',
+          actionType: 'status_changed',
+          details: `Status changed from ${existing.status} to ${targetStatus}`,
+        });
+      }
+    }
+
+    const updated = await this.getConversationById(params.organizationId, params.conversationId);
     if (!updated) {
       throw new Error('Failed to reload updated conversation.');
     }
     return updated;
   }
 
+  async updateMessageDeliveryStatus(params: {
+    organizationId: string;
+    messageId: string;
+    deliveryStatus: MessageDeliveryStatus;
+    externalMessageId?: string | null;
+    deliveryError?: string | null;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE support_messages
+         SET delivery_status = ?,
+             external_message_id = COALESCE(?, external_message_id),
+             delivery_error = ?
+         WHERE id = ? AND organization_id = ?`
+      )
+      .bind(
+        params.deliveryStatus,
+        params.externalMessageId ?? null,
+        params.deliveryError ?? null,
+        params.messageId,
+        params.organizationId
+      )
+      .run();
+  }
+
   async updateConversationStatus(params: {
     organizationId: string;
     conversationId: string;
-    status: ConversationStatus;
+    status?: ConversationStatus;
+    priority?: EscalationPriority;
+    category?: string;
     assignedAgentName?: string | null;
+    assignedAgentId?: string | null;
+    actorUserId?: string | null;
+    actorName?: string;
   }): Promise<WorkspaceConversationItem> {
     const existing = await this.db
       .prepare(
-        `SELECT id, assigned_agent_name FROM support_conversations
+        `SELECT id, status, priority, category, assigned_agent_id, assigned_agent_name, escalation_count
+         FROM support_conversations
          WHERE id = ? AND organization_id = ?`
       )
       .bind(params.conversationId, params.organizationId)
-      .first<{ id: string; assigned_agent_name: string | null }>();
+      .first<{
+        id: string;
+        status: string;
+        priority: string;
+        category: string;
+        assigned_agent_id: string | null;
+        assigned_agent_name: string | null;
+        escalation_count: number;
+      }>();
 
     if (!existing) {
       throw new Error('Conversation not found in this business workspace.');
     }
 
     const now = new Date().toISOString();
-    const nextAgent =
+    const nextStatus = (params.status ?? existing.status) as ConversationStatus;
+    const nextPriority = (params.priority ?? existing.priority) as EscalationPriority;
+    const nextCategory = params.category?.trim() || existing.category;
+    const nextAgentName =
       params.assignedAgentName !== undefined
         ? params.assignedAgentName
         : existing.assigned_agent_name;
+    const nextAgentId =
+      params.assignedAgentId !== undefined
+        ? params.assignedAgentId
+        : existing.assigned_agent_id;
+    const nextEscalationCount =
+      nextStatus === ConversationStatus.Escalated && existing.status !== ConversationStatus.Escalated
+        ? Number(existing.escalation_count ?? 0) + 1
+        : Number(existing.escalation_count ?? 0);
 
     await this.db
       .prepare(
         `UPDATE support_conversations
-         SET status = ?, assigned_agent_name = ?, updated_at = ?
+         SET status = ?, priority = ?, category = ?, assigned_agent_id = ?, assigned_agent_name = ?, escalation_count = ?, updated_at = ?
          WHERE id = ? AND organization_id = ?`
       )
-      .bind(params.status, nextAgent, now, params.conversationId, params.organizationId)
+      .bind(
+        nextStatus,
+        nextPriority,
+        nextCategory,
+        nextAgentId,
+        nextAgentName,
+        nextEscalationCount,
+        now,
+        params.conversationId,
+        params.organizationId
+      )
       .run();
 
-    const list = await this.listConversations(params.organizationId);
-    const updated = list.find((c) => c.id === params.conversationId);
+    const actorName = params.actorName || nextAgentName || 'Support Specialist';
+
+    if (params.assignedAgentName !== undefined && nextAgentName !== existing.assigned_agent_name) {
+      await this.logConversationActivity({
+        conversationId: params.conversationId,
+        organizationId: params.organizationId,
+        actorUserId: params.actorUserId ?? null,
+        actorName,
+        actorType: 'agent',
+        actionType: existing.assigned_agent_name ? 'transferred' : 'assigned',
+        details: nextAgentName
+          ? existing.assigned_agent_name
+            ? `Transferred from ${existing.assigned_agent_name} to ${nextAgentName}`
+            : `Assigned to ${nextAgentName}`
+          : `Unassigned from ${existing.assigned_agent_name}`,
+      });
+    }
+
+    if (params.priority !== undefined && nextPriority !== existing.priority) {
+      await this.logConversationActivity({
+        conversationId: params.conversationId,
+        organizationId: params.organizationId,
+        actorUserId: params.actorUserId ?? null,
+        actorName,
+        actorType: 'agent',
+        actionType: 'priority_changed',
+        details: `Priority changed from ${existing.priority} to ${nextPriority}`,
+      });
+    }
+
+    if (params.status !== undefined && nextStatus !== existing.status) {
+      const wasResolvedOrClosed =
+        existing.status === ConversationStatus.Resolved ||
+        existing.status === ConversationStatus.Closed;
+      const actionType =
+        wasResolvedOrClosed && nextStatus === ConversationStatus.Open
+          ? 'reopened'
+          : nextStatus === ConversationStatus.Escalated
+            ? 'escalated'
+            : 'status_changed';
+
+      await this.logConversationActivity({
+        conversationId: params.conversationId,
+        organizationId: params.organizationId,
+        actorUserId: params.actorUserId ?? null,
+        actorName,
+        actorType: 'agent',
+        actionType,
+        details: `Status changed from ${existing.status} to ${nextStatus}`,
+      });
+    }
+
+    const updated = await this.getConversationById(params.organizationId, params.conversationId);
     if (!updated) {
       throw new Error('Failed to reload updated conversation.');
     }
     return updated;
+  }
+
+  /* =========================================================================
+     Saved Replies (Tenant-Isolated Canned Responses)
+  ========================================================================= */
+
+  async listSavedReplies(organizationId: string): Promise<SavedReplyRecord[]> {
+    interface SavedReplyRow {
+      id: string;
+      organization_id: string;
+      title: string;
+      category: string;
+      body: string;
+      shortcut: string;
+      created_by_user_id: string | null;
+      created_at: string;
+      updated_at: string;
+    }
+
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM saved_replies
+         WHERE organization_id = ?
+         ORDER BY category ASC, title ASC`
+      )
+      .bind(organizationId)
+      .all<SavedReplyRow>();
+
+    return results.map((r) => ({
+      id: r.id,
+      organizationId: r.organization_id,
+      title: r.title,
+      category: r.category,
+      body: r.body,
+      shortcut: r.shortcut || undefined,
+      createdByUserId: r.created_by_user_id,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  async createSavedReply(
+    organizationId: string,
+    input: {
+      title: string;
+      category: string;
+      body: string;
+      shortcut?: string;
+      createdByUserId?: string | null;
+    }
+  ): Promise<SavedReplyRecord> {
+    const id = createId('srp');
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `INSERT INTO saved_replies
+           (id, organization_id, title, category, body, shortcut, created_by_user_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        organizationId,
+        input.title.trim(),
+        input.category.trim() || 'General',
+        input.body.trim(),
+        input.shortcut?.trim() ?? '',
+        input.createdByUserId ?? null,
+        now,
+        now
+      )
+      .run();
+
+    return {
+      id,
+      organizationId,
+      title: input.title.trim(),
+      category: input.category.trim() || 'General',
+      body: input.body.trim(),
+      shortcut: input.shortcut?.trim() || undefined,
+      createdByUserId: input.createdByUserId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  async deleteSavedReply(organizationId: string, savedReplyId: string): Promise<void> {
+    await this.db
+      .prepare(`DELETE FROM saved_replies WHERE id = ? AND organization_id = ?`)
+      .bind(savedReplyId, organizationId)
+      .run();
   }
 
   async listCustomers(organizationId: string, search?: string): Promise<WorkspaceCustomerRecord[]> {
@@ -1201,42 +1611,70 @@ export class D1WorkspaceRepository {
   }
 
   async listAgents(organizationId: string): Promise<WorkspaceAgentRecord[]> {
-    const [{ results: agentRows }, { results: openCounts }] = await Promise.all([
-      this.db
-        .prepare(
-          `SELECT * FROM support_agents
-           WHERE organization_id = ?
-           ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 ELSE 3 END, display_name ASC`
-        )
-        .bind(organizationId)
-        .all<AgentRow>(),
-      this.db
-        .prepare(
-          `SELECT assigned_agent_name, COUNT(*) AS cnt
-           FROM support_conversations
-           WHERE organization_id = ? AND status NOT IN ('resolved', 'closed') AND assigned_agent_name IS NOT NULL
-           GROUP BY assigned_agent_name`
-        )
-        .bind(organizationId)
-        .all<{ assigned_agent_name: string; cnt: number }>(),
-    ]);
+    interface TgLinkJoinRow {
+      user_email: string;
+      user_id: string;
+      telegram_username: string | null;
+      status: string;
+    }
+
+    const [{ results: agentRows }, { results: openCounts }, { results: tgLinks }] =
+      await Promise.all([
+        this.db
+          .prepare(
+            `SELECT * FROM support_agents
+             WHERE organization_id = ?
+             ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 ELSE 3 END, display_name ASC`
+          )
+          .bind(organizationId)
+          .all<AgentRow>(),
+        this.db
+          .prepare(
+            `SELECT assigned_agent_name, COUNT(*) AS cnt
+             FROM support_conversations
+             WHERE organization_id = ? AND status NOT IN ('resolved', 'closed') AND assigned_agent_name IS NOT NULL
+             GROUP BY assigned_agent_name`
+          )
+          .bind(organizationId)
+          .all<{ assigned_agent_name: string; cnt: number }>(),
+        this.db
+          .prepare(
+            `SELECT l.user_id, u.email AS user_email, l.telegram_username, l.status
+             FROM telegram_agent_links l
+             JOIN users u ON u.id = l.user_id
+             WHERE l.organization_id = ? AND l.status = 'linked'`
+          )
+          .bind(organizationId)
+          .all<TgLinkJoinRow>(),
+      ]);
 
     const loadMap = new Map<string, number>();
     for (const row of openCounts) {
       loadMap.set(row.assigned_agent_name, Number(row.cnt));
     }
 
-    return agentRows.map((a) => ({
-      id: a.id,
-      organizationId: a.organization_id,
-      displayName: a.display_name,
-      email: a.email,
-      role: a.role as WorkspaceAgentRecord['role'],
-      specialty: a.specialty,
-      availability: a.availability as AgentAvailability,
-      activeConversations: loadMap.get(a.display_name) ?? 0,
-      createdAt: a.created_at,
-    }));
+    const tgByEmail = new Map<string, TgLinkJoinRow>();
+    for (const link of tgLinks) {
+      tgByEmail.set(link.user_email.toLowerCase(), link);
+    }
+
+    return agentRows.map((a) => {
+      const tg = tgByEmail.get(a.email.toLowerCase());
+      return {
+        id: a.id,
+        organizationId: a.organization_id,
+        userId: a.user_id ?? tg?.user_id ?? null,
+        displayName: a.display_name,
+        email: a.email,
+        role: a.role as WorkspaceAgentRecord['role'],
+        specialty: a.specialty,
+        availability: a.availability as AgentAvailability,
+        activeConversations: loadMap.get(a.display_name) ?? 0,
+        telegramLinked: Boolean(tg),
+        telegramUsername: tg?.telegram_username ?? null,
+        createdAt: a.created_at,
+      };
+    });
   }
 
   async createAgent(
@@ -1251,25 +1689,46 @@ export class D1WorkspaceRepository {
   ): Promise<WorkspaceAgentRecord> {
     const now = new Date().toISOString();
     const id = createId('agt');
+    const normalizedEmail = input.email.trim().toLowerCase();
+
+    const existingUser = await this.db
+      .prepare(`SELECT id FROM users WHERE email = ?`)
+      .bind(normalizedEmail)
+      .first<{ id: string }>();
 
     await this.db
       .prepare(
         `INSERT INTO support_agents
-           (id, organization_id, display_name, email, role, specialty, availability, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, user_id, display_name, email, role, specialty, availability, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         id,
         organizationId,
-        input.displayName,
-        input.email.toLowerCase(),
+        existingUser?.id ?? null,
+        input.displayName.trim(),
+        normalizedEmail,
         input.role,
-        input.specialty,
+        input.specialty.trim(),
         input.availability,
         now,
         now
       )
       .run();
+
+    if (existingUser) {
+      await this.db
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, is_active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 1, ?, ?)
+           ON CONFLICT (organization_id, user_id) DO UPDATE SET
+             role = CASE WHEN organization_members.role = 'owner' THEN 'owner' ELSE excluded.role END,
+             is_active = 1,
+             updated_at = excluded.updated_at`
+        )
+        .bind(createId('mem'), organizationId, existingUser.id, input.role, now, now)
+        .run();
+    }
 
     const agents = await this.listAgents(organizationId);
     const created = agents.find((a) => a.id === id);
@@ -1298,6 +1757,9 @@ export class D1WorkspaceRepository {
     }
 
     const now = new Date().toISOString();
+    const nextRole = patch.role ?? existing.role;
+    const nextEmail = patch.email ? patch.email.trim().toLowerCase() : existing.email;
+
     await this.db
       .prepare(
         `UPDATE support_agents
@@ -1306,8 +1768,8 @@ export class D1WorkspaceRepository {
       )
       .bind(
         patch.displayName?.trim() || existing.display_name,
-        patch.email ? patch.email.trim().toLowerCase() : existing.email,
-        patch.role ?? existing.role,
+        nextEmail,
+        nextRole,
         patch.specialty ?? existing.specialty,
         patch.availability ?? existing.availability,
         now,
@@ -1316,6 +1778,23 @@ export class D1WorkspaceRepository {
       )
       .run();
 
+    if (patch.role) {
+      const targetUser = await this.db
+        .prepare(`SELECT id FROM users WHERE email = ?`)
+        .bind(nextEmail)
+        .first<{ id: string }>();
+      if (targetUser) {
+        await this.db
+          .prepare(
+            `UPDATE organization_members
+             SET role = CASE WHEN role = 'owner' THEN 'owner' ELSE ? END, updated_at = ?
+             WHERE organization_id = ? AND user_id = ?`
+          )
+          .bind(nextRole, now, organizationId, targetUser.id)
+          .run();
+      }
+    }
+
     const agents = await this.listAgents(organizationId);
     const updated = agents.find((a) => a.id === agentId);
     if (!updated) throw new Error('Failed to reload specialist.');
@@ -1323,6 +1802,46 @@ export class D1WorkspaceRepository {
   }
 
   async deleteAgent(organizationId: string, agentId: string): Promise<void> {
+    const existing = await this.db
+      .prepare(`SELECT * FROM support_agents WHERE id = ? AND organization_id = ?`)
+      .bind(agentId, organizationId)
+      .first<AgentRow>();
+
+    if (existing) {
+      const now = new Date().toISOString();
+      const targetUser = existing.user_id
+        ? { id: existing.user_id }
+        : await this.db
+            .prepare(`SELECT id FROM users WHERE email = ?`)
+            .bind(existing.email.toLowerCase())
+            .first<{ id: string }>();
+
+      if (targetUser) {
+        // Revoke non-owner membership and any active Telegram agent link for this business
+        await this.db
+          .prepare(
+            `UPDATE organization_members
+             SET is_active = CASE WHEN role = 'owner' THEN 1 ELSE 0 END, updated_at = ?
+             WHERE organization_id = ? AND user_id = ?`
+          )
+          .bind(now, organizationId, targetUser.id)
+          .run();
+
+        await this.db
+          .prepare(
+            `UPDATE telegram_agent_links
+             SET status = 'revoked',
+                 link_code_hash = NULL,
+                 telegram_user_id = NULL,
+                 telegram_chat_id = NULL,
+                 updated_at = ?
+             WHERE organization_id = ? AND user_id = ?`
+          )
+          .bind(now, organizationId, targetUser.id)
+          .run();
+      }
+    }
+
     await this.db
       .prepare(`DELETE FROM support_agents WHERE id = ? AND organization_id = ?`)
       .bind(agentId, organizationId)
@@ -1390,6 +1909,7 @@ export class D1WorkspaceRepository {
     const archivedFaqs = faqMap.get('archived') ?? 0;
 
     const open = convMap.get('open') ?? 0;
+    const pending = convMap.get('pending') ?? 0;
     const troubleshooting = convMap.get('troubleshooting') ?? 0;
     const escalated = convMap.get('escalated') ?? 0;
     const resolved = (convMap.get('resolved') ?? 0) + (convMap.get('closed') ?? 0);
@@ -1406,8 +1926,9 @@ export class D1WorkspaceRepository {
         publishedProcedures: (settings.procedures ?? []).filter((p) => p.isPublished).length,
       },
       conversations: {
-        total: open + troubleshooting + escalated + resolved,
+        total: open + pending + troubleshooting + escalated + resolved,
         open,
+        pending,
         troubleshooting,
         escalated,
         resolved,
@@ -2211,6 +2732,25 @@ export class D1WorkspaceRepository {
     const now = new Date().toISOString();
     await this.db
       .prepare(`UPDATE organizations SET onboarding_status = 'published', updated_at = ? WHERE id = ?`)
+      .bind(now, organizationId)
+      .run();
+
+    return this.getOnboardingProgress(organizationId);
+  }
+
+  async unpublishWorkspacePortal(organizationId: string): Promise<OnboardingProgressReport> {
+    const org = await this.getActiveOrgById(organizationId);
+    if (!org) {
+      throw new Error('Organization workspace not found.');
+    }
+
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `UPDATE organizations
+         SET onboarding_status = 'ready_to_publish', updated_at = ?
+         WHERE id = ?`
+      )
       .bind(now, organizationId)
       .run();
 

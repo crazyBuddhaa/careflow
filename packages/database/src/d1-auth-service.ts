@@ -23,7 +23,13 @@ import {
 } from './password-auth';
 import { resolveResendConfig } from './resend-email';
 
-export type RateLimitAction = 'login' | 'register' | 'password_reset' | 'mfa_verify';
+export type RateLimitAction =
+  | 'login'
+  | 'register'
+  | 'password_reset'
+  | 'mfa_verify'
+  | 'api'
+  | 'escalation';
 
 export interface RateLimitPolicy {
   maxAttempts: number;
@@ -36,6 +42,8 @@ const DEFAULT_RATE_LIMIT_POLICIES: Record<RateLimitAction, RateLimitPolicy> = {
   register: { maxAttempts: 5, windowSeconds: 15 * 60, cooldownSeconds: 15 * 60 },
   password_reset: { maxAttempts: 3, windowSeconds: 15 * 60, cooldownSeconds: 15 * 60 },
   mfa_verify: { maxAttempts: 5, windowSeconds: 10 * 60, cooldownSeconds: 10 * 60 },
+  api: { maxAttempts: 120, windowSeconds: 60, cooldownSeconds: 60 },
+  escalation: { maxAttempts: 30, windowSeconds: 60, cooldownSeconds: 60 },
 };
 
 const ROLE_WEIGHT: Record<UserRole, number> = {

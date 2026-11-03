@@ -249,6 +249,7 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS support_agents (
     id TEXT PRIMARY KEY NOT NULL,
     organization_id TEXT NOT NULL,
+    user_id TEXT,
     display_name TEXT NOT NULL,
     email TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'agent' CHECK (role IN ('agent', 'supervisor', 'admin')),
@@ -267,13 +268,18 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     customer_name TEXT NOT NULL,
     customer_email TEXT NOT NULL,
     customer_external_ref TEXT NOT NULL DEFAULT '',
+    customer_identity_id TEXT,
+    source_channel_ref TEXT NOT NULL DEFAULT '',
     channel TEXT NOT NULL DEFAULT 'portal',
-    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'troubleshooting', 'escalated', 'resolved', 'closed')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'pending', 'troubleshooting', 'escalated', 'resolved', 'closed')),
     priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
     category TEXT NOT NULL DEFAULT 'General',
     subject TEXT NOT NULL,
+    assigned_agent_id TEXT,
     assigned_agent_name TEXT,
     diagnostic_summary TEXT NOT NULL DEFAULT '',
+    escalation_count INTEGER NOT NULL DEFAULT 0,
+    last_message_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
@@ -289,9 +295,14 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     id TEXT PRIMARY KEY NOT NULL,
     conversation_id TEXT NOT NULL,
     organization_id TEXT NOT NULL,
-    sender_type TEXT NOT NULL CHECK (sender_type IN ('customer', 'system', 'agent')),
+    sender_type TEXT NOT NULL CHECK (sender_type IN ('customer', 'system', 'agent', 'bot')),
     sender_name TEXT NOT NULL,
+    sender_user_id TEXT,
     body TEXT NOT NULL,
+    is_internal_note INTEGER NOT NULL DEFAULT 0 CHECK (is_internal_note IN (0, 1)),
+    external_message_id TEXT,
+    delivery_status TEXT NOT NULL DEFAULT 'delivered' CHECK (delivery_status IN ('pending', 'sent', 'delivered', 'failed', 'internal')),
+    delivery_error TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (conversation_id) REFERENCES support_conversations(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
@@ -325,6 +336,119 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
         THEN RAISE(ABORT, 'CROSS_TENANT_VIOLATION: support_messages.organization_id must match parent support_conversations.organization_id')
       END;
     END`,
+  `CREATE TABLE IF NOT EXISTS channel_integrations (
+    id TEXT PRIMARY KEY NOT NULL,
+    organization_id TEXT NOT NULL,
+    channel TEXT NOT NULL CHECK (channel IN ('telegram', 'portal', 'web_widget', 'email', 'whatsapp', 'api_webhooks')),
+    status TEXT NOT NULL DEFAULT 'not_activated' CHECK (status IN ('not_activated', 'setup_required', 'pending_verification', 'connected', 'active', 'attention_required', 'disconnected')),
+    public_token TEXT UNIQUE,
+    public_token_hash TEXT UNIQUE,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    encrypted_credentials TEXT,
+    last_event_at TEXT,
+    last_error_message TEXT,
+    activated_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    UNIQUE (organization_id, channel)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_channel_integrations_org
+    ON channel_integrations (organization_id, channel, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_channel_integrations_public_token
+    ON channel_integrations (public_token)`,
+  `CREATE TABLE IF NOT EXISTS channel_customer_identities (
+    id TEXT PRIMARY KEY NOT NULL,
+    organization_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    external_user_id TEXT NOT NULL,
+    external_chat_id TEXT NOT NULL DEFAULT '',
+    external_username TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL,
+    email TEXT NOT NULL DEFAULT '',
+    verified_email INTEGER NOT NULL DEFAULT 0 CHECK (verified_email IN (0, 1)),
+    active_conversation_id TEXT,
+    last_interaction_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    UNIQUE (organization_id, channel, external_user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_channel_customer_identities_lookup
+    ON channel_customer_identities (organization_id, channel, external_user_id)`,
+  `CREATE TABLE IF NOT EXISTS telegram_customer_contexts (
+    telegram_user_id TEXT PRIMARY KEY NOT NULL,
+    telegram_chat_id TEXT NOT NULL,
+    active_organization_id TEXT NOT NULL,
+    public_token_used TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (active_organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS telegram_agent_links (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    organization_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_code' CHECK (status IN ('pending_code', 'linked', 'revoked')),
+    link_code_hash TEXT UNIQUE,
+    code_expires_at TEXT,
+    code_used_at TEXT,
+    telegram_user_id TEXT,
+    telegram_chat_id TEXT,
+    telegram_username TEXT,
+    active_organization_id TEXT,
+    active_conversation_id TEXT,
+    notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notifications_enabled IN (0, 1)),
+    linked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    UNIQUE (user_id, organization_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_telegram_agent_links_tg_user
+    ON telegram_agent_links (telegram_user_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_telegram_agent_links_org
+    ON telegram_agent_links (organization_id, status)`,
+  `CREATE TABLE IF NOT EXISTS webhook_event_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    provider TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    organization_id TEXT,
+    event_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'processed',
+    error_message TEXT,
+    processed_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_webhook_event_logs_provider_key
+    ON webhook_event_logs (provider, idempotency_key)`,
+  `CREATE TABLE IF NOT EXISTS conversation_activity_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    conversation_id TEXT NOT NULL,
+    organization_id TEXT NOT NULL,
+    actor_user_id TEXT,
+    actor_name TEXT NOT NULL,
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('customer', 'agent', 'system', 'bot')),
+    action_type TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (conversation_id, organization_id) REFERENCES support_conversations(id, organization_id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_conv_activity_logs_org_conv
+    ON conversation_activity_logs (organization_id, conversation_id, created_at ASC)`,
+  `CREATE TABLE IF NOT EXISTS saved_replies (
+    id TEXT PRIMARY KEY NOT NULL,
+    organization_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'General',
+    body TEXT NOT NULL,
+    shortcut TEXT NOT NULL DEFAULT '',
+    created_by_user_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_saved_replies_org
+    ON saved_replies (organization_id, category, title)`,
 ];
 
 export const KNOWLEDGE_D1_MIGRATION_SQL = [

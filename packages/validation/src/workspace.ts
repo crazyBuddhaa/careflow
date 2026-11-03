@@ -138,12 +138,74 @@ export const CreatePortalEscalationSchema = z.object({
 export const ReplyConversationSchema = z.object({
   senderName: z.string().trim().min(2).max(100).optional(),
   body: z.string().trim().min(2).max(2000),
+  isInternalNote: z.boolean().optional().default(false),
   nextStatus: z.nativeEnum(ConversationStatus).optional(),
 });
 
 export const UpdateConversationStatusSchema = z.object({
-  status: z.nativeEnum(ConversationStatus),
+  status: z.nativeEnum(ConversationStatus).optional(),
+  priority: z.nativeEnum(EscalationPriority).optional(),
+  category: z.string().trim().min(2).max(100).optional(),
   assignedAgentName: z.string().trim().max(100).nullable().optional(),
+  assignedAgentId: z.string().trim().max(100).nullable().optional(),
+});
+
+export const ChannelIntegrationCategorySchema = z.enum([
+  'telegram',
+  'portal',
+  'web_widget',
+  'email',
+  'whatsapp',
+  'api_webhooks',
+]);
+
+export const ConfigureChannelIntegrationSchema = z.object({
+  channel: ChannelIntegrationCategorySchema,
+  action: z.enum(['activate', 'deactivate', 'rotate_token', 'update_config']),
+  telegramConfig: z
+    .object({
+      welcomeMessage: z.string().trim().min(4).max(500).optional(),
+      supportCategories: z.array(z.string().trim().min(2).max(80)).min(1).max(15).optional(),
+      allowHumanEscalation: z.boolean().optional(),
+      escalationPriorityDefault: z.nativeEnum(EscalationPriority).optional(),
+      notifyAssignedAgentOnTelegram: z.boolean().optional(),
+      offlineMessage: z.string().trim().min(4).max(400).optional(),
+    })
+    .optional(),
+  widgetConfig: z
+    .object({
+      launcherTitle: z.string().trim().min(2).max(80).optional(),
+      welcomeGreeting: z.string().trim().min(4).max(300).optional(),
+      primaryColor: z.string().trim().min(4).max(24).optional(),
+      position: z.enum(['bottom-right', 'bottom-left']).optional(),
+      allowedOrigins: z.array(z.string().trim().max(180)).max(15).optional(),
+      allowHumanEscalation: z.boolean().optional(),
+    })
+    .optional(),
+  emailConfig: z
+    .object({
+      forwardingAddress: z.string().trim().email().max(160).optional(),
+      outboundReplyFromName: z.string().trim().min(2).max(100).optional(),
+      autoAcknowledgeEnabled: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const SavedReplyInputSchema = z.object({
+  title: z.string().trim().min(2).max(120),
+  category: z.string().trim().min(2).max(80).default('General'),
+  body: z.string().trim().min(4).max(2000),
+  shortcut: z.string().trim().max(40).optional().default(''),
+});
+
+export const PublicWidgetMessageSchema = z.object({
+  message: z.string().trim().min(1).max(1000),
+  sessionRef: z.string().trim().min(4).max(120).optional(),
+  customerName: z.string().trim().max(100).optional(),
+  customerEmail: z.string().trim().email().max(160).optional(),
+  category: z.string().trim().max(100).optional(),
+  escalateToHuman: z.boolean().optional().default(false),
+  idempotencyKey: z.string().trim().max(120).optional(),
 });
 
 export const CreateAgentSchema = z.object({

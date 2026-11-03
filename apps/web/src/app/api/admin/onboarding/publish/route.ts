@@ -41,3 +41,25 @@ export async function POST(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  try {
+    const csrf = verifyRequestOriginCsrf(request);
+    if (!csrf.allowed) {
+      return jsonApiError('FORBIDDEN', csrf.reason || 'CSRF validation failed.', 403);
+    }
+
+    const auth = await requireAuthorizedWorkspaceSession(UserRole.Admin);
+    if (!auth.authorized) {
+      return jsonApiError(auth.code, auth.message, auth.status);
+    }
+
+    const repo = await getWorkspaceRepository();
+    const progress = await repo.unpublishWorkspacePortal(auth.session.identity.organizationId);
+
+    return jsonApiSuccess(progress);
+  } catch (err) {
+    return handleKnowledgeApiException(err);
+  }
+}
+
+

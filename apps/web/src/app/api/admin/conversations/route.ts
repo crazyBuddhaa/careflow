@@ -23,11 +23,24 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const status = url.searchParams.get('status') ?? undefined;
     const search = url.searchParams.get('search') ?? undefined;
+    const assignedTo = url.searchParams.get('assignedTo') ?? undefined;
+    const priority = url.searchParams.get('priority') ?? undefined;
+    const channel = url.searchParams.get('channel') ?? undefined;
 
     const repo = await getWorkspaceRepository();
     const conversations = await repo.listConversations(auth.session.identity.organizationId, {
       status,
       search,
+      assignedAgentName:
+        assignedTo === 'me'
+          ? auth.session.userName || auth.session.identity.email
+          : assignedTo && assignedTo !== 'unassigned' && assignedTo !== 'all'
+            ? assignedTo
+            : undefined,
+      unassignedOnly: assignedTo === 'unassigned',
+      priority,
+      channel,
+      includeInternalNotes: true,
     });
     return jsonApiSuccess(conversations);
   } catch (err) {

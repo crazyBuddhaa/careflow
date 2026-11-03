@@ -21,6 +21,8 @@ export const ServerEnvSchema = PublicEnvSchema.extend({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+  CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME: z.string().min(2).default('CustomCareBot'),
+  CAREFLOW_INTEGRATION_ENCRYPTION_KEY: z.string().min(16).optional(),
   CAREFLOW_ADMIN_SESSION_SECRET: z.string().min(16).optional(),
   CAREFLOW_SQLITE_PATH: z.string().min(1).optional(),
   CAREFLOW_APP_BASE_URL: z.string().url().optional(),
@@ -88,6 +90,16 @@ export function validateServerEnv(rawEnv: Record<string, string | undefined>): {
     TELEGRAM_WEBHOOK_SECRET: isConfiguredValue(rawEnv.TELEGRAM_WEBHOOK_SECRET)
       ? rawEnv.TELEGRAM_WEBHOOK_SECRET
       : undefined,
+    CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME: isConfiguredValue(
+      rawEnv.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME
+    )
+      ? rawEnv.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME.replace(/^@/, '').trim()
+      : 'CustomCareBot',
+    CAREFLOW_INTEGRATION_ENCRYPTION_KEY: isConfiguredValue(
+      rawEnv.CAREFLOW_INTEGRATION_ENCRYPTION_KEY
+    )
+      ? rawEnv.CAREFLOW_INTEGRATION_ENCRYPTION_KEY
+      : undefined,
     CAREFLOW_ADMIN_SESSION_SECRET: isConfiguredValue(rawEnv.CAREFLOW_ADMIN_SESSION_SECRET)
       ? rawEnv.CAREFLOW_ADMIN_SESSION_SECRET
       : undefined,
@@ -140,6 +152,7 @@ export function validateServerEnv(rawEnv: Record<string, string | undefined>): {
       env: {
         ...fallbackPublic,
         NODE_ENV: 'development',
+        CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME: 'CustomCareBot',
       },
       status: {
         publicEnv: fallbackPublic,

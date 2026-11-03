@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   X,
   ShieldCheck,
+  Share2,
 } from 'lucide-react';
 import {
   CAREFLOW_NAME,
@@ -48,6 +49,7 @@ import {
 } from '@/components/admin/WorkspaceOperationsManager';
 import { WorkspaceOnboardingGuide } from '@/components/admin/WorkspaceOnboardingGuide';
 import { AccountSecurityManager } from '@/components/admin/AccountSecurityManager';
+import { ChannelIntegrationsManager } from '@/components/admin/ChannelIntegrationsManager';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 interface AdminModuleDescriptor {
@@ -63,6 +65,12 @@ const ADMIN_MODULES: AdminModuleDescriptor[] = [
     title: 'Onboarding Guide (7 Steps)',
     group: 'Workspace Setup',
     icon: Sparkles,
+  },
+  {
+    key: 'integrations',
+    title: 'Channels & Integrations',
+    group: 'Workspace Setup',
+    icon: Share2,
   },
   {
     key: 'knowledge-overview',
@@ -902,6 +910,14 @@ export function BusinessAdminShell() {
                 onNavigateSection={(sec) => setSelectedKey(sec)}
                 onPortalPublished={() => void loadSession()}
               />
+            ) : selectedKey === 'integrations' ? (
+              <ChannelIntegrationsManager
+                key={activeSession.organizationId}
+                organizationName={activeSession.organizationName}
+                organizationSlug={activeSession.organizationSlug}
+                currentUserId={activeSession.userId}
+                currentUserRole={activeSession.role}
+              />
             ) : selectedKey === 'account-security' ? (
               <AccountSecurityManager
                 key={activeSession.userId}
@@ -927,6 +943,8 @@ export function BusinessAdminShell() {
                 key={activeSession.organizationId}
                 activeSubView={selectedKey as OperationsSubView}
                 organizationName={activeSession.organizationName}
+                currentUserName={activeSession.userName}
+                currentUserRole={activeSession.role}
               />
             )}
           </main>
@@ -935,3 +953,4 @@ export function BusinessAdminShell() {
     </div>
   );
 }
+

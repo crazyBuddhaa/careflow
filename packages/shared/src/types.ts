@@ -2,10 +2,14 @@ export enum SupportChannel {
   WebWidget = 'web_widget',
   Telegram = 'telegram',
   Portal = 'portal',
+  Email = 'email',
+  WhatsApp = 'whatsapp',
+  Api = 'api',
 }
 
 export enum ConversationStatus {
   Open = 'open',
+  Pending = 'pending',
   Troubleshooting = 'troubleshooting',
   Escalated = 'escalated',
   Resolved = 'resolved',
@@ -32,7 +36,32 @@ export enum MessageSenderType {
   Customer = 'customer',
   System = 'system',
   Agent = 'agent',
+  Bot = 'bot',
 }
+
+export type MessageDeliveryStatus =
+  | 'pending'
+  | 'sent'
+  | 'delivered'
+  | 'failed'
+  | 'internal';
+
+export type ChannelIntegrationCategory =
+  | 'telegram'
+  | 'portal'
+  | 'web_widget'
+  | 'email'
+  | 'whatsapp'
+  | 'api_webhooks';
+
+export type ChannelIntegrationLifecycleStatus =
+  | 'not_activated'
+  | 'setup_required'
+  | 'pending_verification'
+  | 'connected'
+  | 'active'
+  | 'attention_required'
+  | 'disconnected';
 
 export type BusinessOnboardingStatus =
   | 'incomplete'

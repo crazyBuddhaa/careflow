@@ -2,6 +2,7 @@ import path from 'node:path';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import {
   D1AuthIdentityService,
+  D1ChannelIntegrationService,
   D1KnowledgeRepository,
   D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
@@ -135,3 +136,27 @@ export async function getAuthIdentityService(): Promise<D1AuthIdentityService> {
   const db = await getKnowledgeDatabase();
   return new D1AuthIdentityService(db);
 }
+
+export async function getChannelIntegrationService(): Promise<D1ChannelIntegrationService> {
+  const db = await getKnowledgeDatabase();
+  const env = getActiveCloudflareEnv();
+  const centralBotUsername =
+    (typeof env?.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME === 'string' &&
+      env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME.trim()) ||
+    process.env.CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME?.trim() ||
+    'CustomCareBot';
+  const encryptionKey =
+    (typeof env?.CAREFLOW_INTEGRATION_ENCRYPTION_KEY === 'string' &&
+      env.CAREFLOW_INTEGRATION_ENCRYPTION_KEY.trim()) ||
+    process.env.CAREFLOW_INTEGRATION_ENCRYPTION_KEY?.trim() ||
+    (typeof env?.CAREFLOW_ADMIN_SESSION_SECRET === 'string' &&
+      env.CAREFLOW_ADMIN_SESSION_SECRET.trim()) ||
+    process.env.CAREFLOW_ADMIN_SESSION_SECRET?.trim() ||
+    '';
+
+  return new D1ChannelIntegrationService(db, {
+    centralBotUsername,
+    encryptionKey,
+  });
+}
+
