@@ -20,14 +20,6 @@
       "service": "customcare"
     }
   ],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "customcare-db",
-      "database_id": "c084b502-1b1e-42a9-9d39-cd28ac841bec",
-      "migrations_dir": "cloudflare/d1/migrations"
-    }
-  ],
   "vars": {
     "NEXT_PUBLIC_APP_NAME": "CustomCare",
     "NEXT_PUBLIC_APP_URL": "https://getcustomcare.xyz",
@@ -39,5 +31,27 @@
     "CAREFLOW_EMAIL_FROM_NAME": "CustomCare Support",
     "CAREFLOW_EMAIL_FROM_ADDRESS": "support@getcustomcare.xyz",
     "CAREFLOW_ENFORCE_ADMIN_MFA": "false"
-  }
+  },
+  "routes": [
+    {
+      "pattern": "getcustomcare.xyz",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.getcustomcare.xyz",
+      "custom_domain": true
+    },
+    {
+      "pattern": "*.getcustomcare.xyz/*",
+      "zone_name": "getcustomcare.xyz"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "customcare-db",
+      "database_id": "c084b502-1b1e-42a9-9d39-cd28ac841bec",
+      "migrations_dir": "cloudflare/d1/migrations"
+    }
+  ]
 }
