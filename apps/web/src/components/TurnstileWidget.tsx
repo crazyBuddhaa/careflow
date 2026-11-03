@@ -31,7 +31,16 @@ const BUILD_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() || '';
 export function TurnstileWidget({ onVerify, onExpire }: TurnstileWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
+  const onVerifyRef = useRef(onVerify);
+  const onExpireRef = useRef(onExpire);
+
+  useEffect(() => {
+    onVerifyRef.current = onVerify;
+    onExpireRef.current = onExpire;
+  }, [onVerify, onExpire]);
+
   const [siteKey, setSiteKey] = React.useState<string>(BUILD_SITE_KEY);
+  const [widgetError, setWidgetError] = React.useState<string | null>(null);
 
   useEffect(() => {
     if (BUILD_SITE_KEY) {
@@ -64,6 +73,7 @@ export function TurnstileWidget({ onVerify, onExpire }: TurnstileWidgetProps) {
     }
 
     let cancelled = false;
+    setWidgetError(null);
 
     function mountTurnstile() {
       if (cancelled || !containerRef.current || !window.turnstile) {
@@ -75,22 +85,31 @@ export function TurnstileWidget({ onVerify, onExpire }: TurnstileWidgetProps) {
         } catch {
           // ignore
         }
+        widgetIdRef.current = null;
       }
-      widgetIdRef.current = window.turnstile.render(containerRef.current, {
-        sitekey: siteKey,
-        theme: 'light',
-        callback: (token: string) => {
-          onVerify(token);
-        },
-        'expired-callback': () => {
-          onVerify('');
-          onExpire?.();
-        },
-        'error-callback': () => {
-          onVerify('');
-          onExpire?.();
-        },
-      });
+      try {
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          theme: 'light',
+          callback: (token: string) => {
+            setWidgetError(null);
+            onVerifyRef.current(token);
+          },
+          'expired-callback': () => {
+            onVerifyRef.current('');
+            onExpireRef.current?.();
+          },
+          'error-callback': () => {
+            onVerifyRef.current('');
+            onExpireRef.current?.();
+            setWidgetError(
+              'Security challenge could not load. Check that getcustomcare.xyz is added to your Cloudflare Turnstile widget domains or disable ad/script blockers.'
+            );
+          },
+        });
+      } catch {
+        setWidgetError('Unable to initialize Cloudflare Turnstile challenge.');
+      }
     }
 
     if (window.turnstile) {
@@ -106,6 +125,13 @@ export function TurnstileWidget({ onVerify, onExpire }: TurnstileWidgetProps) {
         script.async = true;
         script.defer = true;
         script.onload = mountTurnstile;
+        script.onerror = () => {
+          if (!cancelled) {
+            setWidgetError(
+              'Cloudflare Turnstile script was blocked by your browser (e.g. Brave Shields or an ad blocker). Please allow challenges.cloudflare.com.'
+            );
+          }
+        };
         document.head.appendChild(script);
       }
     }
@@ -118,17 +144,23 @@ export function TurnstileWidget({ onVerify, onExpire }: TurnstileWidgetProps) {
         } catch {
           // ignore
         }
+        widgetIdRef.current = null;
       }
     };
-  }, [siteKey, onVerify, onExpire]);
+  }, [siteKey]);
 
   if (!siteKey) {
     return null;
   }
 
   return (
-    <div className="pt-2">
-      <div ref={containerRef} className="min-h-[65px]" />
+    <div className="pt-2 space-y-1.5">
+      <div ref={containerRef} className="min-h-[65px] flex items-center justify-center rounded-xl bg-slate-50 border border-slate-200/80 p-1.5 overflow-hidden" />
+      {widgetError && (
+        <p className="text-[11px] font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+          {widgetError}
+        </p>
+      )}
     </div>
   );
 }

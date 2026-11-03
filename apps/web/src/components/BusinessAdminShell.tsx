@@ -48,6 +48,7 @@ import {
 } from '@/components/admin/WorkspaceOperationsManager';
 import { WorkspaceOnboardingGuide } from '@/components/admin/WorkspaceOnboardingGuide';
 import { AccountSecurityManager } from '@/components/admin/AccountSecurityManager';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 interface AdminModuleDescriptor {
   key: AdminModuleSectionKey;
@@ -179,6 +180,7 @@ export function BusinessAdminShell() {
   const [authTab, setAuthTab] = useState<'account' | 'mfa' | 'workspace_code'>('account');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [mfaChallengeToken, setMfaChallengeToken] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [workspaceIdentifier, setWorkspaceIdentifier] = useState('');
@@ -271,6 +273,7 @@ export function BusinessAdminShell() {
         body: JSON.stringify({
           email: loginEmail.trim(),
           password: loginPassword,
+          turnstileToken: turnstileToken || undefined,
         }),
       });
 
@@ -709,6 +712,11 @@ export function BusinessAdminShell() {
                   />
                 </div>
 
+                <TurnstileWidget
+                  onVerify={(t) => setTurnstileToken(t)}
+                  onExpire={() => setTurnstileToken('')}
+                />
+
                 {authError && (
                   <p role="alert" className="text-xs font-semibold text-rose-700">
                     {authError}
@@ -811,11 +819,11 @@ export function BusinessAdminShell() {
               </form>
             )}
 
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
               <span>Setting up a new business?</span>
               <Link
                 href="/onboarding"
-                className="font-bold text-teal-600 hover:text-teal-700"
+                className="font-bold text-teal-600 hover:text-teal-700 whitespace-nowrap"
               >
                 Register Account &rarr;
               </Link>
