@@ -351,11 +351,11 @@ export function WorkspaceOnboardingGuide({
   const isPublished = report?.status === 'published';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 w-full">
       {/* Onboarding Status Header Banner */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-8 shadow-sm overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2.5">
               <span
                 className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${

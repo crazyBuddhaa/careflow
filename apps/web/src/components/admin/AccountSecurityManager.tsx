@@ -322,12 +322,12 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 w-full">
       {/* Header */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-teal-700 text-xs font-bold uppercase tracking-wider">
-            <ShieldCheck className="w-4 h-4" />
+            <ShieldCheck className="w-4 h-4 shrink-0" />
             <span>CustomCare Identity & Account Security</span>
           </div>
           <h2 className="mt-1 text-xl font-bold text-slate-900">
@@ -341,7 +341,7 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
         <button
           type="button"
           onClick={() => void loadSecurityOverview()}
-          className="inline-flex items-center gap-1.5 py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 self-start sm:self-auto cursor-pointer"
+          className="inline-flex items-center gap-1.5 py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 self-start sm:self-auto shrink-0 cursor-pointer"
         >
           <RefreshCw className="w-3.5 h-3.5" />
           <span>Refresh</span>
@@ -351,22 +351,22 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
       {errorMessage && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs font-semibold text-rose-800 flex items-start gap-2.5">
           <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-          <span>{errorMessage}</span>
+          <span className="min-w-0 break-words">{errorMessage}</span>
         </div>
       )}
 
       {statusBanner && (
         <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-xs font-semibold text-teal-900 flex items-start gap-2.5">
           <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
-          <span>{statusBanner}</span>
+          <span className="min-w-0 break-words">{statusBanner}</span>
         </div>
       )}
 
       {/* Section 1: Email Verification Status */}
       {overview && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 space-y-4 overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
               <div
                 className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                   overview.user.emailVerified
@@ -380,8 +380,8 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
                   <MailWarning className="w-5 h-5" />
                 )}
               </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold text-slate-900 break-all">
                   Account Email: {overview.user.email}
                 </h3>
                 <p className="text-xs text-slate-600 mt-0.5">
@@ -392,7 +392,7 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
               </div>
             </div>
             <span
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase ${
+              className={`self-start shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase ${
                 overview.user.emailVerified
                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                   : 'bg-amber-50 text-amber-800 border border-amber-200'
@@ -424,26 +424,26 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
               {devVerificationToken && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 space-y-1">
                   <div className="font-bold">
-                    Development / Worker URL Verification Token Preview:
+                    Single-Use Verification Token:
                   </div>
-                  <code className="block font-mono text-[11px] break-all bg-white px-2.5 py-1.5 rounded border border-amber-200">
+                  <code className="block font-mono text-[11px] break-all bg-white px-2.5 py-1.5 rounded border border-amber-200 select-all">
                     {devVerificationToken}
                   </code>
                 </div>
               )}
 
-              <form onSubmit={handleConfirmEmailVerification} className="flex gap-2 max-w-md">
+              <form onSubmit={handleConfirmEmailVerification} className="flex flex-col sm:flex-row gap-2 max-w-md">
                 <input
                   type="text"
                   value={verifyTokenInput}
                   onChange={(e) => setVerifyTokenInput(e.target.value)}
                   placeholder="Paste single-use verification token"
-                  className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:border-teal-600 outline-none"
+                  className="w-full sm:flex-1 min-w-0 px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:border-teal-600 outline-none"
                 />
                 <button
                   type="submit"
                   disabled={verifyingEmail || !verifyTokenInput.trim()}
-                  className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+                  className="py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold shrink-0 cursor-pointer"
                 >
                   Verify Email
                 </button>
@@ -455,9 +455,9 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
 
       {/* Section 2: TOTP Multi-Factor Authentication (MFA) */}
       {overview && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 space-y-5 overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
               <div
                 className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                   overview.mfaEnabled
@@ -467,7 +467,7 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
               >
                 <Smartphone className="w-5 h-5" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-bold text-slate-900">
                   Multi-Factor Authentication (TOTP Authenticator App)
                 </h3>
@@ -479,7 +479,7 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
               </div>
             </div>
             <span
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase ${
+              className={`self-start shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase ${
                 overview.mfaEnabled
                   ? 'bg-teal-50 text-teal-800 border border-teal-200'
                   : 'bg-slate-100 text-slate-600'
@@ -558,12 +558,12 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
                     </span>
                   </div>
 
-                  <div className="md:col-span-8 space-y-3">
+                  <div className="md:col-span-8 space-y-3 min-w-0">
                     <div>
                       <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
                         Manual Setup Key (Base32)
                       </div>
-                      <code className="mt-1 block px-3 py-2 rounded-xl bg-white border border-slate-200 font-mono text-xs font-bold text-slate-900 select-all">
+                      <code className="mt-1 block px-3 py-2 rounded-xl bg-white border border-slate-200 font-mono text-xs font-bold text-slate-900 select-all break-all">
                         {mfaSetup.secret}
                       </code>
                     </div>
@@ -785,18 +785,18 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
                   key={sess.id}
                   className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-900">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900 break-words">
                         {sess.userAgent || 'Browser Session'}
                       </span>
                       {sess.isCurrent && (
-                        <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 border border-teal-200 text-[10px] font-bold uppercase">
+                        <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 border border-teal-200 text-[10px] font-bold uppercase shrink-0">
                           Current Device
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-slate-500 break-words">
                       IP: {sess.ipAddress || '127.0.0.1'} · Last active:{' '}
                       {new Date(sess.lastActiveAt).toLocaleString()} · Expires:{' '}
                       {new Date(sess.expiresAt).toLocaleString()}

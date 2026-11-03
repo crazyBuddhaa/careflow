@@ -369,34 +369,34 @@ export function BusinessAdminShell() {
   const workspaces = sessionState?.workspaces ?? [];
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+    <div className="min-h-screen w-full overflow-x-hidden flex flex-col bg-slate-50 text-slate-900">
       {/* Top Bar with Workspace Switcher */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 px-6 py-3.5">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4 px-4 sm:px-6 py-3 sm:py-3.5">
           {/* Left: Breadcrumbs & Workspace Switcher */}
-          <div className="flex items-center gap-3 whitespace-nowrap shrink-0">
-            <Link href="/" className="text-lg font-bold tracking-tight text-slate-900">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <Link href="/" className="text-base sm:text-lg font-bold tracking-tight text-slate-900 shrink-0">
               {CAREFLOW_NAME}
             </Link>
-            <span className="text-slate-300" aria-hidden="true">
+            <span className="text-slate-300 shrink-0" aria-hidden="true">
               /
             </span>
 
             {activeSession ? (
-              <div className="relative">
+              <div className="relative min-w-0">
                 <button
                   type="button"
                   onClick={() => setSwitcherOpen(!switcherOpen)}
-                  className="flex items-center gap-2 py-1.5 px-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all text-xs font-bold text-slate-900"
+                  className="flex items-center gap-1.5 sm:gap-2 py-1.5 px-2.5 sm:px-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all text-xs font-bold text-slate-900 max-w-full"
                 >
-                  <Building2 className="w-3.5 h-3.5 text-teal-600" />
-                  <span className="truncate max-w-[160px] sm:max-w-[220px]">
+                  <Building2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                  <span className="truncate max-w-[105px] sm:max-w-[200px]">
                     {activeSession.organizationName}
                   </span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-bold bg-slate-100 text-slate-600">
+                  <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] uppercase font-bold bg-slate-100 text-slate-600 shrink-0">
                     {activeSession.role}
                   </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 </button>
 
                 {/* Workspace Switcher Dropdown */}
@@ -406,7 +406,7 @@ export function BusinessAdminShell() {
                       className="fixed inset-0 z-40"
                       onClick={() => setSwitcherOpen(false)}
                     />
-                    <div className="absolute left-0 top-full mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 space-y-1">
+                    <div className="absolute left-0 top-full mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 space-y-1">
                       <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                         Your Businesses ({workspaces.length > 0 ? workspaces.length : 1})
                       </div>
@@ -824,11 +824,11 @@ export function BusinessAdminShell() {
         </main>
       ) : (
         /* Authenticated Admin Workspace Body */
-        <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
           {/* Sidebar Navigation */}
           <aside
             aria-label="Workspace Navigation"
-            className="lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 space-y-5"
+            className="min-w-0 w-full lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 space-y-5"
           >
             {(['Workspace Setup', 'Knowledge', 'Configuration', 'Operations'] as const).map((groupName) => {
               const items = ADMIN_MODULES.filter((m) => m.group === groupName);
@@ -868,18 +868,18 @@ export function BusinessAdminShell() {
           </aside>
 
           {/* Main Administration Panel */}
-          <main className="lg:col-span-8 xl:col-span-9 space-y-6">
+          <main className="min-w-0 w-full lg:col-span-8 xl:col-span-9 space-y-6">
             {activeSession.emailVerified === false && selectedKey !== 'account-security' && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="text-xs text-amber-900">
+                <div className="text-xs text-amber-900 min-w-0 break-words">
                   <span className="font-bold">Verify your account email:</span> Please confirm{' '}
-                  <span className="font-mono font-semibold">{activeSession.email}</span> to secure
+                  <span className="font-mono font-semibold break-all">{activeSession.email}</span> to secure
                   your CustomCare owner account and enable recovery alerts.
                 </div>
                 <button
                   type="button"
                   onClick={() => setSelectedKey('account-security')}
-                  className="shrink-0 py-1.5 px-3 rounded-xl bg-amber-900 hover:bg-amber-950 text-white text-xs font-bold transition-colors cursor-pointer"
+                  className="self-start sm:self-auto shrink-0 py-1.5 px-3 rounded-xl bg-amber-900 hover:bg-amber-950 text-white text-xs font-bold transition-colors cursor-pointer"
                 >
                   Verify Email &amp; Security &rarr;
                 </button>

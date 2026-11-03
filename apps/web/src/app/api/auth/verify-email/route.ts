@@ -15,9 +15,64 @@ import { getAuthIdentityService } from '@/lib/knowledge-runtime';
 
 export const dynamic = 'force-dynamic';
 
+async function handleIssueAndSendVerificationEmail() {
+  const session = await resolveServerAdminSession();
+  if (!session.identity || !session.identity.email) {
+    return jsonApiError('UNAUTHORIZED', 'Sign in to request a verification email.', 401);
+  }
+
+  const authService = await getAuthIdentityService();
+  const rateCheck = await authService.checkRateLimit(
+    'password_reset',
+    `verify:${session.identity.userId}`
+  );
+  if (!rateCheck.allowed) {
+    return jsonApiError(
+      'RATE_LIMITED',
+      `Please wait ${rateCheck.retryAfterSeconds} seconds before requesting another verification email.`,
+      429
+    );
+  }
+
+  await authService.recordRateLimitAttempt(
+    'password_reset',
+    `verify:${session.identity.userId}`
+  );
+
+  const { rawToken, expiresAt } = await authService.issueEmailVerificationToken(
+    session.identity.userId
+  );
+
+  const runtimeEnv = getMergedRuntimeEnv();
+  const emailDelivery = await sendEmailVerificationMessage(
+    {
+      to: session.identity.email,
+      fullName: session.userName || 'CustomCare User',
+      rawToken,
+    },
+    undefined,
+    runtimeEnv
+  );
+
+  const sent = Boolean(emailDelivery.sent);
+  const message = sent
+    ? `Verification email sent to ${session.identity.email}. Check your inbox (and spam folder) for your verification link or token.`
+    : `Transactional email delivery via Resend is not active yet (${emailDelivery.errorMessage || 'verify sender domain in Resend'}). Use the single-use verification token below to verify your email immediately.`;
+
+  return jsonApiSuccess({
+    issued: true,
+    sent,
+    message,
+    expiresAt,
+    emailDelivery,
+    devToken: !sent || emailDelivery.devToken ? rawToken : undefined,
+  });
+}
+
 /**
  * POST /api/auth/verify-email
- * Verifies a single-use email verification token.
+ * Either issues/resends a verification token ({ action: 'resend' })
+ * or verifies a single-use email verification token ({ token: '...' }).
  */
 export async function POST(request: Request) {
   try {
@@ -33,6 +88,15 @@ export async function POST(request: Request) {
       return jsonApiError('INVALID_JSON', 'Request body must be valid JSON.', 400);
     }
 
+    if (
+      rawBody &&
+      typeof rawBody === 'object' &&
+      'action' in rawBody &&
+      (rawBody as { action?: unknown }).action === 'resend'
+    ) {
+      return await handleIssueAndSendVerificationEmail();
+    }
+
     const input = VerifyEmailTokenSchema.parse(rawBody);
     const { ipAddress, userAgent } = extractRequestClientMeta(request);
     const authService = await getAuthIdentityService();
@@ -45,6 +109,7 @@ export async function POST(request: Request) {
 
       return jsonApiSuccess({
         verified: true,
+        message: 'Your email address has been verified successfully.',
         user: verifiedUser,
       });
     } catch (err) {
@@ -65,7 +130,7 @@ export async function POST(request: Request) {
       }
       return jsonApiError(
         'INVALID_TOKEN',
-        'Invalid email verification token.',
+        'Invalid email verification token. Please check the token and try again.',
         400
       );
     }
@@ -85,49 +150,7 @@ export async function PUT(request: Request) {
       return jsonApiError('CSRF_REJECTED', csrf.reason || 'Forbidden cross-origin request.', 403);
     }
 
-    const session = await resolveServerAdminSession();
-    if (!session.identity || !session.identity.email) {
-      return jsonApiError('UNAUTHORIZED', 'Sign in to request a verification email.', 401);
-    }
-
-    const authService = await getAuthIdentityService();
-    const rateCheck = await authService.checkRateLimit(
-      'password_reset',
-      `verify:${session.identity.userId}`
-    );
-    if (!rateCheck.allowed) {
-      return jsonApiError(
-        'RATE_LIMITED',
-        `Please wait ${rateCheck.retryAfterSeconds} seconds before requesting another verification email.`,
-        429
-      );
-    }
-
-    await authService.recordRateLimitAttempt(
-      'password_reset',
-      `verify:${session.identity.userId}`
-    );
-
-    const { rawToken, expiresAt } = await authService.issueEmailVerificationToken(
-      session.identity.userId
-    );
-
-    const runtimeEnv = getMergedRuntimeEnv();
-    const emailDelivery = await sendEmailVerificationMessage(
-      {
-        to: session.identity.email,
-        fullName: session.userName || 'CareFlow User',
-        rawToken,
-      },
-      undefined,
-      runtimeEnv
-    );
-
-    return jsonApiSuccess({
-      issued: true,
-      expiresAt,
-      emailDelivery,
-    });
+    return await handleIssueAndSendVerificationEmail();
   } catch (err) {
     return handleKnowledgeApiException(err);
   }
