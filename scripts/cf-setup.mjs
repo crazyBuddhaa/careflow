@@ -246,11 +246,24 @@ async function main() {
   );
 
   if (databaseId) {
-    console.log(`Applying remote D1 SQL migrations (0001, 0002, 0003, 0004, 0005) to "${resolvedDbName}"...`);
+    console.log(`Applying remote D1 SQL migrations (0001..0006) to "${resolvedDbName}"...`);
     execSync(`npx wrangler d1 migrations apply ${resolvedDbName} --remote`, {
       stdio: 'inherit',
       env: { ...process.env, CI: 'true' },
     });
+
+    const safeAlterColumns = [
+      `ALTER TABLE channel_customer_identities ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE telegram_customer_contexts ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
+    ];
+    for (const sql of safeAlterColumns) {
+      spawnSync(
+        'npx',
+        ['wrangler', 'd1', 'execute', resolvedDbName, '--remote', '--command', sql],
+        { stdio: 'pipe', env: { ...process.env, CI: 'true' } }
+      );
+    }
+
     console.log('✅ Remote D1 migrations applied successfully!');
   }
 

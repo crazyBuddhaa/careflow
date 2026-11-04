@@ -158,6 +158,40 @@ export interface PublicPortalSummary {
   publishedFaqCount: number;
 }
 
+export interface ConversationAttachmentRecord {
+  id: string;
+  organizationId: string;
+  conversationId: string;
+  messageId?: string | null;
+  channel: SupportChannel;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  externalFileId?: string | null;
+  createdAt: string;
+}
+
+export type TelegramCustomerFlowStep =
+  | 'main_menu'
+  | 'payment_menu'
+  | 'payment_awaiting_details'
+  | 'product_select'
+  | 'product_issue'
+  | 'technical_menu'
+  | 'technical_awaiting_details'
+  | 'other_enquiry'
+  | 'conversation_select';
+
+export interface TelegramCustomerSessionState {
+  step: TelegramCustomerFlowStep;
+  selectedCategory?: string;
+  selectedSubIssue?: string;
+  selectedProduct?: string;
+  pendingTransactionRef?: string;
+  pendingPaymentAmountDate?: string;
+  updatedAt: string;
+}
+
 export interface WorkspaceMessageItem {
   id: string;
   conversationId: string;
@@ -169,6 +203,7 @@ export interface WorkspaceMessageItem {
   externalMessageId?: string | null;
   deliveryStatus?: MessageDeliveryStatus;
   deliveryError?: string | null;
+  attachments?: ConversationAttachmentRecord[];
   createdAt: string;
 }
 

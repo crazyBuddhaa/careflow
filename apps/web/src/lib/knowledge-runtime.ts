@@ -287,6 +287,121 @@ export async function getChannelIntegrationService(): Promise<D1ChannelIntegrati
   return new D1ChannelIntegrationService(db, {
     centralBotUsername,
     encryptionKey,
+    aiCompletionHandler: async ({
+      provider,
+      businessName,
+      question,
+      systemInstructions,
+      supportedTopics,
+      restrictedTopics,
+      knowledgeContext,
+    }) => {
+      const systemPrompt =
+        `You are the official customer support assistant for ${businessName}.\n` +
+        `${systemInstructions || ''}\n` +
+        `Supported Topics: ${supportedTopics.join(', ')}\n` +
+        `Restricted Topics (refuse politely): ${restrictedTopics.join(', ')}\n` +
+        `CRITICAL RULES:\n` +
+        `1. Only answer using facts explicitly present in the Business Knowledge Context below.\n` +
+        `2. Never invent policies, prices, product specifications, or payment verification statuses.\n` +
+        `3. Never ask for passwords, PINs, OTPs, or full card numbers.\n` +
+        `4. If the answer is not in the knowledge context, return an empty response or state that a human support specialist can assist.\n\n` +
+        `Business Knowledge Context:\n${knowledgeContext || '(No knowledge articles matched)'}`;
+
+      if (!knowledgeContext || knowledgeContext.trim().length === 0) {
+        return null;
+      }
+
+      if (provider === 'gemini') {
+        const geminiKey =
+          (typeof env?.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim()) ||
+          process.env.GEMINI_API_KEY?.trim() ||
+          '';
+        if (!geminiKey) return null;
+
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(
+            geminiKey
+          )}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              contents: [{ role: 'user', parts: [{ text: question }] }],
+              generationConfig: { temperature: 0.1, maxOutputTokens: 280 },
+            }),
+          }
+        );
+        if (!res.ok) return null;
+        const json = (await res.json()) as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        };
+        return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+      }
+
+      if (provider === 'groq') {
+        const groqKey =
+          (typeof env?.GROQ_API_KEY === 'string' && env.GROQ_API_KEY.trim()) ||
+          process.env.GROQ_API_KEY?.trim() ||
+          '';
+        if (!groqKey) return null;
+
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${groqKey}`,
+          },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            temperature: 0.1,
+            max_tokens: 280,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: question },
+            ],
+          }),
+        });
+        if (!res.ok) return null;
+        const json = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        return json.choices?.[0]?.message?.content?.trim() || null;
+      }
+
+      if (provider === 'openrouter') {
+        const openRouterKey =
+          (typeof env?.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY.trim()) ||
+          process.env.OPENROUTER_API_KEY?.trim() ||
+          '';
+        if (!openRouterKey) return null;
+
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${openRouterKey}`,
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            temperature: 0.1,
+            max_tokens: 280,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: question },
+            ],
+          }),
+        });
+        if (!res.ok) return null;
+        const json = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        return json.choices?.[0]?.message?.content?.trim() || null;
+      }
+
+      return null;
+    },
   });
 }
 

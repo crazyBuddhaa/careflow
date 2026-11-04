@@ -368,6 +368,7 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     email TEXT NOT NULL DEFAULT '',
     verified_email INTEGER NOT NULL DEFAULT 0 CHECK (verified_email IN (0, 1)),
     active_conversation_id TEXT,
+    session_state_json TEXT NOT NULL DEFAULT '{}',
     last_interaction_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -381,9 +382,26 @@ export const KNOWLEDGE_D1_SCHEMA_STATEMENTS: readonly string[] = [
     telegram_chat_id TEXT NOT NULL,
     active_organization_id TEXT NOT NULL,
     public_token_used TEXT NOT NULL,
+    session_state_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL,
     FOREIGN KEY (active_organization_id) REFERENCES organizations(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS conversation_attachments (
+    id TEXT PRIMARY KEY NOT NULL,
+    organization_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    message_id TEXT,
+    channel TEXT NOT NULL DEFAULT 'telegram',
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    file_size INTEGER NOT NULL DEFAULT 0,
+    external_file_id TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id, organization_id) REFERENCES support_conversations(id, organization_id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_conversation_attachments_org_conv
+    ON conversation_attachments (organization_id, conversation_id, created_at ASC)`,
   `CREATE TABLE IF NOT EXISTS telegram_agent_links (
     id TEXT PRIMARY KEY NOT NULL,
     user_id TEXT NOT NULL,

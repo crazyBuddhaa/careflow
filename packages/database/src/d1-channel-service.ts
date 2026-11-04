@@ -6,19 +6,26 @@ import {
   SupportChannel,
   UserRole,
   type AgentAvailability,
+  type BusinessPortalConfig,
   type ChannelIntegrationCategory,
   type ChannelIntegrationLifecycleStatus,
   type ChannelIntegrationRecord,
+  type ConversationAttachmentRecord,
   type EmailChannelConfig,
   type MessageDeliveryStatus,
   type TelegramAgentLinkCodeResponse,
   type TelegramAgentLinkRecord,
   type TelegramChannelConfig,
+  type TelegramCustomerFlowStep,
+  type TelegramCustomerSessionState,
   type WebWidgetChannelConfig,
   type WorkspaceConversationItem,
 } from '@careflow/shared';
 import type { D1DatabaseLike } from './d1-types';
-import { D1WorkspaceRepository } from './d1-workspace-repository';
+import {
+  D1WorkspaceRepository,
+  type ExternalAiCompletionHandler,
+} from './d1-workspace-repository';
 import { generateSecureToken, hashTokenSha256 } from './password-auth';
 
 function createChannelId(prefix: string): string {
@@ -135,6 +142,8 @@ export interface TelegramOutboundMessagePayload {
   chatId: string;
   text: string;
   replyMarkup?: Record<string, unknown>;
+  callbackQueryId?: string;
+  callbackAlertText?: string;
 }
 
 export type TelegramOutboundSender = (
@@ -158,6 +167,20 @@ export const defaultTelegramOutboundSender: TelegramOutboundSender = async (
   }
 
   try {
+    if (payload.callbackQueryId) {
+      await fetch(
+        `https://api.telegram.org/bot${botToken.trim()}/answerCallbackQuery`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callback_query_id: payload.callbackQueryId,
+            ...(payload.callbackAlertText ? { text: payload.callbackAlertText } : {}),
+          }),
+        }
+      ).catch(() => undefined);
+    }
+
     const response = await fetch(
       `https://api.telegram.org/bot${botToken.trim()}/sendMessage`,
       {
@@ -199,6 +222,22 @@ export const defaultTelegramOutboundSender: TelegramOutboundSender = async (
   }
 };
 
+export interface TelegramPhotoSizeItem {
+  file_id: string;
+  file_unique_id?: string;
+  width?: number;
+  height?: number;
+  file_size?: number;
+}
+
+export interface TelegramDocumentItem {
+  file_id: string;
+  file_unique_id?: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+}
+
 export interface TelegramUpdateEnvelope {
   update_id: number;
   message?: {
@@ -220,6 +259,30 @@ export interface TelegramUpdateEnvelope {
       last_name?: string;
     };
     text?: string;
+    caption?: string;
+    photo?: TelegramPhotoSizeItem[];
+    document?: TelegramDocumentItem;
+  };
+  edited_message?: {
+    message_id: number;
+    date?: number;
+    from?: {
+      id: number | string;
+      is_bot?: boolean;
+      first_name?: string;
+      last_name?: string;
+      username?: string;
+    };
+    chat: {
+      id: number | string;
+      type?: string;
+      title?: string;
+      username?: string;
+      first_name?: string;
+      last_name?: string;
+    };
+    text?: string;
+    caption?: string;
   };
   callback_query?: {
     id: string;
@@ -238,6 +301,30 @@ export interface TelegramUpdateEnvelope {
     data?: string;
   };
 }
+
+export const TELEGRAM_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB
+
+export const TELEGRAM_ALLOWED_ATTACHMENT_MIMES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+export const TELEGRAM_ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.pdf',
+  '.txt',
+  '.csv',
+  '.docx',
+]);
 
 interface DbChannelIntegrationRow {
   id: string;
@@ -280,6 +367,7 @@ export class D1ChannelIntegrationService {
   private readonly sendTelegram: TelegramOutboundSender;
   private readonly defaultCentralBotUsername: string;
   private readonly defaultEncryptionKey?: string;
+  private readonly aiCompletionHandler?: ExternalAiCompletionHandler;
 
   constructor(
     db: D1DatabaseLike,
@@ -288,16 +376,18 @@ export class D1ChannelIntegrationService {
       telegramSender?: TelegramOutboundSender;
       centralBotUsername?: string;
       encryptionKey?: string;
+      aiCompletionHandler?: ExternalAiCompletionHandler;
     }
   ) {
     this.db = db;
     this.workspaceRepo = options?.workspaceRepo ?? new D1WorkspaceRepository(db);
     this.sendTelegram = options?.telegramSender ?? defaultTelegramOutboundSender;
-    this.defaultCentralBotUsername = (options?.centralBotUsername || 'CustomCareBot').replace(
+    this.defaultCentralBotUsername = (options?.centralBotUsername || 'getcustomcarebot').replace(
       /^@/,
       ''
     );
     this.defaultEncryptionKey = options?.encryptionKey;
+    this.aiCompletionHandler = options?.aiCompletionHandler;
   }
 
   /* =========================================================================
@@ -1098,6 +1188,73 @@ export class D1ChannelIntegrationService {
     };
   }
 
+  /**
+   * Notifies a Telegram customer when their conversation status or assignment changes
+   * from the web dashboard or Telegram Agent Companion.
+   */
+  async notifyCustomerOfConversationStatusChange(params: {
+    organizationId: string;
+    conversation: WorkspaceConversationItem;
+    previousStatus?: ConversationStatus;
+    nextStatus?: ConversationStatus;
+    assignedAgentName?: string | null;
+    actorName?: string;
+    botToken?: string;
+  }): Promise<{ notified: boolean }> {
+    if (params.conversation.channel !== SupportChannel.Telegram) {
+      return { notified: false };
+    }
+
+    const chatId =
+      params.conversation.sourceChannelRef ||
+      params.conversation.customerExternalRef.replace(/^tg:/, '');
+    if (!chatId) {
+      return { notified: false };
+    }
+
+    const org = await this.db
+      .prepare(`SELECT name FROM organizations WHERE id = ?`)
+      .bind(params.organizationId)
+      .first<{ name: string }>();
+    const businessName = org?.name ?? 'Support';
+
+    if (
+      params.nextStatus === ConversationStatus.Resolved &&
+      params.previousStatus !== ConversationStatus.Resolved
+    ) {
+      const text =
+        `✅ Your support conversation (${params.conversation.id}) with ${businessName} has been marked as resolved${
+          params.actorName ? ` by ${params.actorName}` : ''
+        }.\n\n` +
+        `If you need any further help, tap an option below or send a new message anytime.`;
+      await this.sendTelegram(
+        {
+          chatId,
+          text,
+          replyMarkup: {
+            inline_keyboard: [
+              [
+                { text: '🆕 Start New Enquiry', callback_data: 'cc:conv:new' },
+                { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
+              ],
+            ],
+          },
+        },
+        params.botToken
+      );
+      return { notified: true };
+    }
+
+    if (params.assignedAgentName) {
+      const text =
+        `👤 Support specialist ${params.assignedAgentName} at ${businessName} has been assigned to your conversation (${params.conversation.id}). You can reply directly here anytime.`;
+      await this.sendTelegram({ chatId, text }, params.botToken);
+      return { notified: true };
+    }
+
+    return { notified: false };
+  }
+
   private async notifyLinkedAgentsOfEscalation(params: {
     organizationId: string;
     organizationName: string;
@@ -1130,7 +1287,7 @@ export class D1ChannelIntegrationService {
             `Customer: ${params.conversation.customerName}\n` +
             `Category: ${params.conversation.category} · Priority: ${params.conversation.priority.toUpperCase()}\n` +
             `Subject: ${params.conversation.subject}\n\n` +
-            `Reply with:\n/open ${params.conversation.id}\n/reply ${params.conversation.id} <your message>`,
+            `Reply with:\n/open ${params.conversation.id}\n/accept ${params.conversation.id}\n/reply ${params.conversation.id} <your message>`,
         },
         params.botToken
       );
@@ -1167,7 +1324,13 @@ export class D1ChannelIntegrationService {
     const dedup = await this.checkAndRecordIdempotencyKey({
       provider: 'telegram',
       idempotencyKey: `tg_upd_${update.update_id}`,
-      eventType: update.message ? 'message' : update.callback_query ? 'callback_query' : 'other',
+      eventType: update.message
+        ? 'message'
+        : update.callback_query
+          ? 'callback_query'
+          : update.edited_message
+            ? 'edited_message'
+            : 'other',
     });
 
     if (dedup.isDuplicate) {
@@ -1178,14 +1341,22 @@ export class D1ChannelIntegrationService {
       };
     }
 
-    const message = update.message;
+    const message = update.message ?? update.edited_message;
     const callbackQuery = update.callback_query;
 
-    const rawText = (message?.text ?? callbackQuery?.data ?? '').trim();
+    const hasAttachment = Boolean(
+      update.message?.photo?.length || update.message?.document
+    );
+    const rawText = (
+      message?.text ??
+      message?.caption ??
+      callbackQuery?.data ??
+      ''
+    ).trim();
     const fromUser = message?.from ?? callbackQuery?.from;
     const chatObj = message?.chat ?? callbackQuery?.message?.chat;
 
-    if (!fromUser || !chatObj || !rawText) {
+    if (!fromUser || !chatObj || (!rawText && !hasAttachment)) {
       return {
         handled: false,
         deduplicated: false,
@@ -1201,11 +1372,16 @@ export class D1ChannelIntegrationService {
       telegramUsername ||
       `Telegram User ${telegramUserId.slice(-4)}`;
 
-    const sendReply = async (text: string): Promise<string> => {
+    const sendReply = async (
+      text: string,
+      replyMarkup?: Record<string, unknown>
+    ): Promise<string> => {
       await this.sendTelegram(
         {
           chatId: telegramChatId,
           text,
+          replyMarkup,
+          callbackQueryId: callbackQuery?.id,
         },
         options?.botToken
       );
@@ -1268,7 +1444,11 @@ export class D1ChannelIntegrationService {
 
     // 3. Check for Customer Business Deep Link: `/start <BUSINESS_PUBLIC_TOKEN>`
     const startBusinessMatch = rawText.match(/^\/start\s+([A-Za-z0-9_-]{8,120})$/i);
-    if (startBusinessMatch && startBusinessMatch[1] && !startBusinessMatch[1].toLowerCase().startsWith('link_')) {
+    if (
+      startBusinessMatch &&
+      startBusinessMatch[1] &&
+      !startBusinessMatch[1].toLowerCase().startsWith('link_')
+    ) {
       const publicToken = startBusinessMatch[1].trim();
       return this.handleTelegramCustomerStart({
         telegramUserId,
@@ -1277,10 +1457,16 @@ export class D1ChannelIntegrationService {
         displayName,
         publicToken,
         botToken: options?.botToken,
+        callbackQueryId: callbackQuery?.id,
       });
     }
 
-    // 4. Determine whether this Telegram user is operating as a verified linked Agent
+    // 4. Customer Interactive Callback Queries (`cc:...`) always route to Customer Mode
+    const isCustomerCallback = Boolean(
+      callbackQuery?.data && callbackQuery.data.startsWith('cc:')
+    );
+
+    // 5. Determine whether this Telegram user is operating as a verified linked Agent
     const agentCommandPrefixes = [
       '/my',
       '/unassigned',
@@ -1295,17 +1481,31 @@ export class D1ChannelIntegrationService {
       '/pending',
       '/availability',
       '/workspace',
+      '/switch',
       '/unlink',
       '/agent',
       '/help',
     ];
-    const isExplicitAgentCommand = agentCommandPrefixes.some(
-      (cmd) => rawText.toLowerCase() === cmd || rawText.toLowerCase().startsWith(`${cmd} `)
-    );
+    const isExplicitAgentCommand =
+      !isCustomerCallback &&
+      agentCommandPrefixes.some(
+        (cmd) =>
+          rawText.toLowerCase() === cmd || rawText.toLowerCase().startsWith(`${cmd} `)
+      );
 
-    const activeAgentLinks = await this.resolveVerifiedAgentLinksForTelegramUser(telegramUserId);
+    const activeAgentLinks = isCustomerCallback
+      ? []
+      : await this.resolveVerifiedAgentLinksForTelegramUser(telegramUserId);
 
-    if (isExplicitAgentCommand || (activeAgentLinks.length > 0 && !rawText.toLowerCase().startsWith('/customer'))) {
+    const isCustomerMenuCommand =
+      /^\/(customer|menu|categories|new|conversations|human|escalate)\b/i.test(rawText);
+
+    if (
+      !isCustomerCallback &&
+      !isCustomerMenuCommand &&
+      (isExplicitAgentCommand ||
+        (activeAgentLinks.length > 0 && !hasAttachment))
+    ) {
       if (activeAgentLinks.length === 0) {
         const replyText = await sendReply(
           `🔒 Agent access denied. Your Telegram account is not linked to an active CustomCare workspace member.\n` +
@@ -1319,7 +1519,6 @@ export class D1ChannelIntegrationService {
         };
       }
 
-      // If the user is a linked agent AND has an active conversation selected or sent an agent command, handle in Agent Mode
       const primaryLink =
         activeAgentLinks.find((l) => l.organization_id === l.active_organization_id) ??
         activeAgentLinks[0]!;
@@ -1336,7 +1535,7 @@ export class D1ChannelIntegrationService {
       }
     }
 
-    // 5. Otherwise handle as Customer Support interaction in the customer's active business context
+    // 6. Otherwise handle as Customer Support interaction in the customer's active business context
     const strippedCustomerText = rawText.replace(/^\/customer\s*/i, '').trim() || rawText;
     return this.handleTelegramCustomerMessage({
       telegramUserId,
@@ -1344,6 +1543,10 @@ export class D1ChannelIntegrationService {
       telegramUsername,
       displayName,
       text: strippedCustomerText,
+      callbackData: callbackQuery?.data,
+      callbackQueryId: callbackQuery?.id,
+      photo: update.message?.photo,
+      document: update.message?.document,
       externalMessageId: message?.message_id ? String(message.message_id) : undefined,
       botToken: options?.botToken,
     });
@@ -1396,6 +1599,191 @@ export class D1ChannelIntegrationService {
     return results;
   }
 
+  private parseCustomerSessionState(rawJson?: string | null): TelegramCustomerSessionState {
+    if (rawJson) {
+      try {
+        const parsed = JSON.parse(rawJson) as Partial<TelegramCustomerSessionState>;
+        if (parsed && typeof parsed.step === 'string') {
+          return {
+            step: parsed.step as TelegramCustomerFlowStep,
+            selectedCategory: parsed.selectedCategory,
+            selectedSubIssue: parsed.selectedSubIssue,
+            selectedProduct: parsed.selectedProduct,
+            pendingTransactionRef: parsed.pendingTransactionRef,
+            pendingPaymentAmountDate: parsed.pendingPaymentAmountDate,
+            updatedAt: parsed.updatedAt || new Date().toISOString(),
+          };
+        }
+      } catch {
+        // use default
+      }
+    }
+    return {
+      step: 'main_menu',
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private async saveCustomerSessionState(params: {
+    identityId: string;
+    telegramUserId: string;
+    state: TelegramCustomerSessionState;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    const nextState: TelegramCustomerSessionState = {
+      ...params.state,
+      updatedAt: now,
+    };
+    const json = JSON.stringify(nextState);
+    await Promise.all([
+      this.db
+        .prepare(
+          `UPDATE channel_customer_identities
+           SET session_state_json = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(json, now, params.identityId)
+        .run()
+        .catch(() => undefined),
+      this.db
+        .prepare(
+          `UPDATE telegram_customer_contexts
+           SET session_state_json = ?, updated_at = ?
+           WHERE telegram_user_id = ?`
+        )
+        .bind(json, now, params.telegramUserId)
+        .run()
+        .catch(() => undefined),
+    ]);
+  }
+
+  private buildMainMenuInlineKeyboard(params: {
+    portalSettings: BusinessPortalConfig;
+    tgConfig: TelegramChannelConfig;
+    activeConversationsCount: number;
+  }): Record<string, unknown> {
+    const rows: Array<Array<{ text: string; callback_data: string }>> = [
+      [{ text: '💳 Payment or Deposit Issues', callback_data: 'cc:cat:payment' }],
+      [{ text: '📦 Product Support', callback_data: 'cc:cat:product' }],
+      [{ text: '⚙️ Technical Issues', callback_data: 'cc:cat:technical' }],
+      [{ text: '💬 Other Enquiries', callback_data: 'cc:cat:other' }],
+    ];
+
+    // Add any custom business-configured categories that aren't already covered by the 4 core flows
+    const coreKeywords = ['payment', 'deposit', 'billing', 'product', 'technical', 'other', 'general'];
+    const customCats = (params.tgConfig.supportCategories || [])
+      .filter((c) => {
+        const lower = c.toLowerCase();
+        return !coreKeywords.some((kw) => lower.includes(kw));
+      })
+      .slice(0, 3);
+
+    customCats.forEach((cat, idx) => {
+      rows.push([
+        {
+          text: `📌 ${cat.slice(0, 32)}`,
+          callback_data: `cc:customcat:${idx}`,
+        },
+      ]);
+    });
+
+    if (params.activeConversationsCount > 0) {
+      rows.push([
+        {
+          text: `📂 My Active Conversations (${params.activeConversationsCount})`,
+          callback_data: 'cc:conv:list',
+        },
+        {
+          text: '🆕 New Enquiry',
+          callback_data: 'cc:conv:new',
+        },
+      ]);
+    }
+
+    if (params.tgConfig.allowHumanEscalation) {
+      rows.push([{ text: '👤 Speak to an Agent', callback_data: 'cc:human' }]);
+    }
+
+    return { inline_keyboard: rows };
+  }
+
+  private buildPaymentMenuKeyboard(): Record<string, unknown> {
+    return {
+      inline_keyboard: [
+        [{ text: '⏳ My payment or deposit is pending', callback_data: 'cc:pay:pending' }],
+        [{ text: '💳 Account debited but not credited', callback_data: 'cc:pay:debited' }],
+        [{ text: '🔍 My payment is missing', callback_data: 'cc:pay:missing' }],
+        [{ text: '❓ I have another payment problem', callback_data: 'cc:pay:other' }],
+        [
+          { text: '👤 Speak to an Agent', callback_data: 'cc:human' },
+          { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
+        ],
+      ],
+    };
+  }
+
+  private buildTechnicalMenuKeyboard(): Record<string, unknown> {
+    return {
+      inline_keyboard: [
+        [{ text: '📱 Application not opening', callback_data: 'cc:tech:app_open' }],
+        [{ text: '🔐 Login problems', callback_data: 'cc:tech:login' }],
+        [{ text: '🛠️ Features not working', callback_data: 'cc:tech:features' }],
+        [{ text: '⚠️ Errors during operation', callback_data: 'cc:tech:errors' }],
+        [{ text: '🔄 Failed transactions', callback_data: 'cc:tech:failed_tx' }],
+        [{ text: '❓ Other technical difficulties', callback_data: 'cc:tech:other' }],
+        [
+          { text: '👤 Speak to an Agent', callback_data: 'cc:human' },
+          { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
+        ],
+      ],
+    };
+  }
+
+  private buildNavigationFooterKeyboard(
+    backCallback = 'cc:menu:main',
+    includeHuman = true
+  ): Record<string, unknown> {
+    const navRow: Array<{ text: string; callback_data: string }> = [
+      { text: '⬅️ Back', callback_data: backCallback },
+      { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
+      { text: '✖️ Cancel', callback_data: 'cc:cancel' },
+    ];
+    const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+    if (includeHuman) {
+      rows.push([{ text: '👤 Speak to an Agent', callback_data: 'cc:human' }]);
+    }
+    rows.push(navRow);
+    return { inline_keyboard: rows };
+  }
+
+  private resolveConfiguredBusinessProducts(
+    portalSettings: BusinessPortalConfig,
+    tgConfig: TelegramChannelConfig
+  ): string[] {
+    const candidates: string[] = [];
+    for (const cat of portalSettings.categories || []) {
+      if (cat.title && !/other|deposit|payment/i.test(cat.title)) {
+        candidates.push(cat.title.trim());
+      }
+    }
+    for (const topic of portalSettings.chatbot.supportedTopics || []) {
+      if (topic && !candidates.includes(topic.trim())) {
+        candidates.push(topic.trim());
+      }
+    }
+    for (const art of portalSettings.publishedKnowledge || []) {
+      if (art.title && candidates.length < 6 && !candidates.includes(art.title.trim())) {
+        candidates.push(art.title.trim().slice(0, 36));
+      }
+    }
+    for (const tc of tgConfig.supportCategories || []) {
+      if (tc && !candidates.includes(tc.trim())) {
+        candidates.push(tc.trim());
+      }
+    }
+    return candidates.slice(0, 5);
+  }
+
   private async handleTelegramCustomerStart(params: {
     telegramUserId: string;
     telegramChatId: string;
@@ -1403,6 +1791,7 @@ export class D1ChannelIntegrationService {
     displayName: string;
     publicToken: string;
     botToken?: string;
+    callbackQueryId?: string;
   }): Promise<{
     handled: boolean;
     deduplicated: boolean;
@@ -1430,7 +1819,11 @@ export class D1ChannelIntegrationService {
       const replyText =
         `⚠️ This business support link is invalid, inactive, or has been revoked. Please contact the business for an updated support link.`;
       await this.sendTelegram(
-        { chatId: params.telegramChatId, text: replyText },
+        {
+          chatId: params.telegramChatId,
+          text: replyText,
+          callbackQueryId: params.callbackQueryId,
+        },
         params.botToken
       );
       return {
@@ -1458,16 +1851,23 @@ export class D1ChannelIntegrationService {
       // use default
     }
 
+    const initialState: TelegramCustomerSessionState = {
+      step: 'main_menu',
+      updatedAt: now,
+    };
+    const stateJson = JSON.stringify(initialState);
+
     // Bind customer's active business context to this organization
     await this.db
       .prepare(
         `INSERT INTO telegram_customer_contexts
-           (telegram_user_id, telegram_chat_id, active_organization_id, public_token_used, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+           (telegram_user_id, telegram_chat_id, active_organization_id, public_token_used, session_state_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (telegram_user_id) DO UPDATE SET
            telegram_chat_id = excluded.telegram_chat_id,
            active_organization_id = excluded.active_organization_id,
            public_token_used = excluded.public_token_used,
+           session_state_json = excluded.session_state_json,
            updated_at = excluded.updated_at`
       )
       .bind(
@@ -1475,20 +1875,44 @@ export class D1ChannelIntegrationService {
         params.telegramChatId,
         integrationRow.organization_id,
         params.publicToken,
+        stateJson,
         now
       )
-      .run();
+      .run()
+      .catch(async () => {
+        // Fallback if session_state_json column not yet present
+        await this.db
+          .prepare(
+            `INSERT INTO telegram_customer_contexts
+               (telegram_user_id, telegram_chat_id, active_organization_id, public_token_used, updated_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (telegram_user_id) DO UPDATE SET
+               telegram_chat_id = excluded.telegram_chat_id,
+               active_organization_id = excluded.active_organization_id,
+               public_token_used = excluded.public_token_used,
+               updated_at = excluded.updated_at`
+          )
+          .bind(
+            params.telegramUserId,
+            params.telegramChatId,
+            integrationRow.organization_id,
+            params.publicToken,
+            now
+          )
+          .run();
+      });
 
     // Upsert tenant-scoped customer identity
     await this.db
       .prepare(
         `INSERT INTO channel_customer_identities
-           (id, organization_id, channel, external_user_id, external_chat_id, external_username, display_name, email, verified_email, last_interaction_at, created_at, updated_at)
-         VALUES (?, ?, 'telegram', ?, ?, ?, ?, ?, 0, ?, ?, ?)
+           (id, organization_id, channel, external_user_id, external_chat_id, external_username, display_name, email, verified_email, session_state_json, last_interaction_at, created_at, updated_at)
+         VALUES (?, ?, 'telegram', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
          ON CONFLICT (organization_id, channel, external_user_id) DO UPDATE SET
            external_chat_id = excluded.external_chat_id,
            external_username = excluded.external_username,
            display_name = excluded.display_name,
+           session_state_json = excluded.session_state_json,
            last_interaction_at = excluded.last_interaction_at,
            updated_at = excluded.updated_at`
       )
@@ -1500,16 +1924,58 @@ export class D1ChannelIntegrationService {
         params.telegramUsername,
         params.displayName,
         `tg.${params.telegramUserId}@telegram.customer`,
+        stateJson,
         now,
         now,
         now
       )
-      .run();
+      .run()
+      .catch(async () => {
+        await this.db
+          .prepare(
+            `INSERT INTO channel_customer_identities
+               (id, organization_id, channel, external_user_id, external_chat_id, external_username, display_name, email, verified_email, last_interaction_at, created_at, updated_at)
+             VALUES (?, ?, 'telegram', ?, ?, ?, ?, ?, 0, ?, ?, ?)
+             ON CONFLICT (organization_id, channel, external_user_id) DO UPDATE SET
+               external_chat_id = excluded.external_chat_id,
+               external_username = excluded.external_username,
+               display_name = excluded.display_name,
+               last_interaction_at = excluded.last_interaction_at,
+               updated_at = excluded.updated_at`
+          )
+          .bind(
+            createChannelId('cid'),
+            integrationRow.organization_id,
+            params.telegramUserId,
+            params.telegramChatId,
+            params.telegramUsername,
+            params.displayName,
+            `tg.${params.telegramUserId}@telegram.customer`,
+            now,
+            now,
+            now
+          )
+          .run();
+      });
 
     await this.db
       .prepare(`UPDATE channel_integrations SET last_event_at = ?, updated_at = ? WHERE id = ?`)
       .bind(now, now, integrationRow.id)
       .run();
+
+    // Count active conversations for this customer in this business
+    const allConvs = await this.workspaceRepo.listConversations(
+      integrationRow.organization_id,
+      { includeInternalNotes: false }
+    );
+    const activeCustomerConvs = allConvs.filter(
+      (c) =>
+        c.channel === SupportChannel.Telegram &&
+        (c.customerExternalRef === `tg:${params.telegramUserId}` ||
+          c.sourceChannelRef === params.telegramChatId) &&
+        c.status !== ConversationStatus.Resolved &&
+        c.status !== ConversationStatus.Closed
+    );
 
     const categoriesLine =
       tgConfig.supportCategories.length > 0
@@ -1517,11 +1983,23 @@ export class D1ChannelIntegrationService {
         : '';
 
     const replyText =
-      `👋 ${tgConfig.welcomeMessage}${categoriesLine}\n\n` +
-      `Send your question anytime, or type /human to connect with a support specialist at ${integrationRow.org_name}.`;
+      `Welcome to ${integrationRow.org_name}! 👋\n\n` +
+      `${tgConfig.welcomeMessage}${categoriesLine}\n\n` +
+      `How can we help you today? Choose an option below or type your question in your own words:`;
+
+    const replyMarkup = this.buildMainMenuInlineKeyboard({
+      portalSettings,
+      tgConfig,
+      activeConversationsCount: activeCustomerConvs.length,
+    });
 
     await this.sendTelegram(
-      { chatId: params.telegramChatId, text: replyText },
+      {
+        chatId: params.telegramChatId,
+        text: replyText,
+        replyMarkup,
+        callbackQueryId: params.callbackQueryId,
+      },
       params.botToken
     );
 
@@ -1534,12 +2012,176 @@ export class D1ChannelIntegrationService {
     };
   }
 
+  private validateTelegramAttachmentInput(params: {
+    photo?: TelegramPhotoSizeItem[];
+    document?: TelegramDocumentItem;
+  }): {
+    valid: boolean;
+    errorMessage?: string;
+    fileId?: string;
+    fileName?: string;
+    mimeType?: string;
+    fileSize?: number;
+  } {
+    if (params.photo && params.photo.length > 0) {
+      // Telegram provides photo sizes in ascending order; pick the highest resolution
+      const largestPhoto = params.photo[params.photo.length - 1]!;
+      const fileSize = Number(largestPhoto.file_size ?? 0);
+      if (fileSize > TELEGRAM_MAX_ATTACHMENT_BYTES) {
+        return {
+          valid: false,
+          errorMessage: `⚠️ Image exceeds the maximum allowed size of 10 MB. Please send a smaller screenshot or image.`,
+        };
+      }
+      return {
+        valid: true,
+        fileId: largestPhoto.file_id,
+        fileName: `telegram_photo_${largestPhoto.file_unique_id || Date.now()}.jpg`,
+        mimeType: 'image/jpeg',
+        fileSize,
+      };
+    }
+
+    if (params.document) {
+      const doc = params.document;
+      const fileSize = Number(doc.file_size ?? 0);
+      const rawName = (doc.file_name || 'telegram_document').trim();
+      const safeFileName = rawName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'document.bin';
+      const lowerName = safeFileName.toLowerCase();
+      const extMatch = lowerName.match(/\.[a-z0-9]+$/);
+      const ext = extMatch ? extMatch[0] : '';
+      const mimeType = (doc.mime_type || 'application/octet-stream').toLowerCase();
+
+      if (fileSize > TELEGRAM_MAX_ATTACHMENT_BYTES) {
+        return {
+          valid: false,
+          errorMessage: `⚠️ File "${safeFileName}" exceeds the 10 MB size limit. Please upload a file under 10 MB.`,
+        };
+      }
+
+      const mimeAllowed = TELEGRAM_ALLOWED_ATTACHMENT_MIMES.has(mimeType);
+      const extAllowed = ext ? TELEGRAM_ALLOWED_ATTACHMENT_EXTENSIONS.has(ext) : false;
+
+      if (!mimeAllowed && !extAllowed) {
+        return {
+          valid: false,
+          errorMessage:
+            `⚠️ Unsupported file type (${mimeType}). For security, only images (JPG, PNG, WebP) and documents (PDF, TXT, CSV, DOCX) are accepted.`,
+        };
+      }
+
+      return {
+        valid: true,
+        fileId: doc.file_id,
+        fileName: safeFileName,
+        mimeType,
+        fileSize,
+      };
+    }
+
+    return { valid: false };
+  }
+
+  private async countAvailableAgentsForOrg(organizationId: string): Promise<{
+    availableCount: number;
+    linkedCount: number;
+  }> {
+    const [availRow, linkedRow] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS cnt FROM support_agents
+           WHERE organization_id = ? AND availability = 'available'`
+        )
+        .bind(organizationId)
+        .first<{ cnt: number }>(),
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS cnt FROM telegram_agent_links l
+           JOIN organization_members om
+             ON om.organization_id = l.organization_id AND om.user_id = l.user_id
+           WHERE l.organization_id = ? AND l.status = 'linked' AND om.is_active = 1`
+        )
+        .bind(organizationId)
+        .first<{ cnt: number }>(),
+    ]);
+
+    return {
+      availableCount: Number(availRow?.cnt ?? 0),
+      linkedCount: Number(linkedRow?.cnt ?? 0),
+    };
+  }
+
+  private async ensureOrAppendCustomerConversation(params: {
+    organizationId: string;
+    displayName: string;
+    email: string;
+    telegramUserId: string;
+    telegramChatId: string;
+    identityId: string;
+    activeConv: WorkspaceConversationItem | null;
+    category: string;
+    subject: string;
+    messageBody: string;
+    targetStatus: ConversationStatus;
+    priority: EscalationPriority;
+    transcriptSummary?: string;
+    externalMessageId?: string;
+    forceNewConversation?: boolean;
+  }): Promise<WorkspaceConversationItem> {
+    const now = new Date().toISOString();
+    let conv = params.forceNewConversation ? null : params.activeConv;
+
+    if (!conv) {
+      conv = await this.workspaceRepo.createEscalatedConversation({
+        organizationId: params.organizationId,
+        customerName: params.displayName,
+        customerEmail: params.email,
+        customerExternalRef: `tg:${params.telegramUserId}`,
+        customerIdentityId: params.identityId,
+        sourceChannelRef: params.telegramChatId,
+        channel: SupportChannel.Telegram,
+        status: params.targetStatus,
+        priority: params.priority,
+        category: params.category,
+        subject: params.subject.slice(0, 90) || params.category,
+        message: params.messageBody,
+        transcriptSummary: params.transcriptSummary,
+        externalMessageId: params.externalMessageId,
+      });
+
+      await this.db
+        .prepare(
+          `UPDATE channel_customer_identities
+           SET active_conversation_id = ?, last_interaction_at = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(conv.id, now, now, params.identityId)
+        .run();
+    } else {
+      conv = await this.workspaceRepo.replyToConversation({
+        organizationId: params.organizationId,
+        conversationId: conv.id,
+        senderName: params.displayName,
+        senderType: MessageSenderType.Customer,
+        body: params.messageBody,
+        externalMessageId: params.externalMessageId,
+        nextStatus: params.targetStatus,
+      });
+    }
+
+    return conv;
+  }
+
   private async handleTelegramCustomerMessage(params: {
     telegramUserId: string;
     telegramChatId: string;
     telegramUsername: string;
     displayName: string;
     text: string;
+    callbackData?: string;
+    callbackQueryId?: string;
+    photo?: TelegramPhotoSizeItem[];
+    document?: TelegramDocumentItem;
     externalMessageId?: string;
     botToken?: string;
   }): Promise<{
@@ -1552,7 +2194,7 @@ export class D1ChannelIntegrationService {
   }> {
     const contextRow = await this.db
       .prepare(
-        `SELECT c.active_organization_id, c.public_token_used,
+        `SELECT c.active_organization_id, c.public_token_used, c.session_state_json,
                 o.name AS org_name, o.slug AS org_slug, o.is_active AS org_active,
                 ci.id AS integration_id, ci.status AS integration_status, ci.public_token AS current_public_token, ci.config_json
          FROM telegram_customer_contexts c
@@ -1565,6 +2207,7 @@ export class D1ChannelIntegrationService {
       .first<{
         active_organization_id: string;
         public_token_used: string;
+        session_state_json?: string | null;
         org_name: string;
         org_slug: string;
         org_active: number;
@@ -1572,7 +2215,33 @@ export class D1ChannelIntegrationService {
         integration_status: string | null;
         current_public_token: string | null;
         config_json: string | null;
-      }>();
+      }>()
+      .catch(async () => {
+        return this.db
+          .prepare(
+            `SELECT c.active_organization_id, c.public_token_used,
+                    o.name AS org_name, o.slug AS org_slug, o.is_active AS org_active,
+                    ci.id AS integration_id, ci.status AS integration_status, ci.public_token AS current_public_token, ci.config_json
+             FROM telegram_customer_contexts c
+             JOIN organizations o ON o.id = c.active_organization_id
+             LEFT JOIN channel_integrations ci
+               ON ci.organization_id = c.active_organization_id AND ci.channel = 'telegram'
+             WHERE c.telegram_user_id = ?`
+          )
+          .bind(params.telegramUserId)
+          .first<{
+            active_organization_id: string;
+            public_token_used: string;
+            session_state_json?: string | null;
+            org_name: string;
+            org_slug: string;
+            org_active: number;
+            integration_id: string | null;
+            integration_status: string | null;
+            current_public_token: string | null;
+            config_json: string | null;
+          }>();
+      });
 
     if (
       !contextRow ||
@@ -1582,9 +2251,13 @@ export class D1ChannelIntegrationService {
       contextRow.current_public_token !== contextRow.public_token_used
     ) {
       const replyText =
-        `⚠️ Please open a valid business support link (e.g. https://t.me/CustomCareBot?start=BUSINESS_TOKEN) to start or continue a support conversation.`;
+        `⚠️ Please open a valid business support link (e.g. https://t.me/${this.defaultCentralBotUsername}?start=BUSINESS_TOKEN) to start or continue a support conversation.`;
       await this.sendTelegram(
-        { chatId: params.telegramChatId, text: replyText },
+        {
+          chatId: params.telegramChatId,
+          text: replyText,
+          callbackQueryId: params.callbackQueryId,
+        },
         params.botToken
       );
       return {
@@ -1597,8 +2270,12 @@ export class D1ChannelIntegrationService {
 
     const organizationId = contextRow.active_organization_id;
     const now = new Date().toISOString();
+    const portalSettings = await this.workspaceRepo.getWorkspaceSettings(organizationId);
 
-    let tgConfig = this.getDefaultTelegramConfig(contextRow.org_name, []);
+    let tgConfig = this.getDefaultTelegramConfig(
+      contextRow.org_name,
+      portalSettings.chatbot.supportedTopics
+    );
     if (contextRow.config_json) {
       try {
         tgConfig = {
@@ -1621,6 +2298,7 @@ export class D1ChannelIntegrationService {
         id: string;
         active_conversation_id: string | null;
         email: string;
+        session_state_json?: string | null;
       }>();
 
     const syntheticEmail = `tg.${params.telegramUserId}@telegram.customer`;
@@ -1645,100 +2323,840 @@ export class D1ChannelIntegrationService {
           now
         )
         .run();
-      identity = { id: cid, active_conversation_id: null, email: syntheticEmail };
+      identity = {
+        id: cid,
+        active_conversation_id: null,
+        email: syntheticEmail,
+        session_state_json: '{}',
+      };
     }
 
-    // Check if there is an active open/pending/troubleshooting/escalated conversation for this customer in this business
+    const sessionState = this.parseCustomerSessionState(
+      identity.session_state_json || contextRow.session_state_json
+    );
+
+    // Load all active conversations for this customer in this business
+    const allOrgConvs = await this.workspaceRepo.listConversations(organizationId, {
+      includeInternalNotes: false,
+    });
+    const customerActiveConvs = allOrgConvs.filter(
+      (c) =>
+        c.channel === SupportChannel.Telegram &&
+        (c.customerExternalRef === `tg:${params.telegramUserId}` ||
+          c.sourceChannelRef === params.telegramChatId) &&
+        c.status !== ConversationStatus.Resolved &&
+        c.status !== ConversationStatus.Closed
+    );
+
     let activeConv: WorkspaceConversationItem | null = null;
     if (identity.active_conversation_id) {
-      const existing = await this.workspaceRepo.getConversationById(
-        organizationId,
-        identity.active_conversation_id
-      );
-      if (
-        existing &&
-        existing.status !== ConversationStatus.Resolved &&
-        existing.status !== ConversationStatus.Closed
-      ) {
-        activeConv = existing;
-      }
+      activeConv =
+        customerActiveConvs.find((c) => c.id === identity!.active_conversation_id) ?? null;
     }
 
+    const sendCustomerOutput = async (
+      text: string,
+      replyMarkup?: Record<string, unknown>
+    ): Promise<string> => {
+      await this.sendTelegram(
+        {
+          chatId: params.telegramChatId,
+          text,
+          replyMarkup,
+          callbackQueryId: params.callbackQueryId,
+        },
+        params.botToken
+      );
+      return text;
+    };
+
+    /* -----------------------------------------------------------------------
+       A. Handle File & Photo Attachments (Phase 6)
+    ----------------------------------------------------------------------- */
+    const hasAttachment = Boolean(params.photo?.length || params.document);
+    if (hasAttachment) {
+      const validation = this.validateTelegramAttachmentInput({
+        photo: params.photo,
+        document: params.document,
+      });
+
+      if (!validation.valid || !validation.fileId) {
+        const replyText = await sendCustomerOutput(
+          validation.errorMessage ||
+            `⚠️ Could not process that attachment. Please upload a valid image (JPG, PNG, WebP) or document (PDF, TXT, CSV, DOCX) under 10 MB.`,
+          this.buildNavigationFooterKeyboard('cc:menu:main', true)
+        );
+        return {
+          handled: true,
+          deduplicated: false,
+          mode: 'customer',
+          organizationId,
+          conversationId: activeConv?.id,
+          replyText,
+        };
+      }
+
+      const categoryForAttachment =
+        sessionState.selectedCategory ||
+        activeConv?.category ||
+        (sessionState.step.startsWith('payment')
+          ? 'Payment or Deposit Issues'
+          : sessionState.step.startsWith('product')
+            ? 'Product Support'
+            : sessionState.step.startsWith('technical')
+              ? 'Technical Issues'
+              : 'General Support');
+
+      const captionText = params.text
+        ? `${params.text}\n[Attachment: ${validation.fileName} (${validation.mimeType})]`
+        : `[Uploaded attachment: ${validation.fileName} (${validation.mimeType})]`;
+
+      activeConv = await this.ensureOrAppendCustomerConversation({
+        organizationId,
+        displayName: params.displayName,
+        email: identity.email || syntheticEmail,
+        telegramUserId: params.telegramUserId,
+        telegramChatId: params.telegramChatId,
+        identityId: identity.id,
+        activeConv,
+        category: categoryForAttachment,
+        subject: params.text || `Attachment: ${validation.fileName}`,
+        messageBody: captionText,
+        targetStatus: activeConv?.status ?? ConversationStatus.Open,
+        priority: activeConv?.priority ?? EscalationPriority.Normal,
+        externalMessageId: params.externalMessageId,
+      });
+
+      const lastCustomerMsg = activeConv.messages
+        .filter((m) => m.senderType === MessageSenderType.Customer)
+        .pop();
+
+      await this.workspaceRepo.createConversationAttachment({
+        organizationId,
+        conversationId: activeConv.id,
+        messageId: lastCustomerMsg?.id ?? null,
+        channel: SupportChannel.Telegram,
+        fileName: validation.fileName!,
+        mimeType: validation.mimeType!,
+        fileSize: validation.fileSize ?? 0,
+        externalFileId: validation.fileId,
+      });
+
+      const ackText =
+        `📎 Attachment received ("${validation.fileName}") and securely linked to your ${contextRow.org_name} support conversation (${activeConv.id}).\n\n` +
+        `You can add any additional details below, or tap "👤 Speak to an Agent" if you would like a support specialist to review your file right away.`;
+
+      activeConv = await this.workspaceRepo.replyToConversation({
+        organizationId,
+        conversationId: activeConv.id,
+        senderName: `${contextRow.org_name} Assistant`,
+        senderType: MessageSenderType.Bot,
+        body: ackText,
+      });
+
+      await sendCustomerOutput(
+        ackText,
+        this.buildNavigationFooterKeyboard('cc:menu:main', true)
+      );
+
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv.id,
+        replyText: ackText,
+      };
+    }
+
+    /* -----------------------------------------------------------------------
+       B. Handle Interactive Inline Button Callbacks & Navigation Commands
+    ----------------------------------------------------------------------- */
+    const cb = params.callbackData?.trim() || '';
+    const lowerText = params.text.trim().toLowerCase();
+
+    // Main Menu or /menu or /categories
+    if (
+      cb === 'cc:menu:main' ||
+      cb === 'cc:cancel' ||
+      lowerText === '/menu' ||
+      lowerText === '/categories' ||
+      lowerText === '/start'
+    ) {
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: { step: 'main_menu', updatedAt: now },
+      });
+
+      const menuHeader =
+        cb === 'cc:cancel'
+          ? `✖️ Current action cancelled.\n\nWelcome back to ${contextRow.org_name} Support! How can we help you today?`
+          : `🏠 ${contextRow.org_name} Support Menu\n\nChoose a support category below or type your question in your own words:`;
+
+      const replyMarkup = this.buildMainMenuInlineKeyboard({
+        portalSettings,
+        tgConfig,
+        activeConversationsCount: customerActiveConvs.length,
+      });
+
+      const replyText = await sendCustomerOutput(menuHeader, replyMarkup);
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    // Start New Enquiry (`cc:conv:new` or `/new`)
+    if (cb === 'cc:conv:new' || lowerText === '/new') {
+      await this.db
+        .prepare(
+          `UPDATE channel_customer_identities
+           SET active_conversation_id = NULL, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(now, identity.id)
+        .run();
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: { step: 'main_menu', updatedAt: now },
+      });
+
+      const replyText = await sendCustomerOutput(
+        `🆕 Ready to start a new support enquiry with ${contextRow.org_name}.\n\nSelect a topic below or describe your new question:`,
+        this.buildMainMenuInlineKeyboard({
+          portalSettings,
+          tgConfig,
+          activeConversationsCount: customerActiveConvs.length,
+        })
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        replyText,
+      };
+    }
+
+    // List / Switch Active Conversations (`cc:conv:list` or `/conversations`)
+    if (cb === 'cc:conv:list' || lowerText === '/conversations') {
+      if (customerActiveConvs.length === 0) {
+        const replyText = await sendCustomerOutput(
+          `📂 You have no open conversations with ${contextRow.org_name} right now. Choose a category below or send a message to start one:`,
+          this.buildMainMenuInlineKeyboard({
+            portalSettings,
+            tgConfig,
+            activeConversationsCount: 0,
+          })
+        );
+        return {
+          handled: true,
+          deduplicated: false,
+          mode: 'customer',
+          organizationId,
+          replyText,
+        };
+      }
+
+      const convButtons = customerActiveConvs.slice(0, 5).map((c) => [
+        {
+          text: `${c.id === activeConv?.id ? '✅ ' : '📂 '}${c.category}: ${c.subject.slice(0, 26)} (${c.status})`,
+          callback_data: `cc:conv:sel:${c.id}`,
+        },
+      ]);
+      convButtons.push([
+        { text: '🆕 Start New Enquiry', callback_data: 'cc:conv:new' },
+        { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
+      ]);
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: { step: 'conversation_select', updatedAt: now },
+      });
+
+      const listLines = customerActiveConvs
+        .slice(0, 5)
+        .map(
+          (c) =>
+            `• [${c.id}] ${c.category} — "${c.subject}" (${c.status.toUpperCase()})${
+              c.id === activeConv?.id ? ' [ACTIVE]' : ''
+            }`
+        )
+        .join('\n');
+
+      const replyText = await sendCustomerOutput(
+        `📂 Your Active Conversations with ${contextRow.org_name}:\n\n${listLines}\n\nSelect a conversation below to continue it, or start a new enquiry:`,
+        { inline_keyboard: convButtons }
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    // Select a specific conversation (`cc:conv:sel:<convId>`)
+    if (cb.startsWith('cc:conv:sel:')) {
+      const targetConvId = cb.slice('cc:conv:sel:'.length).trim();
+      const chosen = customerActiveConvs.find((c) => c.id === targetConvId);
+      if (!chosen) {
+        const replyText = await sendCustomerOutput(
+          `⚠️ That conversation is no longer active or could not be found. Returning to the main menu:`,
+          this.buildMainMenuInlineKeyboard({
+            portalSettings,
+            tgConfig,
+            activeConversationsCount: customerActiveConvs.length,
+          })
+        );
+        return {
+          handled: true,
+          deduplicated: false,
+          mode: 'customer',
+          organizationId,
+          replyText,
+        };
+      }
+
+      await this.db
+        .prepare(
+          `UPDATE channel_customer_identities
+           SET active_conversation_id = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(chosen.id, now, identity.id)
+        .run();
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'main_menu',
+          selectedCategory: chosen.category,
+          updatedAt: now,
+        },
+      });
+
+      const lastMsg = chosen.messages[chosen.messages.length - 1];
+      const replyText = await sendCustomerOutput(
+        `✅ Switched to conversation ${chosen.id} (${chosen.category}).\n` +
+          `Status: ${chosen.status.toUpperCase()}${
+            chosen.assignedAgentName ? ` · Assigned Specialist: ${chosen.assignedAgentName}` : ''
+          }\n` +
+          `${lastMsg ? `\nLatest message: "${lastMsg.body.slice(0, 140)}"\n` : ''}\n` +
+          `Send your next message or attachment below to continue this conversation.`,
+        this.buildNavigationFooterKeyboard('cc:conv:list', true)
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: chosen.id,
+        replyText,
+      };
+    }
+
+    /* -----------------------------------------------------------------------
+       C. Category 1: Payment or Deposit Issues (`cc:cat:payment` & `cc:pay:*`)
+    ----------------------------------------------------------------------- */
+    if (cb === 'cc:cat:payment') {
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'payment_menu',
+          selectedCategory: 'Payment or Deposit Issues',
+          updatedAt: now,
+        },
+      });
+
+      const replyText = await sendCustomerOutput(
+        `💳 Payment or Deposit Assistance (${contextRow.org_name})\n\n` +
+          `Please select the option that best describes your payment or deposit issue:\n\n` +
+          `🔒 Security Reminder: ${contextRow.org_name} will NEVER ask for your password, PIN, OTP, or full payment card number.`,
+        this.buildPaymentMenuKeyboard()
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    if (cb.startsWith('cc:pay:')) {
+      const subKey = cb.slice('cc:pay:'.length);
+      const subLabelMap: Record<string, string> = {
+        pending: 'My payment or deposit is pending',
+        debited: 'My account was debited but not credited',
+        missing: 'My payment is missing',
+        other: 'Another payment or deposit problem',
+      };
+      const subIssueLabel = subLabelMap[subKey] || 'Payment or deposit enquiry';
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'payment_awaiting_details',
+          selectedCategory: 'Payment or Deposit Issues',
+          selectedSubIssue: subIssueLabel,
+          updatedAt: now,
+        },
+      });
+
+      // Find any published payment/deposit procedure or FAQ from the business settings
+      const paymentProc = (portalSettings.procedures || []).find(
+        (p) =>
+          p.isPublished &&
+          /deposit|payment|billing|transfer|balance/i.test(`${p.title} ${p.category}`)
+      );
+      const procStepsText = paymentProc
+        ? `\n\n📋 Recommended Verification Steps (${paymentProc.title}):\n` +
+          paymentProc.steps.map((s) => `${s.stepNumber}. ${s.instruction}`).join('\n')
+        : `\n\n📋 Initial Verification Checklist:\n` +
+          `1. Check that your payment confirmation receipt shows a completed transfer.\n` +
+          `2. Verify the account identifier on the receipt matches your registered profile.\n` +
+          `3. Note that automated payment status is only confirmed once verified by ${contextRow.org_name}'s billing system or specialist team.`;
+
+      const promptText =
+        `💳 Selected: ${subIssueLabel}${procStepsText}\n\n` +
+        `To help us investigate or record your payment enquiry accurately, please reply with:\n` +
+        `• Your transaction reference or receipt ID\n` +
+        `• The payment date and amount\n` +
+        `• (Optional) Upload a payment confirmation screenshot or PDF receipt directly in this chat\n\n` +
+        `🔒 Never share your password, OTP, PIN, or full card number.`;
+
+      const replyText = await sendCustomerOutput(
+        promptText,
+        this.buildNavigationFooterKeyboard('cc:cat:payment', true)
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    /* -----------------------------------------------------------------------
+       D. Category 2: Product Support (`cc:cat:product` & `cc:prod:*`)
+    ----------------------------------------------------------------------- */
+    if (cb === 'cc:cat:product') {
+      const products = this.resolveConfiguredBusinessProducts(portalSettings, tgConfig);
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'product_select',
+          selectedCategory: 'Product Support',
+          updatedAt: now,
+        },
+      });
+
+      const productButtons = products.map((prod, idx) => [
+        {
+          text: `📦 ${prod.slice(0, 34)}`,
+          callback_data: `cc:prod:${idx}`,
+        },
+      ]);
+      productButtons.push([
+        { text: '👤 Speak to an Agent', callback_data: 'cc:human' },
+        { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
+      ]);
+
+      const replyText = await sendCustomerOutput(
+        `📦 Product & Service Support (${contextRow.org_name})\n\n` +
+          `Select the product or topic you need assistance with below, or type your product question directly:`,
+        { inline_keyboard: productButtons }
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    if (cb.startsWith('cc:prod:')) {
+      const idx = Number(cb.slice('cc:prod:'.length));
+      const products = this.resolveConfiguredBusinessProducts(portalSettings, tgConfig);
+      const selectedProduct = products[idx] || products[0] || 'Product Support';
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'product_issue',
+          selectedCategory: 'Product Support',
+          selectedProduct,
+          updatedAt: now,
+        },
+      });
+
+      // Retrieve any matching published article or FAQ for this product
+      const kbAnswer = await this.workspaceRepo.answerPortalQuestion(
+        contextRow.org_slug,
+        selectedProduct,
+        {
+          requirePublished: false,
+          viewerOrganizationId: organizationId,
+        }
+      );
+
+      const kbPreview =
+        kbAnswer && kbAnswer.resolutionLayer !== 'human-escalation'
+          ? `\n\n📘 Official Guidance:\n${kbAnswer.reply}`
+          : '';
+
+      const replyText = await sendCustomerOutput(
+        `📦 Product Selected: ${selectedProduct}${kbPreview}\n\n` +
+          `Please describe the issue you are experiencing or ask a question about ${selectedProduct}, and we will check ${contextRow.org_name}'s verified documentation or connect you with a specialist.`,
+        this.buildNavigationFooterKeyboard('cc:cat:product', true)
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    /* -----------------------------------------------------------------------
+       E. Category 3: Technical Issues (`cc:cat:technical` & `cc:tech:*`)
+    ----------------------------------------------------------------------- */
+    if (cb === 'cc:cat:technical') {
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'technical_menu',
+          selectedCategory: 'Technical Issues',
+          updatedAt: now,
+        },
+      });
+
+      const replyText = await sendCustomerOutput(
+        `⚙️ Technical Support (${contextRow.org_name})\n\n` +
+          `Which technical issue are you experiencing? Choose an option below or describe the error message:`,
+        this.buildTechnicalMenuKeyboard()
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    if (cb.startsWith('cc:tech:')) {
+      const techKey = cb.slice('cc:tech:'.length);
+      const techLabels: Record<string, { label: string; steps: string[] }> = {
+        app_open: {
+          label: 'Application not opening',
+          steps: [
+            '1. Check your internet connection and close any background VPN or proxy.',
+            '2. Force-close and reopen the application or refresh your browser tab.',
+            '3. Ensure you are running the latest version or try opening in a private/incognito window.',
+          ],
+        },
+        login: {
+          label: 'Login problems',
+          steps: [
+            '1. Verify that your registered email address is spelled correctly.',
+            '2. Check if multi-factor authentication (MFA) or email verification is required.',
+            '3. Use the official password reset option if you cannot recall your password (never share your password in chat).',
+          ],
+        },
+        features: {
+          label: 'Features not working',
+          steps: [
+            '1. Verify that all required fields on the current screen are completed.',
+            '2. Refresh your active session to reload workspace permissions.',
+            '3. Share a screenshot of the screen if a button or control remains disabled.',
+          ],
+        },
+        errors: {
+          label: 'Errors during operation',
+          steps: [
+            '1. Note the exact error message or code displayed on your screen.',
+            '2. Retry the action once after refreshing your session.',
+            '3. Send the error text or a screenshot below so our team can inspect it.',
+          ],
+        },
+        failed_tx: {
+          label: 'Failed transactions',
+          steps: [
+            '1. Check whether a transaction reference or error notice was generated.',
+            '2. Avoid submitting duplicate transactions immediately if a transfer is still processing.',
+            '3. Reply below with the timestamp and reference so we can check the status.',
+          ],
+        },
+        other: {
+          label: 'Other technical difficulties',
+          steps: [
+            '1. Describe what you were trying to do when the issue occurred.',
+            '2. Include your device/browser type and any error message or screenshot.',
+          ],
+        },
+      };
+
+      const chosenTech = techLabels[techKey] ?? techLabels.other!;
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'technical_awaiting_details',
+          selectedCategory: 'Technical Issues',
+          selectedSubIssue: chosenTech.label,
+          updatedAt: now,
+        },
+      });
+
+      // Check if business has a custom published procedure matching technical/workspace issues
+      const customTechProc = (portalSettings.procedures || []).find(
+        (p) =>
+          p.isPublished &&
+          !/deposit|payment/i.test(`${p.title} ${p.category}`)
+      );
+
+      const stepsBlock = customTechProc
+        ? customTechProc.steps.map((s) => `${s.stepNumber}. ${s.instruction}`).join('\n')
+        : chosenTech.steps.join('\n');
+
+      const replyText = await sendCustomerOutput(
+        `⚙️ Technical Issue: ${chosenTech.label}\n\n` +
+          `🛠️ Recommended Troubleshooting Steps:\n${stepsBlock}\n\n` +
+          `If the problem continues, please reply below with what happened (or upload a screenshot), or tap "👤 Speak to an Agent" to escalate to ${contextRow.org_name}'s technical team.`,
+        this.buildNavigationFooterKeyboard('cc:cat:technical', true)
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    /* -----------------------------------------------------------------------
+       F. Category 4 & Custom Categories: Other Enquiries (`cc:cat:other` / `cc:customcat:*`)
+    ----------------------------------------------------------------------- */
+    if (cb === 'cc:cat:other' || cb.startsWith('cc:customcat:')) {
+      let chosenCategory = 'Other Enquiries';
+      if (cb.startsWith('cc:customcat:')) {
+        const idx = Number(cb.slice('cc:customcat:'.length));
+        const coreKeywords = ['payment', 'deposit', 'billing', 'product', 'technical', 'other', 'general'];
+        const customCats = (tgConfig.supportCategories || []).filter((c) => {
+          const lower = c.toLowerCase();
+          return !coreKeywords.some((kw) => lower.includes(kw));
+        });
+        chosenCategory = customCats[idx] || 'General Support';
+      }
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          step: 'other_enquiry',
+          selectedCategory: chosenCategory,
+          updatedAt: now,
+        },
+      });
+
+      const replyText = await sendCustomerOutput(
+        `💬 ${chosenCategory} (${contextRow.org_name})\n\n` +
+          `Please type your question or describe how we can help you today. I will search ${contextRow.org_name}'s official knowledge base immediately or connect you with a human support agent.`,
+        this.buildNavigationFooterKeyboard('cc:menu:main', true)
+      );
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    /* -----------------------------------------------------------------------
+       G. Speak to a Human Agent (`cc:human` or `/human` or natural language)
+    ----------------------------------------------------------------------- */
     const explicitHumanRequest =
+      cb === 'cc:human' ||
       /^\/(human|escalate|agent)\b/i.test(params.text) ||
       /\b(human|agent|person|representative|specialist|talk to someone|live support)\b/i.test(
         params.text
       );
 
-    // Run deterministic chatbot & knowledge base for this specific business
-    const botAnswer = await this.workspaceRepo.answerPortalQuestion(
-      contextRow.org_slug,
-      params.text,
-      {
-        requirePublished: false,
-        viewerOrganizationId: organizationId,
-      }
-    );
+    // Security check: if customer accidentally sends sensitive credentials (PIN/OTP/Password/Full card)
+    const containsSensitiveSecretPattern =
+      /\b(my password is|my pin is|my otp is)\b/i.test(params.text) ||
+      /\b(?:\d[ -]*?){15,16}\b/.test(params.text);
+
+    const effectiveCustomerText =
+      cb === 'cc:human'
+        ? `Customer requested to speak with a human support agent${
+            sessionState.selectedCategory ? ` regarding ${sessionState.selectedCategory}` : ''
+          }${sessionState.selectedSubIssue ? ` (${sessionState.selectedSubIssue})` : ''}.`
+        : params.text;
+
+    // Run priority-ordered natural language resolution (Rules -> KB -> Procedures -> Optional AI Fallback -> Escalation)
+    const botAnswer =
+      cb === 'cc:human'
+        ? null
+        : await this.workspaceRepo.answerPortalQuestion(
+            contextRow.org_slug,
+            effectiveCustomerText,
+            {
+              requirePublished: false,
+              viewerOrganizationId: organizationId,
+              aiCompletionHandler: this.aiCompletionHandler,
+            }
+          );
+
+    const isPaymentDetailsSubmission =
+      sessionState.step === 'payment_awaiting_details' && !cb;
+    const isTechnicalDetailsSubmission =
+      sessionState.step === 'technical_awaiting_details' && !cb;
+    const isProductIssueSubmission =
+      sessionState.step === 'product_issue' && !cb;
 
     const shouldEscalate =
       tgConfig.allowHumanEscalation &&
-      (explicitHumanRequest || botAnswer?.resolutionLayer === 'human-escalation');
+      (explicitHumanRequest ||
+        isPaymentDetailsSubmission ||
+        botAnswer?.resolutionLayer === 'human-escalation');
 
     const targetStatus = shouldEscalate
       ? ConversationStatus.Escalated
       : ConversationStatus.Open;
 
-    if (!activeConv) {
-      activeConv = await this.workspaceRepo.createEscalatedConversation({
-        organizationId,
-        customerName: params.displayName,
-        customerEmail: identity.email || syntheticEmail,
-        customerExternalRef: `tg:${params.telegramUserId}`,
-        customerIdentityId: identity.id,
-        sourceChannelRef: params.telegramChatId,
-        channel: SupportChannel.Telegram,
-        status: targetStatus,
-        priority: shouldEscalate
-          ? tgConfig.escalationPriorityDefault
-          : EscalationPriority.Normal,
-        category:
-          botAnswer?.suggestedTopic ||
-          tgConfig.supportCategories[0] ||
-          'General Support',
-        subject: params.text.slice(0, 90),
-        message: params.text,
-        externalMessageId: params.externalMessageId,
-      });
+    const resolvedCategory =
+      sessionState.selectedCategory ||
+      botAnswer?.suggestedTopic ||
+      tgConfig.supportCategories[0] ||
+      'General Support';
 
-      await this.db
-        .prepare(
-          `UPDATE channel_customer_identities
-           SET active_conversation_id = ?, last_interaction_at = ?, updated_at = ?
-           WHERE id = ?`
-        )
-        .bind(activeConv.id, now, now, identity.id)
-        .run();
-    } else {
-      activeConv = await this.workspaceRepo.replyToConversation({
-        organizationId,
-        conversationId: activeConv.id,
-        senderName: params.displayName,
-        senderType: MessageSenderType.Customer,
-        body: params.text,
-        externalMessageId: params.externalMessageId,
-        nextStatus: shouldEscalate ? ConversationStatus.Escalated : activeConv.status,
-      });
-    }
+    const diagnosticContextParts = [
+      sessionState.selectedCategory ? `Category: ${sessionState.selectedCategory}` : '',
+      sessionState.selectedSubIssue ? `Issue: ${sessionState.selectedSubIssue}` : '',
+      sessionState.selectedProduct ? `Product: ${sessionState.selectedProduct}` : '',
+    ].filter(Boolean);
+
+    const subjectLine =
+      sessionState.selectedSubIssue ||
+      sessionState.selectedProduct ||
+      effectiveCustomerText.slice(0, 90);
+
+    activeConv = await this.ensureOrAppendCustomerConversation({
+      organizationId,
+      displayName: params.displayName,
+      email: identity.email || syntheticEmail,
+      telegramUserId: params.telegramUserId,
+      telegramChatId: params.telegramChatId,
+      identityId: identity.id,
+      activeConv,
+      category: resolvedCategory,
+      subject: subjectLine,
+      messageBody: effectiveCustomerText,
+      targetStatus,
+      priority: shouldEscalate
+        ? tgConfig.escalationPriorityDefault
+        : EscalationPriority.Normal,
+      transcriptSummary:
+        diagnosticContextParts.length > 0 ? diagnosticContextParts.join(' · ') : undefined,
+      externalMessageId: params.externalMessageId,
+    });
+
+    const securityWarningPrefix = containsSensitiveSecretPattern
+      ? `🔒 Security Notice: Please never share passwords, PINs, OTPs, or full card numbers in chat. ${contextRow.org_name} specialists will never require them.\n\n`
+      : '';
 
     let replyText: string;
-    if (shouldEscalate) {
+
+    if (isPaymentDetailsSubmission && !explicitHumanRequest) {
+      const { availableCount } = await this.countAvailableAgentsForOrg(organizationId);
+      const availabilityLine =
+        availableCount > 0
+          ? `A support specialist (${activeConv.assignedAgentName || 'Billing Team'}) has been notified and will review your payment details.`
+          : `Our support specialists are currently offline or assisting other customers. Your payment details are saved in our priority queue (${
+              portalSettings.supportHours ? `Hours: ${portalSettings.supportHours}` : tgConfig.offlineMessage
+            }).`;
+
       replyText =
-        `🤝 Your conversation (${activeConv.id}) has been escalated to ${contextRow.org_name}'s human support team.\n` +
+        `${securityWarningPrefix}📋 Thank you. Your payment enquiry details have been recorded under conversation ${activeConv.id} (${sessionState.selectedSubIssue || 'Payment Support'}).\n\n` +
+        `Note: Your payment status is pending specialist verification and has not yet been confirmed by an automated integration.\n\n` +
+        `🤝 ${availabilityLine}\n` +
+        `You can upload a payment receipt screenshot anytime or continue messaging here.`;
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: {
+          ...sessionState,
+          step: 'main_menu',
+          pendingTransactionRef: effectiveCustomerText.slice(0, 120),
+          updatedAt: now,
+        },
+      });
+    } else if (shouldEscalate) {
+      const { availableCount } = await this.countAvailableAgentsForOrg(organizationId);
+      const honestAgentStatus =
+        availableCount > 0
+          ? activeConv.assignedAgentName
+            ? `Your conversation has been assigned to ${activeConv.assignedAgentName} and our team has been notified.`
+            : `Our support team has been notified and an available specialist will reply here shortly.`
+          : `No human support agents are currently online (${
+              portalSettings.supportHours ? `Operating hours: ${portalSettings.supportHours}` : 'currently offline'
+            }). Your request and full conversation history have been placed in ${contextRow.org_name}'s support queue so a specialist can respond as soon as they are available.`;
+
+      const kbPrefix =
+        !explicitHumanRequest &&
+        botAnswer?.reply &&
+        botAnswer.resolutionLayer !== 'human-escalation'
+          ? `${botAnswer.reply}\n\n`
+          : '';
+
+      replyText =
+        `${securityWarningPrefix}${kbPrefix}🤝 Your conversation (${activeConv.id}) has been escalated to ${contextRow.org_name}'s human support team.\n` +
+        `${honestAgentStatus}\n` +
         `${tgConfig.offlineMessage}`;
     } else {
+      const contextPrefix =
+        isProductIssueSubmission && sessionState.selectedProduct
+          ? `📦 [${sessionState.selectedProduct}]\n`
+          : isTechnicalDetailsSubmission && sessionState.selectedSubIssue
+            ? `⚙️ [${sessionState.selectedSubIssue}]\n`
+            : '';
+
       replyText =
-        botAnswer?.reply ??
-        `Thank you for contacting ${contextRow.org_name}. Type /human if you would like a support specialist to join this chat.`;
+        `${securityWarningPrefix}${contextPrefix}` +
+        (botAnswer?.reply ??
+          `Thank you for contacting ${contextRow.org_name}. Tap "👤 Speak to an Agent" or type /human if you would like a support specialist to join this chat.`);
     }
 
     // Record bot response inside the unified conversation timeline
@@ -1751,10 +3169,18 @@ export class D1ChannelIntegrationService {
       nextStatus: targetStatus,
     });
 
-    await this.sendTelegram(
-      { chatId: params.telegramChatId, text: replyText },
-      params.botToken
-    );
+    const footerMarkup = shouldEscalate
+      ? {
+          inline_keyboard: [
+            [
+              { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
+              { text: '🆕 Start New Enquiry', callback_data: 'cc:conv:new' },
+            ],
+          ],
+        }
+      : this.buildNavigationFooterKeyboard('cc:menu:main', tgConfig.allowHumanEscalation);
+
+    await sendCustomerOutput(replyText, footerMarkup);
 
     if (shouldEscalate && tgConfig.notifyAssignedAgentOnTelegram) {
       await this.notifyLinkedAgentsOfEscalation({
@@ -1831,9 +3257,15 @@ export class D1ChannelIntegrationService {
       return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
     }
 
-    // /workspace [slug]
-    if (lower === '/workspace' || lower.startsWith('/workspace ')) {
-      const targetArg = rawText.slice('/workspace'.length).trim().toLowerCase();
+    // /workspace [slug] or /switch [slug]
+    if (
+      lower === '/workspace' ||
+      lower.startsWith('/workspace ') ||
+      lower === '/switch' ||
+      lower.startsWith('/switch ')
+    ) {
+      const cmdPrefix = lower.startsWith('/switch') ? '/switch' : '/workspace';
+      const targetArg = rawText.slice(cmdPrefix.length).trim().toLowerCase();
       if (!targetArg) {
         const listLines = allLinks.map(
           (l) =>
@@ -2026,6 +3458,14 @@ export class D1ChannelIntegrationService {
         actorName: activeLink.user_full_name,
       });
 
+      await this.notifyCustomerOfConversationStatusChange({
+        organizationId,
+        conversation: updated,
+        assignedAgentName: activeLink.user_full_name,
+        actorName: activeLink.user_full_name,
+        botToken: params.botToken,
+      });
+
       const replyText = await sendAgentReply(
         `✅ Conversation ${updated.id} assigned to ${activeLink.user_full_name}.`
       );
@@ -2050,6 +3490,10 @@ export class D1ChannelIntegrationService {
       }
       const cmd = statusMatch[1].toLowerCase();
       const convId = statusMatch[2].trim();
+      const existingBefore = await this.workspaceRepo.getConversationById(
+        organizationId,
+        convId
+      );
       const nextStatus =
         cmd === 'resolve'
           ? ConversationStatus.Resolved
@@ -2063,6 +3507,15 @@ export class D1ChannelIntegrationService {
         status: nextStatus,
         actorUserId: activeLink.user_id,
         actorName: activeLink.user_full_name,
+      });
+
+      await this.notifyCustomerOfConversationStatusChange({
+        organizationId,
+        conversation: updated,
+        previousStatus: existingBefore?.status,
+        nextStatus,
+        actorName: activeLink.user_full_name,
+        botToken: params.botToken,
       });
 
       const replyText = await sendAgentReply(

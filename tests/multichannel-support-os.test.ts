@@ -773,4 +773,320 @@ describe('CustomCare Unified Multi-Channel Support OS (Phases 2–11)', () => {
       ctx.cleanup();
     }
   });
+
+  it('5. Complete Telegram Customer Support Experience: Interactive Category Flows, Payment Safety, Product/Technical Support, Attachments, Multi-Conversation Continuity, AI Fallback, and Status Sync', async () => {
+    const ctx = await createIsolatedTestContext();
+    try {
+      const reg = await ctx.workspaceRepo.registerUserAndFirstBusiness({
+        fullName: 'Samuel Director',
+        email: 'samuel@paystream.io',
+        password: 'StrongPassword!2026',
+        businessName: 'PayStream FinTech',
+        industry: 'Financial Services',
+        country: 'United States',
+      });
+      const orgId = reg.organization.id;
+
+      // Seed a product knowledge article & FAQ
+      const catProd = await ctx.knowledgeRepo.createCategory(orgId, {
+        name: 'PayStream Virtual Cards',
+        slug: 'virtual-cards',
+        description: 'Virtual card issuance and limits',
+        displayOrder: 1,
+      });
+      await ctx.knowledgeRepo.createFaq(orgId, {
+        categoryId: catProd.id,
+        question: 'What is the daily spending limit on PayStream Virtual Cards?',
+        answer: 'PayStream Virtual Cards support up to $10,000 USD per day for verified business accounts.',
+        status: KnowledgeStatus.Published,
+        searchKeywords: 'virtual card daily spending limit',
+        displayOrder: 1,
+      });
+
+      // Activate Telegram for PayStream FinTech
+      const tg = await ctx.channelService.configureChannelIntegration(orgId, {
+        channel: 'telegram',
+        action: 'activate',
+        telegramConfig: {
+          welcomeMessage: 'Welcome to PayStream FinTech Official Support!',
+          supportCategories: ['PayStream Virtual Cards', 'Wire Transfers'],
+        },
+      });
+
+      // 5a. Customer opens `/start tg_<TOKEN>` -> receives personalized welcome + inline keyboard
+      const startRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5001,
+        message: {
+          message_id: 501,
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          chat: { id: 333444, type: 'private' },
+          text: `/start ${tg.publicToken}`,
+        },
+      });
+      assert.equal(startRes.organizationId, orgId);
+      assert.ok(startRes.replyText?.includes('Welcome to PayStream FinTech! 👋'));
+      const welcomeOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
+      assert.ok(welcomeOutbound.replyMarkup, 'Welcome message must include inline keyboard buttons');
+      const keyboardJson = JSON.stringify(welcomeOutbound.replyMarkup);
+      assert.ok(keyboardJson.includes('Payment or Deposit Issues'));
+      assert.ok(keyboardJson.includes('Product Support'));
+      assert.ok(keyboardJson.includes('Technical Issues'));
+      assert.ok(keyboardJson.includes('Speak to an Agent'));
+
+      // 5b. Customer taps "💳 Payment or Deposit Issues" (`cc:cat:payment`) -> sub-options + security notice
+      const payCatRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5002,
+        callback_query: {
+          id: 'cbq_1',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 501, chat: { id: 333444 } },
+          data: 'cc:cat:payment',
+        },
+      });
+      assert.ok(payCatRes.replyText?.includes('NEVER ask for your password, PIN, OTP'));
+      const paySubMarkup = JSON.stringify(
+        ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!.replyMarkup
+      );
+      assert.ok(paySubMarkup.includes('cc:pay:pending'));
+      assert.ok(paySubMarkup.includes('cc:pay:debited'));
+
+      // Customer selects "My account was debited but not credited" (`cc:pay:debited`)
+      const paySubRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5003,
+        callback_query: {
+          id: 'cbq_2',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 502, chat: { id: 333444 } },
+          data: 'cc:pay:debited',
+        },
+      });
+      assert.ok(paySubRes.replyText?.includes('My account was debited but not credited'));
+      assert.ok(paySubRes.replyText?.includes('transaction reference'));
+
+      // Customer submits transaction reference + date/amount -> creates escalated payment conversation without falsely claiming verification
+      const payDetailsRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5004,
+        message: {
+          message_id: 503,
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          chat: { id: 333444, type: 'private' },
+          text: 'Ref: TXN-99887766, Amount: $450.00 on Nov 3',
+        },
+      });
+      const paymentConvId = payDetailsRes.conversationId!;
+      assert.ok(paymentConvId);
+      assert.ok(
+        payDetailsRes.replyText?.includes('pending specialist verification and has not yet been confirmed'),
+        'Bot must never claim a payment has been verified automatically'
+      );
+
+      // 5c. Customer uploads a payment confirmation screenshot (photo attachment) and a PDF receipt (document attachment)
+      const photoRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5005,
+        message: {
+          message_id: 504,
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          chat: { id: 333444, type: 'private' },
+          caption: 'Here is my bank transfer screenshot',
+          photo: [
+            { file_id: 'tg_file_small', file_unique_id: 'u_small', width: 320, height: 240, file_size: 18400 },
+            { file_id: 'tg_file_large', file_unique_id: 'u_large', width: 1280, height: 960, file_size: 145000 },
+          ],
+        },
+      });
+      assert.equal(photoRes.conversationId, paymentConvId);
+      assert.ok(photoRes.replyText?.includes('Attachment received'));
+
+      // Invalid attachment (executable .exe) is rejected safely
+      const badDocRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5006,
+        message: {
+          message_id: 505,
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          chat: { id: 333444, type: 'private' },
+          document: {
+            file_id: 'tg_bad_exe',
+            file_name: 'malware.exe',
+            mime_type: 'application/x-msdownload',
+            file_size: 55000,
+          },
+        },
+      });
+      assert.ok(badDocRes.replyText?.includes('Unsupported file type'));
+
+      // Oversized attachment (>10 MB) is rejected safely
+      const oversizedDocRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5007,
+        message: {
+          message_id: 506,
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          chat: { id: 333444, type: 'private' },
+          document: {
+            file_id: 'tg_huge_pdf',
+            file_name: 'huge_statement.pdf',
+            mime_type: 'application/pdf',
+            file_size: 15 * 1024 * 1024,
+          },
+        },
+      });
+      assert.ok(oversizedDocRes.replyText?.includes('exceeds the 10 MB size limit'));
+
+      // Verify valid photo attachment is stored in D1 and linked to the conversation message
+      const updatedPayConv = await ctx.workspaceRepo.getConversationById(orgId, paymentConvId);
+      const msgsWithAttachments = updatedPayConv!.messages.filter(
+        (m) => m.attachments && m.attachments.length > 0
+      );
+      assert.equal(msgsWithAttachments.length, 1);
+      const savedAttachment = msgsWithAttachments[0]!.attachments![0]!;
+      assert.equal(savedAttachment.externalFileId, 'tg_file_large');
+      assert.equal(savedAttachment.mimeType, 'image/jpeg');
+
+      // Cross-tenant attachment retrieval must return null
+      const crossTenantAtt = await ctx.workspaceRepo.getConversationAttachmentById(
+        'org_other_tenant',
+        paymentConvId,
+        savedAttachment.id
+      );
+      assert.equal(crossTenantAtt, null, 'Attachment retrieval must enforce tenant ownership');
+
+      // 5d. Multi-Conversation Continuity: Customer taps "🆕 Start New Enquiry" (`cc:conv:new`), explores Product Support & Technical Support, then switches between active conversations
+      await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5008,
+        callback_query: {
+          id: 'cbq_3',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 507, chat: { id: 333444 } },
+          data: 'cc:conv:new',
+        },
+      });
+
+      // Tap Product Support (`cc:cat:product`) -> select product 0 -> ask product question
+      const prodCatRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5009,
+        callback_query: {
+          id: 'cbq_4',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 508, chat: { id: 333444 } },
+          data: 'cc:cat:product',
+        },
+      });
+      assert.ok(prodCatRes.replyText?.includes('Product & Service Support'));
+
+      await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5010,
+        callback_query: {
+          id: 'cbq_5',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 509, chat: { id: 333444 } },
+          data: 'cc:prod:0',
+        },
+      });
+
+      const prodAskRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5011,
+        message: {
+          message_id: 510,
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          chat: { id: 333444, type: 'private' },
+          text: 'What is the daily spending limit on PayStream Virtual Cards?',
+        },
+      });
+      const productConvId = prodAskRes.conversationId!;
+      assert.ok(productConvId);
+      assert.notEqual(
+        productConvId,
+        paymentConvId,
+        'Starting a new enquiry must create a distinct conversation'
+      );
+      assert.ok(prodAskRes.replyText?.includes('$10,000 USD per day'));
+
+      // Tap Technical Issues (`cc:cat:technical`) -> select `cc:tech:login`
+      const techMenuRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5012,
+        callback_query: {
+          id: 'cbq_6',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 511, chat: { id: 333444 } },
+          data: 'cc:cat:technical',
+        },
+      });
+      assert.ok(techMenuRes.replyText?.includes('Technical Support'));
+
+      const techSubRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5013,
+        callback_query: {
+          id: 'cbq_7',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 512, chat: { id: 333444 } },
+          data: 'cc:tech:login',
+        },
+      });
+      assert.ok(techSubRes.replyText?.includes('Login problems'));
+      assert.ok(techSubRes.replyText?.includes('Recommended Troubleshooting Steps'));
+
+      // Customer lists active conversations (`cc:conv:list`) and switches back to the Payment conversation
+      const listConvRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5014,
+        callback_query: {
+          id: 'cbq_8',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 513, chat: { id: 333444 } },
+          data: 'cc:conv:list',
+        },
+      });
+      assert.ok(listConvRes.replyText?.includes(paymentConvId));
+      assert.ok(listConvRes.replyText?.includes(productConvId));
+
+      const switchConvRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5015,
+        callback_query: {
+          id: 'cbq_9',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 514, chat: { id: 333444 } },
+          data: `cc:conv:sel:${paymentConvId}`,
+        },
+      });
+      assert.equal(switchConvRes.conversationId, paymentConvId);
+      assert.ok(switchConvRes.replyText?.includes(`Switched to conversation ${paymentConvId}`));
+
+      // 5e. Honest Offline Agent Status when all specialists are offline
+      const agents = await ctx.workspaceRepo.listAgents(orgId);
+      for (const ag of agents) {
+        await ctx.workspaceRepo.updateAgent(orgId, ag.id, { availability: 'offline' });
+      }
+      const offlineEscalate = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 5016,
+        callback_query: {
+          id: 'cbq_10',
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          message: { message_id: 515, chat: { id: 333444 } },
+          data: 'cc:human',
+        },
+      });
+      assert.ok(
+        offlineEscalate.replyText?.includes('No human support agents are currently online'),
+        'Must honestly inform customer when no human agents are currently online'
+      );
+
+      // 5f. Status notification back to customer when conversation is resolved
+      const resolvedConv = await ctx.workspaceRepo.updateConversationStatus({
+        organizationId: orgId,
+        conversationId: paymentConvId,
+        status: ConversationStatus.Resolved,
+        actorName: 'Samuel Director',
+      });
+      const notifyRes = await ctx.channelService.notifyCustomerOfConversationStatusChange({
+        organizationId: orgId,
+        conversation: resolvedConv,
+        previousStatus: ConversationStatus.Escalated,
+        nextStatus: ConversationStatus.Resolved,
+        actorName: 'Samuel Director',
+      });
+      assert.equal(notifyRes.notified, true);
+      const lastOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
+      assert.ok(lastOutbound.text.includes('has been marked as resolved by Samuel Director'));
+    } finally {
+      ctx.cleanup();
+    }
+  });
 });

@@ -10,6 +10,8 @@ import {
   type CareFlowUserRecord,
   type CommunicationStyle,
   type ConversationActivityLogItem,
+  type ConversationAttachmentRecord,
+  type ExternalAiProviderKey,
   type MessageDeliveryStatus,
   type OnboardingProgressReport,
   type OnboardingStepItemStatus,
@@ -91,6 +93,7 @@ export interface PortalResolutionAccessOptions {
   requirePublished?: boolean;
   viewerUserId?: string;
   viewerOrganizationId?: string;
+  aiCompletionHandler?: ExternalAiCompletionHandler;
 }
 
 const DUMMY_TIMING_PASSWORD_HASH = hashPassword('careflow-constant-time-dummy-secret-2026');
@@ -161,6 +164,29 @@ interface ActivityLogRow {
   details: string;
   created_at: string;
 }
+
+interface AttachmentRow {
+  id: string;
+  organization_id: string;
+  conversation_id: string;
+  message_id: string | null;
+  channel: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  external_file_id: string | null;
+  created_at: string;
+}
+
+export type ExternalAiCompletionHandler = (params: {
+  provider: ExternalAiProviderKey;
+  businessName: string;
+  question: string;
+  systemInstructions: string;
+  supportedTopics: string[];
+  restrictedTopics: string[];
+  knowledgeContext: string;
+}) => Promise<string | null>;
 
 interface AgentRow {
   id: string;
@@ -868,7 +894,50 @@ export class D1WorkspaceRepository {
       };
     }
 
-    // 4/5. Safe Fallback -> Offer Supported Topics or Human Escalation (Never hallucinate!)
+    // 4. Configurable External AI Fallback (Strictly grounded in business KB & boundaries)
+    if (
+      portal.chatbot.aiFallback?.enabled &&
+      options?.aiCompletionHandler
+    ) {
+      const kbSnippets = [
+        ...portal.faqs.slice(0, 8).map((f) => `FAQ: Q: ${f.question} | A: ${f.answer}`),
+        ...portal.publishedKnowledge
+          .slice(0, 6)
+          .map((a) => `Article (${a.title}): ${a.summary} ${a.content ?? ''}`),
+        ...(portal.procedures ?? [])
+          .filter((p) => p.isPublished)
+          .slice(0, 4)
+          .map(
+            (p) =>
+              `Procedure (${p.title}): ${p.steps.map((s) => `${s.stepNumber}. ${s.instruction}`).join(' ')}`
+          ),
+      ].join('\n');
+
+      try {
+        const aiReply = await options.aiCompletionHandler({
+          provider: portal.chatbot.aiFallback.provider,
+          businessName: portal.branding.displayName,
+          question: rawQuestion,
+          systemInstructions: portal.chatbot.aiFallback.systemInstructions,
+          supportedTopics: portal.chatbot.supportedTopics,
+          restrictedTopics: portal.chatbot.restrictedTopics,
+          knowledgeContext: kbSnippets,
+        });
+        if (aiReply && aiReply.trim().length > 0) {
+          return {
+            reply: aiReply.trim(),
+            resolutionLayer: 'ai-fallback',
+            matchedSourceTitle: `${portal.branding.displayName} AI Assistant`,
+            suggestEscalation: true,
+            suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+          };
+        }
+      } catch {
+        // Fall through safely to human-escalation if external AI provider fails
+      }
+    }
+
+    // 5. Safe Fallback -> Offer Supported Topics or Human Escalation (Never hallucinate!)
     return {
       reply: `I don't see a verified article matching that exact question in ${portal.branding.displayName}'s knowledge base. I can help with ${portal.chatbot.supportedTopics.join(', ')}, or pass your question directly to a human support representative.`,
       resolutionLayer: 'human-escalation',
@@ -976,30 +1045,61 @@ export class D1WorkspaceRepository {
 
     const includeInternal = filters?.includeInternalNotes !== false;
 
-    const [{ results: msgRows }, { results: activityRows }] = await Promise.all([
-      this.db
-        .prepare(
-          `SELECT *
-           FROM support_messages
-           WHERE organization_id = ?${includeInternal ? '' : ' AND COALESCE(is_internal_note, 0) = 0'}
-           ORDER BY created_at ASC`
-        )
-        .bind(organizationId)
-        .all<MessageRow>(),
-      this.db
-        .prepare(
-          `SELECT *
-           FROM conversation_activity_logs
-           WHERE organization_id = ?
-           ORDER BY created_at ASC`
-        )
-        .bind(organizationId)
-        .all<ActivityLogRow>(),
-    ]);
+    const [{ results: msgRows }, { results: activityRows }, { results: attachmentRows }] =
+      await Promise.all([
+        this.db
+          .prepare(
+            `SELECT *
+             FROM support_messages
+             WHERE organization_id = ?${includeInternal ? '' : ' AND COALESCE(is_internal_note, 0) = 0'}
+             ORDER BY created_at ASC`
+          )
+          .bind(organizationId)
+          .all<MessageRow>(),
+        this.db
+          .prepare(
+            `SELECT *
+             FROM conversation_activity_logs
+             WHERE organization_id = ?
+             ORDER BY created_at ASC`
+          )
+          .bind(organizationId)
+          .all<ActivityLogRow>(),
+        this.db
+          .prepare(
+            `SELECT *
+             FROM conversation_attachments
+             WHERE organization_id = ?
+             ORDER BY created_at ASC`
+          )
+          .bind(organizationId)
+          .all<AttachmentRow>()
+          .catch(() => ({ results: [] as AttachmentRow[] })),
+      ]);
+
+    const attachmentsByMessage = new Map<string, ConversationAttachmentRecord[]>();
+    for (const att of attachmentRows) {
+      if (!att.message_id) continue;
+      const list = attachmentsByMessage.get(att.message_id) ?? [];
+      list.push({
+        id: att.id,
+        organizationId: att.organization_id,
+        conversationId: att.conversation_id,
+        messageId: att.message_id,
+        channel: (att.channel as SupportChannel) || SupportChannel.Telegram,
+        fileName: att.file_name,
+        mimeType: att.mime_type,
+        fileSize: Number(att.file_size ?? 0),
+        externalFileId: att.external_file_id,
+        createdAt: att.created_at,
+      });
+      attachmentsByMessage.set(att.message_id, list);
+    }
 
     const messagesByConv = new Map<string, WorkspaceMessageItem[]>();
     for (const m of msgRows) {
       const list = messagesByConv.get(m.conversation_id) ?? [];
+      const msgAttachments = attachmentsByMessage.get(m.id);
       list.push({
         id: m.id,
         conversationId: m.conversation_id,
@@ -1011,6 +1111,7 @@ export class D1WorkspaceRepository {
         externalMessageId: m.external_message_id ?? null,
         deliveryStatus: (m.delivery_status as MessageDeliveryStatus) ?? 'delivered',
         deliveryError: m.delivery_error ?? null,
+        ...(msgAttachments && msgAttachments.length > 0 ? { attachments: msgAttachments } : {}),
         createdAt: m.created_at,
       });
       messagesByConv.set(m.conversation_id, list);
@@ -1291,6 +1392,93 @@ export class D1WorkspaceRepository {
       throw new Error('Failed to reload updated conversation.');
     }
     return updated;
+  }
+
+  async createConversationAttachment(params: {
+    organizationId: string;
+    conversationId: string;
+    messageId?: string | null;
+    channel?: SupportChannel;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+    externalFileId?: string | null;
+  }): Promise<ConversationAttachmentRecord> {
+    const conv = await this.db
+      .prepare(`SELECT id FROM support_conversations WHERE id = ? AND organization_id = ?`)
+      .bind(params.conversationId, params.organizationId)
+      .first<{ id: string }>();
+
+    if (!conv) {
+      throw new Error('CROSS_TENANT_VIOLATION: Conversation does not belong to this organization.');
+    }
+
+    const id = createId('att');
+    const now = new Date().toISOString();
+    const channel = params.channel ?? SupportChannel.Telegram;
+
+    await this.db
+      .prepare(
+        `INSERT INTO conversation_attachments
+           (id, organization_id, conversation_id, message_id, channel, file_name, mime_type, file_size, external_file_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        params.organizationId,
+        params.conversationId,
+        params.messageId ?? null,
+        channel,
+        params.fileName,
+        params.mimeType,
+        params.fileSize,
+        params.externalFileId ?? null,
+        now
+      )
+      .run();
+
+    return {
+      id,
+      organizationId: params.organizationId,
+      conversationId: params.conversationId,
+      messageId: params.messageId ?? null,
+      channel,
+      fileName: params.fileName,
+      mimeType: params.mimeType,
+      fileSize: params.fileSize,
+      externalFileId: params.externalFileId ?? null,
+      createdAt: now,
+    };
+  }
+
+  async getConversationAttachmentById(
+    organizationId: string,
+    conversationId: string,
+    attachmentId: string
+  ): Promise<ConversationAttachmentRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT *
+         FROM conversation_attachments
+         WHERE id = ? AND conversation_id = ? AND organization_id = ?`
+      )
+      .bind(attachmentId, conversationId, organizationId)
+      .first<AttachmentRow>();
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      organizationId: row.organization_id,
+      conversationId: row.conversation_id,
+      messageId: row.message_id,
+      channel: (row.channel as SupportChannel) || SupportChannel.Telegram,
+      fileName: row.file_name,
+      mimeType: row.mime_type,
+      fileSize: Number(row.file_size ?? 0),
+      externalFileId: row.external_file_id,
+      createdAt: row.created_at,
+    };
   }
 
   async updateMessageDeliveryStatus(params: {

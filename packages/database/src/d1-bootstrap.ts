@@ -54,6 +54,8 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     `ALTER TABLE support_messages ADD COLUMN external_message_id TEXT`,
     `ALTER TABLE support_messages ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'delivered'`,
     `ALTER TABLE support_messages ADD COLUMN delivery_error TEXT`,
+    `ALTER TABLE channel_customer_identities ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
+    `ALTER TABLE telegram_customer_contexts ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
   ];
   for (const alterSql of schemaAlterations) {
     try {

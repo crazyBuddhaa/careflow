@@ -133,6 +133,10 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const repo = await getWorkspaceRepository();
+    const existingBefore = await repo.getConversationById(
+      auth.session.identity.organizationId,
+      conversationId
+    );
     const updated = await repo.updateConversationStatus({
       organizationId: auth.session.identity.organizationId,
       conversationId,
@@ -144,6 +148,27 @@ export async function PATCH(request: Request, context: RouteContext) {
       actorUserId: auth.session.identity.userId,
       actorName: auth.session.userName || auth.session.identity.email,
     });
+
+    if (
+      updated.channel === SupportChannel.Telegram &&
+      (input.status !== undefined ||
+        (input.assignedAgentName !== undefined &&
+          input.assignedAgentName !== existingBefore?.assignedAgentName))
+    ) {
+      const channelService = await getChannelIntegrationService();
+      await channelService.notifyCustomerOfConversationStatusChange({
+        organizationId: auth.session.identity.organizationId,
+        conversation: updated,
+        previousStatus: existingBefore?.status,
+        nextStatus: input.status,
+        assignedAgentName:
+          input.assignedAgentName !== existingBefore?.assignedAgentName
+            ? input.assignedAgentName
+            : undefined,
+        actorName: auth.session.userName || auth.session.identity.email,
+        botToken: readRuntimeSecret('TELEGRAM_BOT_TOKEN'),
+      });
+    }
 
     return jsonApiSuccess(updated);
   } catch (err) {
