@@ -8,7 +8,10 @@ import {
   jsonApiError,
   jsonApiSuccess,
 } from '@/lib/api-response';
-import { getWorkspaceRepository } from '@/lib/knowledge-runtime';
+import {
+  getChannelIntegrationService,
+  getWorkspaceRepository,
+} from '@/lib/knowledge-runtime';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +52,11 @@ export async function GET(request: Request, context: RouteContext) {
       return jsonApiSuccess(attachment);
     }
 
-    const botToken = readRuntimeSecret('TELEGRAM_BOT_TOKEN');
+    const channelService = await getChannelIntegrationService();
+    const botToken = await channelService.resolveEffectiveTelegramBotTokenForOrg(
+      auth.session.identity.organizationId,
+      readRuntimeSecret('TELEGRAM_BOT_TOKEN')
+    );
     if (!botToken) {
       return jsonApiError(
         'UNAVAILABLE',

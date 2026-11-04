@@ -269,6 +269,14 @@ export interface TelegramChannelConfig {
   escalationPriorityDefault: EscalationPriority;
   notifyAssignedAgentOnTelegram: boolean;
   offlineMessage: string;
+  customBotTokenMasked?: string | null;
+  customBotUsername?: string | null;
+  customBotId?: number | null;
+  customBotFirstName?: string | null;
+  customBotWebhookUrl?: string | null;
+  customBotWebhookRegistered?: boolean;
+  customBotDeepLinkUrl?: string | null;
+  customBotQrCodeSvgDataUrl?: string | null;
 }
 
 export interface WebWidgetChannelConfig {

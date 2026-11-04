@@ -135,6 +135,7 @@ export function ChannelIntegrationsManager({
     EscalationPriority.Normal
   );
   const [tgNotifyAgents, setTgNotifyAgents] = useState(true);
+  const [customSubBotTokenInput, setCustomSubBotTokenInput] = useState('');
 
   // Web Widget config form state
   const [wgtLauncherTitle, setWgtLauncherTitle] = useState('');
@@ -210,7 +211,13 @@ export function ChannelIntegrationsManager({
 
   async function handleChannelAction(
     channel: ChannelIntegrationCategory,
-    action: 'activate' | 'deactivate' | 'rotate_token' | 'update_config',
+    action:
+      | 'activate'
+      | 'deactivate'
+      | 'rotate_token'
+      | 'update_config'
+      | 'connect_subbot'
+      | 'disconnect_subbot',
     extraPayload?: Record<string, unknown>
   ) {
     setSavingChannel(`${channel}:${action}`);
@@ -229,6 +236,9 @@ export function ChannelIntegrationsManager({
       if (!body.ok) {
         setErrorBanner(body.error.message);
         return;
+      }
+      if (action === 'connect_subbot') {
+        setCustomSubBotTokenInput('');
       }
       showFeedback(`Updated ${channel} integration (${action.replace('_', ' ')}).`);
       await loadIntegrations();
@@ -480,20 +490,30 @@ export function ChannelIntegrationsManager({
                       <p className="text-xs text-slate-600 leading-relaxed">{meta.description}</p>
 
                       {item.deepLinkUrl && item.channel === 'telegram' && item.status === 'active' && (
-                        <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3 flex items-center justify-between gap-2">
-                          <span className="text-xs font-mono text-slate-800 truncate">
-                            {item.deepLinkUrl}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              copyToClipboard(item.deepLinkUrl!, 'Telegram support link')
-                            }
-                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-200 shrink-0 cursor-pointer"
-                            title="Copy link"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
+                        <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-mono text-slate-800 truncate">
+                              {item.telegramConfig?.customBotDeepLinkUrl || item.deepLinkUrl}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyToClipboard(
+                                  item.telegramConfig?.customBotDeepLinkUrl || item.deepLinkUrl!,
+                                  'Telegram support link'
+                                )
+                              }
+                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-200 shrink-0 cursor-pointer"
+                              title="Copy link"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          {item.telegramConfig?.customBotUsername && (
+                            <p className="text-[11px] font-semibold text-teal-700">
+                              Dedicated Sub-Bot Active: @{item.telegramConfig.customBotUsername}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -535,16 +555,16 @@ export function ChannelIntegrationsManager({
           )}
 
           {/* =================================================================
-              TAB 2: CENTRAL CUSTOMCARE TELEGRAM BOT FOR CUSTOMERS
+              TAB 2: CUSTOMER TELEGRAM BOT (CENTRAL LINK + DEDICATED SUB-BOT)
           ================================================================== */}
           {activeTab === 'telegram' && tgIntegration && (
             <div className="space-y-6">
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-7 space-y-5">
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-7 space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
                   <div>
                     <div className="flex items-center gap-2.5">
                       <h2 className="text-lg font-bold text-slate-900">
-                        Central CustomCare Telegram Bot
+                        Customer Telegram Bot (Dual-Mode Support)
                       </h2>
                       <span
                         className={`px-2.5 py-0.5 rounded-lg border text-xs font-bold ${
@@ -555,8 +575,11 @@ export function ChannelIntegrationsManager({
                       </span>
                     </div>
                     <p className="mt-1 text-xs sm:text-sm text-slate-600">
-                      Customers message the official central CustomCare Telegram bot through your
-                      unique business link or QR code. No BotFather setup required.
+                      Use the instant Central CustomCare Bot link (zero BotFather needed), connect
+                      your own dedicated <code className="font-mono">@BotFather</code> Sub-Bot token,
+                      or use both simultaneously. Customers can start with <code className="font-mono">/start</code>{' '}
+                      or natural greetings like <code className="font-mono">&quot;Hi&quot;</code> or{' '}
+                      <code className="font-mono">&quot;Hello&quot;</code>.
                     </p>
                   </div>
 
@@ -587,13 +610,18 @@ export function ChannelIntegrationsManager({
                   )}
                 </div>
 
-                {/* Deep Link & QR Code */}
+                {/* MODE A: Instant Central Bot Deep Link & QR Code */}
                 {tgIntegration.deepLinkUrl && (
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center bg-slate-50 rounded-2xl p-5 border border-slate-200/80">
                     <div className="lg:col-span-8 space-y-3">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Your Business Telegram Support Link
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-bold uppercase">
+                          Mode A · Zero BotFather Required
+                        </span>
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                          Central CustomCare Bot Deep-Link
+                        </p>
+                      </div>
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
@@ -617,7 +645,7 @@ export function ChannelIntegrationsManager({
                       </div>
                       <p className="text-xs text-slate-500">
                         Public Token: <code className="font-mono">{tgIntegration.publicToken}</code>{' '}
-                        (Internal organization IDs are never exposed).
+                        · Works immediately without creating a bot in Telegram.
                       </p>
 
                       {isAdminOrOwner && (
@@ -656,6 +684,144 @@ export function ChannelIntegrationsManager({
                   </div>
                 )}
 
+                {/* MODE B: Optional Dedicated Business Sub-Bot (@BotFather Token) */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold uppercase">
+                          Mode B · Optional Custom Branded Bot
+                        </span>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                          Dedicated Business Sub-Bot (@BotFather Token)
+                        </h3>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Have your own Telegram bot from <code className="font-mono">@BotFather</code>?
+                        Paste its token here (or send <code className="font-mono">/connectbot &lt;TOKEN&gt;</code>{' '}
+                        to <code className="font-mono">@getcustomcarebot</code>). CustomCare automatically
+                        registers its serverless webhook and slash commands so customers can message your
+                        bot directly with <code className="font-mono">&quot;Hi&quot;</code> or{' '}
+                        <code className="font-mono">/start</code>.
+                      </p>
+                    </div>
+                  </div>
+
+                  {tgIntegration.telegramConfig?.customBotUsername ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center bg-white rounded-xl p-4 border border-teal-200">
+                      <div className="lg:col-span-8 space-y-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+                            Connected: @{tgIntegration.telegramConfig.customBotUsername}
+                          </span>
+                          {tgIntegration.telegramConfig.customBotTokenMasked && (
+                            <span className="text-xs font-mono text-slate-500">
+                              Token: {tgIntegration.telegramConfig.customBotTokenMasked}
+                            </span>
+                          )}
+                          <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 text-[11px] font-semibold">
+                            Webhook:{' '}
+                            {tgIntegration.telegramConfig.customBotWebhookRegistered
+                              ? 'Verified & Active'
+                              : 'Configured'}
+                          </span>
+                        </div>
+
+                        {tgIntegration.telegramConfig.customBotDeepLinkUrl && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={tgIntegration.telegramConfig.customBotDeepLinkUrl}
+                              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono text-slate-900"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyToClipboard(
+                                  tgIntegration.telegramConfig!.customBotDeepLinkUrl!,
+                                  'Sub-Bot link'
+                                )
+                              }
+                              className="py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy</span>
+                            </button>
+                            <a
+                              href={tgIntegration.telegramConfig.customBotDeepLinkUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="py-2 px-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold inline-flex items-center gap-1 shrink-0"
+                            >
+                              <span>Open</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        )}
+
+                        {isAdminOrOwner && (
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              disabled={savingChannel !== null}
+                              onClick={() =>
+                                void handleChannelAction('telegram', 'disconnect_subbot')
+                              }
+                              className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-800 cursor-pointer"
+                            >
+                              <Unlink className="w-3.5 h-3.5" />
+                              <span>Disconnect Sub-Bot</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {tgIntegration.telegramConfig.customBotQrCodeSvgDataUrl && (
+                        <div className="lg:col-span-4 flex flex-col items-center justify-center bg-slate-50 rounded-xl p-3 border border-slate-200">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={tgIntegration.telegramConfig.customBotQrCodeSvgDataUrl}
+                            alt={`Sub-Bot QR code for @${tgIntegration.telegramConfig.customBotUsername}`}
+                            className="w-28 h-28 rounded-lg"
+                          />
+                          <span className="mt-1 text-[11px] font-mono text-slate-600">
+                            @{tgIntegration.telegramConfig.customBotUsername}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {isAdminOrOwner && (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                      <input
+                        type="password"
+                        value={customSubBotTokenInput}
+                        onChange={(e) => setCustomSubBotTokenInput(e.target.value)}
+                        placeholder="Paste @BotFather token (e.g. 123456789:AAH...)"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-mono text-slate-900"
+                      />
+                      <button
+                        type="button"
+                        disabled={
+                          savingChannel !== null || !customSubBotTokenInput.trim()
+                        }
+                        onClick={() =>
+                          void handleChannelAction('telegram', 'connect_subbot', {
+                            customBotToken: customSubBotTokenInput.trim(),
+                          })
+                        }
+                        className="py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap cursor-pointer"
+                      >
+                        {tgIntegration.telegramConfig?.customBotUsername
+                          ? 'Replace Sub-Bot Token'
+                          : 'Connect Sub-Bot Token'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Business Bot Behavior Configuration */}
                 <form
                   onSubmit={(e) => {
@@ -683,7 +849,7 @@ export function ChannelIntegrationsManager({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="sm:col-span-2">
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Customer Welcome Message (shown on /start)
+                        Customer Welcome Message (shown on /start or when customer says &quot;Hi&quot; / &quot;Hello&quot;)
                       </label>
                       <textarea
                         rows={2}
@@ -692,6 +858,12 @@ export function ChannelIntegrationsManager({
                         disabled={!isAdminOrOwner}
                         className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs text-slate-900"
                       />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Supports <code className="font-mono">{'{name}'}</code> (customer&apos;s Telegram first name) and{' '}
+                        <code className="font-mono">{'{business}'}</code> ({organizationName}). If{' '}
+                        <code className="font-mono">{'{name}'}</code> is omitted, the bot automatically greets them with{' '}
+                        <span className="font-semibold">Hi [First Name]! 👋</span>
+                      </p>
                     </div>
 
                     <div>

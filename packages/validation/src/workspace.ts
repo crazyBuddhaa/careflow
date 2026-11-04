@@ -161,7 +161,15 @@ export const ChannelIntegrationCategorySchema = z.enum([
 
 export const ConfigureChannelIntegrationSchema = z.object({
   channel: ChannelIntegrationCategorySchema,
-  action: z.enum(['activate', 'deactivate', 'rotate_token', 'update_config']),
+  action: z.enum([
+    'activate',
+    'deactivate',
+    'rotate_token',
+    'update_config',
+    'connect_subbot',
+    'disconnect_subbot',
+  ]),
+  customBotToken: z.string().trim().min(15).max(200).optional(),
   telegramConfig: z
     .object({
       welcomeMessage: z.string().trim().min(4).max(500).optional(),

@@ -88,6 +88,8 @@ export async function POST(request: Request) {
       {
         botToken: readRuntimeSecret('TELEGRAM_BOT_TOKEN'),
         centralBotUsername: readRuntimeSecret('CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME'),
+        appBaseUrl:
+          readRuntimeSecret('CAREFLOW_APP_BASE_URL') || 'https://getcustomcare.xyz',
       }
     );
 

@@ -1,6 +1,7 @@
 import { UserRole } from '@careflow/shared';
 import { ConfigureChannelIntegrationSchema } from '@careflow/validation';
 import {
+  readRuntimeSecret,
   requireAuthorizedWorkspaceSession,
   verifyRequestOriginCsrf,
 } from '@/lib/admin-auth';
@@ -20,9 +21,16 @@ export async function GET() {
       return jsonApiError(auth.code, auth.message, auth.status);
     }
 
+    const appBaseUrl =
+      readRuntimeSecret('CAREFLOW_APP_BASE_URL') || 'https://getcustomcare.xyz';
+    const centralBotUsername = readRuntimeSecret('CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME');
+
     const channelService = await getChannelIntegrationService();
     const [integrations, agentLinks] = await Promise.all([
-      channelService.listChannelIntegrations(auth.session.identity.organizationId),
+      channelService.listChannelIntegrations(auth.session.identity.organizationId, {
+        appBaseUrl,
+        centralBotUsername,
+      }),
       channelService.listOrganizationAgentTelegramLinks(auth.session.identity.organizationId),
     ]);
 
@@ -61,9 +69,15 @@ export async function POST(request: Request) {
       {
         channel: input.channel,
         action: input.action,
+        customBotToken: input.customBotToken,
         telegramConfig: input.telegramConfig,
         widgetConfig: input.widgetConfig,
         emailConfig: input.emailConfig,
+      },
+      {
+        appBaseUrl:
+          readRuntimeSecret('CAREFLOW_APP_BASE_URL') || 'https://getcustomcare.xyz',
+        centralBotUsername: readRuntimeSecret('CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME'),
       }
     );
 

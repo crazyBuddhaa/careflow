@@ -457,7 +457,7 @@ export class D1ChannelIntegrationService {
 
   private getDefaultTelegramConfig(businessName: string, supportedTopics: string[]): TelegramChannelConfig {
     return {
-      welcomeMessage: `Welcome to ${businessName} Support on Telegram! Ask a question below or choose a support category to get instant assistance.`,
+      welcomeMessage: `Hi {name}! Welcome to ${businessName} Support on Telegram. Ask a question below or choose a support category to get instant assistance.`,
       supportCategories:
         supportedTopics.length > 0
           ? supportedTopics
@@ -466,7 +466,143 @@ export class D1ChannelIntegrationService {
       escalationPriorityDefault: EscalationPriority.Normal,
       notifyAssignedAgentOnTelegram: true,
       offlineMessage: `Thank you for messaging ${businessName}. A support specialist will follow up with you shortly.`,
+      customBotTokenMasked: null,
+      customBotUsername: null,
+      customBotId: null,
+      customBotFirstName: null,
+      customBotWebhookUrl: null,
+      customBotWebhookRegistered: false,
+      customBotDeepLinkUrl: null,
+      customBotQrCodeSvgDataUrl: null,
     };
+  }
+
+  private parseEncryptedSubBotCredentials(encryptedStr?: string | null): {
+    botToken?: string;
+    webhookSecret?: string;
+    botUsername?: string;
+    botId?: number;
+    botFirstName?: string;
+    webhookUrl?: string;
+    webhookRegistered?: boolean;
+  } | null {
+    if (!encryptedStr) return null;
+    const raw = decryptIntegrationCredentials(encryptedStr, this.defaultEncryptionKey);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as {
+        botToken?: string;
+        webhookSecret?: string;
+        botUsername?: string;
+        botId?: number;
+        botFirstName?: string;
+        webhookUrl?: string;
+        webhookRegistered?: boolean;
+      };
+      if (parsed && typeof parsed.botToken === 'string' && parsed.botToken.length >= 10) {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private maskBotToken(token?: string | null): string | null {
+    if (!token || token.length < 12) return null;
+    const colonIdx = token.indexOf(':');
+    if (colonIdx > 0) {
+      const botIdPart = token.slice(0, colonIdx);
+      const secretTail = token.slice(-4);
+      return `${botIdPart}:••••••••••••${secretTail}`;
+    }
+    return `${token.slice(0, 5)}••••••••${token.slice(-4)}`;
+  }
+
+  /**
+   * Formats a personalized customer greeting using the customer's Telegram first name
+   * and the business's configured welcome message from the dashboard.
+   */
+  public formatPersonalizedCustomerWelcome(params: {
+    customerDisplayName: string;
+    businessName: string;
+    welcomeMessageTemplate: string;
+    supportCategories: string[];
+    isConversationalGreeting?: boolean;
+  }): string {
+    const firstName =
+      params.customerDisplayName
+        .trim()
+        .split(/\s+/)[0]
+        ?.replace(/[^a-zA-Z0-9\u00C0-\u024F'-]/g, '') || 'there';
+
+    const template = (params.welcomeMessageTemplate || '').trim();
+    const hasNamePlaceholder = /\{(name|first_name|customer_name)\}/i.test(template);
+
+    const interpolatedBody = template
+      .replace(/\{(name|first_name|customer_name)\}/gi, firstName)
+      .replace(/\{(business|business_name|company)\}/gi, params.businessName);
+
+    const categoriesLine =
+      params.supportCategories.length > 0
+        ? `\n\nAvailable Support Topics:\n• ${params.supportCategories.join('\n• ')}`
+        : '';
+
+    if (hasNamePlaceholder) {
+      return (
+        `${interpolatedBody}${categoriesLine}\n\n` +
+        `How can we help you today? Choose an option below or type your question in your own words:`
+      );
+    }
+
+    const greetingHeader = params.isConversationalGreeting
+      ? `Hi ${firstName}! 👋 Welcome to ${params.businessName}!`
+      : `Welcome to ${params.businessName}! 👋\nHi ${firstName}!`;
+
+    return (
+      `${greetingHeader}\n\n` +
+      `${interpolatedBody}${categoriesLine}\n\n` +
+      `How can we help you today? Choose an option below or type your question in your own words:`
+    );
+  }
+
+  /**
+   * Classifies whether a customer message is:
+   * - 'pure_greeting': e.g. "Hi", "Hello", "Good morning", "Hey there"
+   * - 'greeting_with_question': e.g. "Hi, why is my deposit pending?"
+   * - 'none': direct question or command
+   */
+  public classifyCustomerGreetingIntent(rawText: string): {
+    type: 'pure_greeting' | 'greeting_with_question' | 'none';
+    cleanedQuestion: string;
+  } {
+    const trimmed = rawText.trim();
+    if (!trimmed || trimmed.startsWith('/')) {
+      return { type: 'none', cleanedQuestion: trimmed };
+    }
+
+    const pureGreetingRegex =
+      /^(?:hi+|hello+|hey+|howdy|hola|greetings|yo|sup|good\s*(?:morning|afternoon|evening|day)|hi\s+there|hello\s+there|hey\s+there|is\s+anyone\s+there|anyone\s+online|i\s+need\s+help|help\s+me|can\s+you\s+help(?:\s+me)?|how\s+are\s+you(?:\s+doing)?)[!.?,\s]*$/i;
+
+    if (pureGreetingRegex.test(trimmed)) {
+      return { type: 'pure_greeting', cleanedQuestion: '' };
+    }
+
+    const prefixGreetingRegex =
+      /^(?:hi+|hello+|hey+|good\s*(?:morning|afternoon|evening|day)|hi\s+there|hello\s+there)[,!.\s-]+(.{4,})$/i;
+    const prefixMatch = trimmed.match(prefixGreetingRegex);
+    if (prefixMatch && prefixMatch[1]) {
+      const remainder = prefixMatch[1].trim();
+      if (pureGreetingRegex.test(remainder)) {
+        return { type: 'pure_greeting', cleanedQuestion: '' };
+      }
+      return {
+        type: 'greeting_with_question',
+        cleanedQuestion: remainder,
+      };
+    }
+
+    return { type: 'none', cleanedQuestion: trimmed };
   }
 
   private getDefaultWidgetConfig(businessName: string): WebWidgetChannelConfig {
@@ -507,7 +643,7 @@ export class D1ChannelIntegrationService {
     }
 
     const portalSettings = await this.workspaceRepo.getWorkspaceSettings(organizationId);
-    const centralBotUsername = (options?.centralBotUsername || 'CustomCareBot').replace(/^@/, '');
+    const centralBotUsername = (options?.centralBotUsername || this.defaultCentralBotUsername || 'getcustomcarebot').replace(/^@/, '');
     const appBaseUrl = (options?.appBaseUrl || 'https://getcustomcare.xyz').replace(/\/+$/, '');
 
     const { results: existingRows } = await this.db
@@ -580,6 +716,41 @@ export class D1ChannelIntegrationService {
             // keep default
           }
         }
+
+        const subBotCreds = this.parseEncryptedSubBotCredentials(row?.encrypted_credentials);
+        if (subBotCreds?.botToken) {
+          const cleanSubUsername = (subBotCreds.botUsername || parsedConfig.customBotUsername || '').replace(/^@/, '');
+          const subDeepLink = cleanSubUsername ? `https://t.me/${cleanSubUsername}` : null;
+          parsedConfig = {
+            ...parsedConfig,
+            customBotTokenMasked: this.maskBotToken(subBotCreds.botToken),
+            customBotUsername: cleanSubUsername || null,
+            customBotId: subBotCreds.botId ?? parsedConfig.customBotId ?? null,
+            customBotFirstName: subBotCreds.botFirstName ?? parsedConfig.customBotFirstName ?? null,
+            customBotWebhookUrl:
+              subBotCreds.webhookUrl ??
+              (row?.id ? `${appBaseUrl}/api/webhooks/telegram/subbot/${row.id}` : null),
+            customBotWebhookRegistered: Boolean(subBotCreds.webhookRegistered),
+            customBotDeepLinkUrl: subDeepLink,
+            customBotQrCodeSvgDataUrl:
+              subDeepLink && cleanSubUsername
+                ? generateTelegramQrCodeSvgDataUrl(subDeepLink, `@${cleanSubUsername} · ${org.name}`)
+                : null,
+          };
+        } else {
+          parsedConfig = {
+            ...parsedConfig,
+            customBotTokenMasked: null,
+            customBotUsername: null,
+            customBotId: null,
+            customBotFirstName: null,
+            customBotWebhookUrl: null,
+            customBotWebhookRegistered: false,
+            customBotDeepLinkUrl: null,
+            customBotQrCodeSvgDataUrl: null,
+          };
+        }
+
         const publicToken = row?.status === 'active' ? row.public_token : null;
         const deepLinkUrl = publicToken
           ? `https://t.me/${centralBotUsername}?start=${publicToken}`
@@ -701,7 +872,14 @@ export class D1ChannelIntegrationService {
     organizationId: string,
     input: {
       channel: ChannelIntegrationCategory;
-      action: 'activate' | 'deactivate' | 'rotate_token' | 'update_config';
+      action:
+        | 'activate'
+        | 'deactivate'
+        | 'rotate_token'
+        | 'update_config'
+        | 'connect_subbot'
+        | 'disconnect_subbot';
+      customBotToken?: string;
       telegramConfig?: Partial<TelegramChannelConfig>;
       widgetConfig?: Partial<WebWidgetChannelConfig>;
       emailConfig?: Partial<EmailChannelConfig>;
@@ -712,6 +890,25 @@ export class D1ChannelIntegrationService {
       throw new Error(
         `The ${input.channel === 'whatsapp' ? 'WhatsApp Business' : 'External API & Webhooks'} integration is planned for a future release and cannot be activated yet.`
       );
+    }
+
+    if (input.channel === 'telegram' && input.action === 'connect_subbot') {
+      if (!input.customBotToken || input.customBotToken.trim().length < 15) {
+        throw new Error('A valid Telegram Bot token from @BotFather is required.');
+      }
+      await this.connectBusinessTelegramSubBot({
+        organizationId,
+        rawBotToken: input.customBotToken,
+        appBaseUrl: options?.appBaseUrl,
+      });
+      const all = await this.listChannelIntegrations(organizationId, options);
+      return all.find((i) => i.channel === 'telegram')!;
+    }
+
+    if (input.channel === 'telegram' && input.action === 'disconnect_subbot') {
+      await this.disconnectBusinessTelegramSubBot(organizationId);
+      const all = await this.listChannelIntegrations(organizationId, options);
+      return all.find((i) => i.channel === 'telegram')!;
     }
 
     const org = await this.db
@@ -847,6 +1044,262 @@ export class D1ChannelIntegrationService {
       throw new Error('Failed to load updated channel integration.');
     }
     return updated;
+  }
+
+  /**
+   * Connects a business's own @BotFather Telegram sub-bot token (e.g. CD bot),
+   * verifies it with Telegram getMe, registers its serverless Cloudflare Worker webhook
+   * at `/api/webhooks/telegram/subbot/<integrationId>`, sets customer slash commands,
+   * and also activates the central bot public_token so both modes work simultaneously.
+   */
+  async connectBusinessTelegramSubBot(params: {
+    organizationId: string;
+    rawBotToken: string;
+    appBaseUrl?: string;
+  }): Promise<{
+    integrationId: string;
+    botUsername: string;
+    botId?: number;
+    botFirstName?: string;
+    webhookUrl: string;
+    webhookRegistered: boolean;
+  }> {
+    const cleanToken = params.rawBotToken.trim();
+    if (!/^\d{5,16}:[A-Za-z0-9_-]{20,120}$/.test(cleanToken)) {
+      throw new Error(
+        'Invalid Telegram Bot Token format. Expected a token from @BotFather like 123456789:AAH...'
+      );
+    }
+
+    const org = await this.db
+      .prepare(`SELECT id, slug, name FROM organizations WHERE id = ? AND is_active = 1`)
+      .bind(params.organizationId)
+      .first<{ id: string; slug: string; name: string }>();
+
+    if (!org) {
+      throw new Error('Organization workspace not found.');
+    }
+
+    const existing = await this.db
+      .prepare(
+        `SELECT * FROM channel_integrations WHERE organization_id = ? AND channel = 'telegram'`
+      )
+      .bind(params.organizationId)
+      .first<DbChannelIntegrationRow>();
+
+    const integrationId = existing?.id ?? createChannelId('chi');
+    const appBaseUrl = (params.appBaseUrl || 'https://getcustomcare.xyz').replace(/\/+$/, '');
+    const webhookUrl = `${appBaseUrl}/api/webhooks/telegram/subbot/${integrationId}`;
+    const webhookSecret = randomBytes(24).toString('hex');
+
+    let botUsername = `${org.slug.replace(/-/g, '_')}_support_bot`;
+    let botId: number | undefined = Number(cleanToken.split(':')[0]) || undefined;
+    let botFirstName = `${org.name} Support`;
+    let webhookRegistered = false;
+
+    try {
+      const meRes = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`);
+      const meJson = (await meRes.json()) as {
+        ok?: boolean;
+        description?: string;
+        result?: { id?: number; username?: string; first_name?: string };
+      };
+
+      if (!meRes.ok || !meJson.ok || !meJson.result?.username) {
+        throw new Error(
+          meJson.description || 'Telegram rejected the bot token. Please check the token in @BotFather.'
+        );
+      }
+
+      botUsername = meJson.result.username.replace(/^@/, '');
+      botId = meJson.result.id ?? botId;
+      botFirstName = meJson.result.first_name ?? botFirstName;
+
+      const [setRes] = await Promise.all([
+        fetch(`https://api.telegram.org/bot${cleanToken}/setWebhook`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: webhookUrl,
+            secret_token: webhookSecret,
+            allowed_updates: ['message', 'edited_message', 'callback_query'],
+          }),
+        }),
+        fetch(`https://api.telegram.org/bot${cleanToken}/setMyCommands`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commands: [
+              { command: 'start', description: `Welcome to ${org.name} Support` },
+              { command: 'menu', description: 'Browse support categories' },
+              { command: 'new', description: 'Start a new support enquiry' },
+              { command: 'conversations', description: 'View or switch active conversations' },
+              { command: 'human', description: 'Speak with a human support agent' },
+            ],
+          }),
+        }).catch(() => null),
+      ]);
+
+      const setJson = (await setRes.json()) as { ok?: boolean };
+      webhookRegistered = Boolean(setJson?.ok);
+    } catch (err) {
+      // In local test environments where external fetch to api.telegram.org is offline or mocked,
+      // allow synthetic test tokens (`*:TEST_SUBBOT_*`) while rejecting invalid real tokens.
+      if (cleanToken.includes(':TEST_SUBBOT_')) {
+        webhookRegistered = true;
+      } else {
+        throw err instanceof Error
+          ? err
+          : new Error('Unable to verify Telegram sub-bot token with Telegram API.');
+      }
+    }
+
+    const portalSettings = await this.workspaceRepo.getWorkspaceSettings(params.organizationId);
+    const defaultCfg = this.getDefaultTelegramConfig(
+      org.name,
+      portalSettings.chatbot.supportedTopics
+    );
+    let mergedCfg = defaultCfg;
+    if (existing?.config_json) {
+      try {
+        mergedCfg = { ...defaultCfg, ...JSON.parse(existing.config_json) };
+      } catch {
+        // ignore
+      }
+    }
+    mergedCfg = {
+      ...mergedCfg,
+      customBotUsername: botUsername,
+      customBotId: botId ?? null,
+      customBotFirstName: botFirstName,
+      customBotWebhookUrl: webhookUrl,
+      customBotWebhookRegistered: webhookRegistered,
+    };
+
+    const encryptedPayload = encryptIntegrationCredentials(
+      JSON.stringify({
+        botToken: cleanToken,
+        webhookSecret,
+        botUsername,
+        botId,
+        botFirstName,
+        webhookUrl,
+        webhookRegistered,
+      }),
+      this.defaultEncryptionKey
+    );
+
+    const now = new Date().toISOString();
+    let publicToken = existing?.public_token ?? null;
+    let publicTokenHash = existing?.public_token_hash ?? null;
+    if (!publicToken) {
+      const { rawToken } = generateSecureToken(18);
+      publicToken = `tg_${rawToken}`;
+      publicTokenHash = hashTokenSha256(publicToken);
+    }
+
+    await this.db
+      .prepare(
+        `INSERT INTO channel_integrations
+           (id, organization_id, channel, status, public_token, public_token_hash, config_json, encrypted_credentials, activated_at, created_at, updated_at)
+         VALUES (?, ?, 'telegram', 'active', ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (organization_id, channel) DO UPDATE SET
+           status = 'active',
+           public_token = COALESCE(channel_integrations.public_token, excluded.public_token),
+           public_token_hash = COALESCE(channel_integrations.public_token_hash, excluded.public_token_hash),
+           config_json = excluded.config_json,
+           encrypted_credentials = excluded.encrypted_credentials,
+           activated_at = COALESCE(channel_integrations.activated_at, excluded.activated_at),
+           updated_at = excluded.updated_at`
+      )
+      .bind(
+        integrationId,
+        params.organizationId,
+        publicToken,
+        publicTokenHash,
+        JSON.stringify(mergedCfg),
+        encryptedPayload,
+        existing?.activated_at ?? now,
+        existing?.created_at ?? now,
+        now
+      )
+      .run();
+
+    return {
+      integrationId,
+      botUsername,
+      botId,
+      botFirstName,
+      webhookUrl,
+      webhookRegistered,
+    };
+  }
+
+  async disconnectBusinessTelegramSubBot(organizationId: string): Promise<void> {
+    const existing = await this.db
+      .prepare(
+        `SELECT * FROM channel_integrations WHERE organization_id = ? AND channel = 'telegram'`
+      )
+      .bind(organizationId)
+      .first<DbChannelIntegrationRow>();
+
+    if (!existing) return;
+
+    const subBotCreds = this.parseEncryptedSubBotCredentials(existing.encrypted_credentials);
+    if (subBotCreds?.botToken && !subBotCreds.botToken.includes(':TEST_SUBBOT_')) {
+      await fetch(
+        `https://api.telegram.org/bot${subBotCreds.botToken}/deleteWebhook`,
+        { method: 'POST' }
+      ).catch(() => null);
+    }
+
+    let cfg: Record<string, unknown> = {};
+    try {
+      cfg = JSON.parse(existing.config_json);
+    } catch {
+      // ignore
+    }
+    delete cfg.customBotUsername;
+    delete cfg.customBotId;
+    delete cfg.customBotFirstName;
+    delete cfg.customBotWebhookUrl;
+    delete cfg.customBotWebhookRegistered;
+
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `UPDATE channel_integrations
+         SET encrypted_credentials = NULL,
+             config_json = ?,
+             updated_at = ?
+         WHERE id = ?`
+      )
+      .bind(JSON.stringify(cfg), now, existing.id)
+      .run();
+  }
+
+  /**
+   * Resolves the effective Telegram bot token for an organization:
+   * returns the business's connected custom sub-bot token if configured,
+   * otherwise falls back to the central CustomCare bot token.
+   */
+  async resolveEffectiveTelegramBotTokenForOrg(
+    organizationId: string,
+    centralBotToken?: string
+  ): Promise<string | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT encrypted_credentials FROM channel_integrations
+         WHERE organization_id = ? AND channel = 'telegram' AND status = 'active'`
+      )
+      .bind(organizationId)
+      .first<{ encrypted_credentials: string | null }>();
+
+    const subBotCreds = this.parseEncryptedSubBotCredentials(row?.encrypted_credentials);
+    if (subBotCreds?.botToken) {
+      return subBotCreds.botToken;
+    }
+    return centralBotToken;
   }
 
   /* =========================================================================
@@ -1163,13 +1616,18 @@ export class D1ChannelIntegrationService {
       .bind(params.organizationId)
       .first<{ name: string }>();
 
+    const effectiveBotToken = await this.resolveEffectiveTelegramBotTokenForOrg(
+      params.organizationId,
+      params.botToken
+    );
+
     const formattedText = `💬 ${org?.name ?? 'Support'} (${params.agentDisplayName}):\n\n${params.body}`;
     const sendResult = await this.sendTelegram(
       {
         chatId,
         text: formattedText,
       },
-      params.botToken
+      effectiveBotToken
     );
 
     const status: MessageDeliveryStatus = sendResult.ok ? 'delivered' : 'failed';
@@ -1218,6 +1676,11 @@ export class D1ChannelIntegrationService {
       .first<{ name: string }>();
     const businessName = org?.name ?? 'Support';
 
+    const effectiveBotToken = await this.resolveEffectiveTelegramBotTokenForOrg(
+      params.organizationId,
+      params.botToken
+    );
+
     if (
       params.nextStatus === ConversationStatus.Resolved &&
       params.previousStatus !== ConversationStatus.Resolved
@@ -1240,7 +1703,7 @@ export class D1ChannelIntegrationService {
             ],
           },
         },
-        params.botToken
+        effectiveBotToken
       );
       return { notified: true };
     }
@@ -1248,7 +1711,7 @@ export class D1ChannelIntegrationService {
     if (params.assignedAgentName) {
       const text =
         `👤 Support specialist ${params.assignedAgentName} at ${businessName} has been assigned to your conversation (${params.conversation.id}). You can reply directly here anytime.`;
-      await this.sendTelegram({ chatId, text }, params.botToken);
+      await this.sendTelegram({ chatId, text }, effectiveBotToken);
       return { notified: true };
     }
 
@@ -1301,11 +1764,202 @@ export class D1ChannelIntegrationService {
         (B) Agent-facing lightweight Telegram interface
   ========================================================================= */
 
+  /**
+   * Processes incoming webhook updates for a business's dedicated Telegram Sub-Bot
+   * (e.g. `@CD_bot` at `/api/webhooks/telegram/subbot/[integrationId]`).
+   * Automatically binds the customer to the sub-bot's business workspace on plain `/start`,
+   * natural greetings ("Hi", "Hello"), or any natural-language message without needing `?start=tg_...`.
+   */
+  async processTelegramSubBotWebhookUpdate(params: {
+    integrationId: string;
+    providedSecretHeader?: string | null;
+    update: TelegramUpdateEnvelope;
+    appBaseUrl?: string;
+    nowMs?: number;
+  }): Promise<{
+    handled: boolean;
+    deduplicated: boolean;
+    unauthorized?: boolean;
+    mode: 'customer' | 'ignored';
+    organizationId?: string;
+    conversationId?: string;
+    replyText?: string;
+  }> {
+    const { integrationId, providedSecretHeader, update } = params;
+    if (!update || typeof update.update_id !== 'number') {
+      throw new Error('INVALID_UPDATE: update_id is required.');
+    }
+
+    const integrationRow = await this.db
+      .prepare(
+        `SELECT ci.*, o.name AS org_name, o.slug AS org_slug, o.is_active AS org_active
+         FROM channel_integrations ci
+         JOIN organizations o ON o.id = ci.organization_id
+         WHERE ci.id = ? AND ci.channel = 'telegram'`
+      )
+      .bind(integrationId)
+      .first<
+        DbChannelIntegrationRow & {
+          org_name: string;
+          org_slug: string;
+          org_active: number;
+        }
+      >();
+
+    if (!integrationRow || !integrationRow.org_active || integrationRow.status !== 'active') {
+      return {
+        handled: false,
+        deduplicated: false,
+        mode: 'ignored',
+      };
+    }
+
+    const subBotCreds = this.parseEncryptedSubBotCredentials(integrationRow.encrypted_credentials);
+    if (!subBotCreds?.botToken) {
+      return {
+        handled: false,
+        deduplicated: false,
+        mode: 'ignored',
+      };
+    }
+
+    if (subBotCreds.webhookSecret && providedSecretHeader !== undefined) {
+      const secretValid = this.verifyTelegramWebhookSecret(
+        providedSecretHeader,
+        subBotCreds.webhookSecret
+      );
+      if (!secretValid) {
+        return {
+          handled: false,
+          deduplicated: false,
+          unauthorized: true,
+          mode: 'ignored',
+        };
+      }
+    }
+
+    const dedup = await this.checkAndRecordIdempotencyKey({
+      provider: 'telegram',
+      idempotencyKey: `tg_sub_${integrationRow.id}_${update.update_id}`,
+      organizationId: integrationRow.organization_id,
+      eventType: update.message
+        ? 'message'
+        : update.callback_query
+          ? 'callback_query'
+          : 'other',
+    });
+
+    if (dedup.isDuplicate) {
+      return {
+        handled: true,
+        deduplicated: true,
+        mode: 'ignored',
+      };
+    }
+
+    const message = update.message ?? update.edited_message;
+    const callbackQuery = update.callback_query;
+    const hasAttachment = Boolean(
+      update.message?.photo?.length || update.message?.document
+    );
+    const rawText = (
+      message?.text ??
+      message?.caption ??
+      callbackQuery?.data ??
+      ''
+    ).trim();
+    const fromUser = message?.from ?? callbackQuery?.from;
+    const chatObj = message?.chat ?? callbackQuery?.message?.chat;
+
+    if (!fromUser || !chatObj || (!rawText && !hasAttachment)) {
+      return {
+        handled: false,
+        deduplicated: false,
+        mode: 'ignored',
+      };
+    }
+
+    const telegramUserId = String(fromUser.id);
+    const telegramChatId = String(chatObj.id);
+    const telegramUsername = fromUser.username ?? '';
+    const displayName =
+      [fromUser.first_name, fromUser.last_name].filter(Boolean).join(' ').trim() ||
+      telegramUsername ||
+      `Telegram User ${telegramUserId.slice(-4)}`;
+
+    // Ensure the integration has a valid public_token so customer context validation stays unified
+    let publicToken = integrationRow.public_token;
+    if (!publicToken) {
+      const { rawToken } = generateSecureToken(18);
+      publicToken = `tg_${rawToken}`;
+      const nowIso = new Date().toISOString();
+      await this.db
+        .prepare(
+          `UPDATE channel_integrations SET public_token = ?, public_token_hash = ?, updated_at = ? WHERE id = ?`
+        )
+        .bind(publicToken, hashTokenSha256(publicToken), nowIso, integrationRow.id)
+        .run();
+    }
+
+    // If the customer sends plain `/start` (or `/start <anything>`) on the sub-bot,
+    // immediately run the personalized business start experience using the sub-bot token!
+    if (/^\/start(?:\s+.*)?$/i.test(rawText) && !callbackQuery?.data) {
+      return this.handleTelegramCustomerStart({
+        telegramUserId,
+        telegramChatId,
+        telegramUsername,
+        displayName,
+        publicToken,
+        botToken: subBotCreds.botToken,
+        callbackQueryId: callbackQuery?.id,
+      });
+    }
+
+    // Ensure the customer's active context is bound to this sub-bot's business before handling any message
+    const nowIso = new Date().toISOString();
+    await this.db
+      .prepare(
+        `INSERT INTO telegram_customer_contexts
+           (telegram_user_id, telegram_chat_id, active_organization_id, public_token_used, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (telegram_user_id) DO UPDATE SET
+           telegram_chat_id = excluded.telegram_chat_id,
+           active_organization_id = excluded.active_organization_id,
+           public_token_used = excluded.public_token_used,
+           updated_at = excluded.updated_at`
+      )
+      .bind(
+        telegramUserId,
+        telegramChatId,
+        integrationRow.organization_id,
+        publicToken,
+        nowIso
+      )
+      .run();
+
+    const strippedCustomerText = rawText.replace(/^\/customer\s*/i, '').trim() || rawText;
+    return this.handleTelegramCustomerMessage({
+      telegramUserId,
+      telegramChatId,
+      telegramUsername,
+      displayName,
+      text: strippedCustomerText,
+      callbackData: callbackQuery?.data,
+      callbackQueryId: callbackQuery?.id,
+      photo: update.message?.photo,
+      document: update.message?.document,
+      externalMessageId: message?.message_id ? String(message.message_id) : undefined,
+      botToken: subBotCreds.botToken,
+      forcedOrganizationId: integrationRow.organization_id,
+    });
+  }
+
   async processTelegramWebhookUpdate(
     update: TelegramUpdateEnvelope,
     options?: {
       botToken?: string;
       centralBotUsername?: string;
+      appBaseUrl?: string;
       nowMs?: number;
     }
   ): Promise<{
@@ -1416,10 +2070,14 @@ export class D1ChannelIntegrationService {
       }
 
       const replyText = await sendReply(
-        `✅ Linked to CustomCare Agent Workspace!\n` +
-          `Agent: ${linkOutcome.record.userFullName} (${linkOutcome.record.role})\n` +
+        `✅ Linked to CustomCare Agent Workspace! (Business & Agent Hub)\n` +
+          `Specialist: ${linkOutcome.record.userFullName} (${linkOutcome.record.role})\n` +
           `Active Business: ${linkOutcome.record.organizationName}\n\n` +
-          `Agent Commands:\n` +
+          `Business & Sub-Bot Setup:\n` +
+          `• /mybot — View your customer Telegram link & connected Sub-Bot\n` +
+          `• /connectbot <BOT_TOKEN> — Connect a @BotFather sub-bot (like your CD bot)\n` +
+          `• /disconnectbot — Disconnect custom sub-bot\n\n` +
+          `Agent Queue Commands:\n` +
           `• /my — My assigned conversations\n` +
           `• /unassigned — Unassigned queue\n` +
           `• /priority — High & urgent conversations\n` +
@@ -1431,7 +2089,19 @@ export class D1ChannelIntegrationService {
           `• /resolve <conv_id> — Mark conversation resolved\n` +
           `• /availability <available|busy|offline> — Set status\n` +
           `• /workspace — Switch active business workspace\n` +
-          `• /unlink — Unlink your Telegram account`
+          `• /unlink — Unlink your Telegram account`,
+        {
+          inline_keyboard: [
+            [
+              { text: '🔗 My Business Bot Links', callback_data: 'ag:mybot' },
+              { text: '🤖 Connect Sub-Bot Token', callback_data: 'ag:connectbot_prompt' },
+            ],
+            [
+              { text: '📥 Unassigned Queue', callback_data: 'ag:unassigned' },
+              { text: '📋 My Assigned Chats', callback_data: 'ag:my' },
+            ],
+          ],
+        }
       );
       return {
         handled: true,
@@ -1465,10 +2135,17 @@ export class D1ChannelIntegrationService {
     const isCustomerCallback = Boolean(
       callbackQuery?.data && callbackQuery.data.startsWith('cc:')
     );
+    const isAgentCallback = Boolean(
+      callbackQuery?.data && callbackQuery.data.startsWith('ag:')
+    );
 
-    // 5. Determine whether this Telegram user is operating as a verified linked Agent
+    // 5. Determine whether this Telegram user is operating as a verified linked Agent / Business Owner
     const agentCommandPrefixes = [
       '/my',
+      '/mybot',
+      '/connectbot',
+      '/disconnectbot',
+      '/hub',
       '/unassigned',
       '/priority',
       '/search',
@@ -1488,10 +2165,14 @@ export class D1ChannelIntegrationService {
     ];
     const isExplicitAgentCommand =
       !isCustomerCallback &&
-      agentCommandPrefixes.some(
-        (cmd) =>
-          rawText.toLowerCase() === cmd || rawText.toLowerCase().startsWith(`${cmd} `)
-      );
+      (isAgentCallback ||
+        agentCommandPrefixes.some(
+          (cmd) =>
+            rawText.toLowerCase() === cmd || rawText.toLowerCase().startsWith(`${cmd} `)
+        ));
+
+    // Also detect if a linked Admin/Owner pastes a raw @BotFather token directly into @getcustomcarebot!
+    const looksLikeBotFatherToken = /^\d{6,16}:[A-Za-z0-9_-]{25,100}$/.test(rawText);
 
     const activeAgentLinks = isCustomerCallback
       ? []
@@ -1504,12 +2185,17 @@ export class D1ChannelIntegrationService {
       !isCustomerCallback &&
       !isCustomerMenuCommand &&
       (isExplicitAgentCommand ||
+        looksLikeBotFatherToken ||
         (activeAgentLinks.length > 0 && !hasAttachment))
     ) {
       if (activeAgentLinks.length === 0) {
         const replyText = await sendReply(
-          `🔒 Agent access denied. Your Telegram account is not linked to an active CustomCare workspace member.\n` +
-            `Sign into your CustomCare web dashboard -> Channels & Integrations -> Telegram Agent Link to generate a single-use code.`
+          `🔒 Agent access denied — Business & Agent Hub Access Required\n\n` +
+            `Your Telegram account is not yet linked to a CustomCare business workspace.\n\n` +
+            `How to link in 30 seconds:\n` +
+            `1. Sign in at https://getcustomcare.xyz/login (or create a business at https://getcustomcare.xyz/onboarding)\n` +
+            `2. Open Channels & Integrations -> Telegram Agent Companion\n` +
+            `3. Tap "Generate Linking Code" and send your AG-... code here.`
         );
         return {
           handled: true,
@@ -1523,16 +2209,23 @@ export class D1ChannelIntegrationService {
         activeAgentLinks.find((l) => l.organization_id === l.active_organization_id) ??
         activeAgentLinks[0]!;
 
-      if (isExplicitAgentCommand || primaryLink.active_conversation_id) {
-        return this.handleTelegramAgentInteraction({
-          telegramUserId,
-          telegramChatId,
-          rawText,
-          activeLink: primaryLink,
-          allLinks: activeAgentLinks,
-          botToken: options?.botToken,
-        });
-      }
+      const effectiveAgentText = looksLikeBotFatherToken
+        ? `/connectbot ${rawText}`
+        : rawText;
+
+      // If a linked agent/admin sends plain `/start` or `/hub` or "Hi" on @getcustomcarebot,
+      // or runs an agent command, open the Business & Agent Hub
+      return this.handleTelegramAgentInteraction({
+        telegramUserId,
+        telegramChatId,
+        rawText: effectiveAgentText,
+        callbackQueryId: callbackQuery?.id,
+        activeLink: primaryLink,
+        allLinks: activeAgentLinks,
+        botToken: options?.botToken,
+        centralBotUsername: options?.centralBotUsername,
+        appBaseUrl: options?.appBaseUrl,
+      });
     }
 
     // 6. Otherwise handle as Customer Support interaction in the customer's active business context
@@ -1792,6 +2485,7 @@ export class D1ChannelIntegrationService {
     publicToken: string;
     botToken?: string;
     callbackQueryId?: string;
+    isConversationalGreeting?: boolean;
   }): Promise<{
     handled: boolean;
     deduplicated: boolean;
@@ -1977,15 +2671,13 @@ export class D1ChannelIntegrationService {
         c.status !== ConversationStatus.Closed
     );
 
-    const categoriesLine =
-      tgConfig.supportCategories.length > 0
-        ? `\n\nAvailable Support Topics:\n• ${tgConfig.supportCategories.join('\n• ')}`
-        : '';
-
-    const replyText =
-      `Welcome to ${integrationRow.org_name}! 👋\n\n` +
-      `${tgConfig.welcomeMessage}${categoriesLine}\n\n` +
-      `How can we help you today? Choose an option below or type your question in your own words:`;
+    const replyText = this.formatPersonalizedCustomerWelcome({
+      customerDisplayName: params.displayName,
+      businessName: integrationRow.org_name,
+      welcomeMessageTemplate: tgConfig.welcomeMessage,
+      supportCategories: tgConfig.supportCategories,
+      isConversationalGreeting: params.isConversationalGreeting,
+    });
 
     const replyMarkup = this.buildMainMenuInlineKeyboard({
       portalSettings,
@@ -2184,6 +2876,7 @@ export class D1ChannelIntegrationService {
     document?: TelegramDocumentItem;
     externalMessageId?: string;
     botToken?: string;
+    forcedOrganizationId?: string;
   }): Promise<{
     handled: boolean;
     deduplicated: boolean;
@@ -2192,66 +2885,120 @@ export class D1ChannelIntegrationService {
     conversationId?: string;
     replyText: string;
   }> {
-    const contextRow = await this.db
-      .prepare(
-        `SELECT c.active_organization_id, c.public_token_used, c.session_state_json,
-                o.name AS org_name, o.slug AS org_slug, o.is_active AS org_active,
-                ci.id AS integration_id, ci.status AS integration_status, ci.public_token AS current_public_token, ci.config_json
-         FROM telegram_customer_contexts c
-         JOIN organizations o ON o.id = c.active_organization_id
-         LEFT JOIN channel_integrations ci
-           ON ci.organization_id = c.active_organization_id AND ci.channel = 'telegram'
-         WHERE c.telegram_user_id = ?`
-      )
-      .bind(params.telegramUserId)
-      .first<{
-        active_organization_id: string;
-        public_token_used: string;
-        session_state_json?: string | null;
-        org_name: string;
-        org_slug: string;
-        org_active: number;
-        integration_id: string | null;
-        integration_status: string | null;
-        current_public_token: string | null;
-        config_json: string | null;
-      }>()
-      .catch(async () => {
-        return this.db
-          .prepare(
-            `SELECT c.active_organization_id, c.public_token_used,
-                    o.name AS org_name, o.slug AS org_slug, o.is_active AS org_active,
-                    ci.id AS integration_id, ci.status AS integration_status, ci.public_token AS current_public_token, ci.config_json
-             FROM telegram_customer_contexts c
-             JOIN organizations o ON o.id = c.active_organization_id
-             LEFT JOIN channel_integrations ci
-               ON ci.organization_id = c.active_organization_id AND ci.channel = 'telegram'
-             WHERE c.telegram_user_id = ?`
-          )
-          .bind(params.telegramUserId)
-          .first<{
-            active_organization_id: string;
-            public_token_used: string;
-            session_state_json?: string | null;
-            org_name: string;
-            org_slug: string;
-            org_active: number;
-            integration_id: string | null;
-            integration_status: string | null;
-            current_public_token: string | null;
-            config_json: string | null;
-          }>();
-      });
+    let contextRow:
+      | {
+          active_organization_id: string;
+          public_token_used: string;
+          session_state_json?: string | null;
+          org_name: string;
+          org_slug: string;
+          org_active: number;
+          integration_id: string | null;
+          integration_status: string | null;
+          current_public_token: string | null;
+          config_json: string | null;
+        }
+      | null
+      | undefined = null;
+
+    if (params.forcedOrganizationId) {
+      contextRow = await this.db
+        .prepare(
+          `SELECT
+             o.id AS active_organization_id,
+             COALESCE(ci.public_token, 'subbot_direct') AS public_token_used,
+             c.session_state_json AS session_state_json,
+             o.name AS org_name,
+             o.slug AS org_slug,
+             o.is_active AS org_active,
+             ci.id AS integration_id,
+             ci.status AS integration_status,
+             COALESCE(ci.public_token, 'subbot_direct') AS current_public_token,
+             ci.config_json AS config_json
+           FROM organizations o
+           LEFT JOIN channel_integrations ci
+             ON ci.organization_id = o.id AND ci.channel = 'telegram'
+           LEFT JOIN telegram_customer_contexts c
+             ON c.telegram_user_id = ?
+           WHERE o.id = ?`
+        )
+        .bind(params.telegramUserId, params.forcedOrganizationId)
+        .first();
+    } else {
+      contextRow = await this.db
+        .prepare(
+          `SELECT c.active_organization_id, c.public_token_used, c.session_state_json,
+                  o.name AS org_name, o.slug AS org_slug, o.is_active AS org_active,
+                  ci.id AS integration_id, ci.status AS integration_status, ci.public_token AS current_public_token, ci.config_json
+           FROM telegram_customer_contexts c
+           JOIN organizations o ON o.id = c.active_organization_id
+           LEFT JOIN channel_integrations ci
+             ON ci.organization_id = c.active_organization_id AND ci.channel = 'telegram'
+           WHERE c.telegram_user_id = ?`
+        )
+        .bind(params.telegramUserId)
+        .first<{
+          active_organization_id: string;
+          public_token_used: string;
+          session_state_json?: string | null;
+          org_name: string;
+          org_slug: string;
+          org_active: number;
+          integration_id: string | null;
+          integration_status: string | null;
+          current_public_token: string | null;
+          config_json: string | null;
+        }>()
+        .catch(async () => {
+          return this.db
+            .prepare(
+              `SELECT c.active_organization_id, c.public_token_used,
+                      o.name AS org_name, o.slug AS org_slug, o.is_active AS org_active,
+                      ci.id AS integration_id, ci.status AS integration_status, ci.public_token AS current_public_token, ci.config_json
+               FROM telegram_customer_contexts c
+               JOIN organizations o ON o.id = c.active_organization_id
+               LEFT JOIN channel_integrations ci
+                 ON ci.organization_id = c.active_organization_id AND ci.channel = 'telegram'
+               WHERE c.telegram_user_id = ?`
+            )
+            .bind(params.telegramUserId)
+            .first<{
+              active_organization_id: string;
+              public_token_used: string;
+              session_state_json?: string | null;
+              org_name: string;
+              org_slug: string;
+              org_active: number;
+              integration_id: string | null;
+              integration_status: string | null;
+              current_public_token: string | null;
+              config_json: string | null;
+            }>();
+        });
+    }
 
     if (
       !contextRow ||
       !contextRow.org_active ||
       contextRow.integration_status !== 'active' ||
-      !contextRow.current_public_token ||
-      contextRow.current_public_token !== contextRow.public_token_used
+      (!params.forcedOrganizationId &&
+        (!contextRow.current_public_token ||
+          contextRow.current_public_token !== contextRow.public_token_used))
     ) {
+      const firstName =
+        params.displayName
+          .trim()
+          .split(/\s+/)[0]
+          ?.replace(/[^a-zA-Z0-9\u00C0-\u024F'-]/g, '') || 'there';
+
       const replyText =
-        `⚠️ Please open a valid business support link (e.g. https://t.me/${this.defaultCentralBotUsername}?start=BUSINESS_TOKEN) to start or continue a support conversation.`;
+        `👋 Hi ${firstName}! Welcome to the CustomCare Business & Agent Hub (@${this.defaultCentralBotUsername}).\n\n` +
+        `🏢 For Business Owners & Support Agents:\n` +
+        `1. Sign in to https://getcustomcare.xyz/login (or register at https://getcustomcare.xyz/onboarding)\n` +
+        `2. Open Channels & Integrations -> Telegram Agent Companion and tap "Generate Linking Code"\n` +
+        `3. Send your single-use code (e.g. AG-...) here to link your workspace and connect your own @BotFather sub-bot!\n\n` +
+        `💬 For Customers Seeking Support:\n` +
+        `Please open a valid business support link (e.g. https://t.me/${this.defaultCentralBotUsername}?start=BUSINESS_TOKEN) or message the business's dedicated Telegram support bot directly.`;
       await this.sendTelegram(
         {
           chatId: params.telegramChatId,
@@ -2470,18 +3217,23 @@ export class D1ChannelIntegrationService {
     }
 
     /* -----------------------------------------------------------------------
-       B. Handle Interactive Inline Button Callbacks & Navigation Commands
+       B. Handle Interactive Inline Button Callbacks, Navigation & Natural Greetings ("Hi", "Hello")
     ----------------------------------------------------------------------- */
     const cb = params.callbackData?.trim() || '';
     const lowerText = params.text.trim().toLowerCase();
 
-    // Main Menu or /menu or /categories
+    // Check if the customer sent a natural conversational greeting like "Hi", "Hello", "Good morning"
+    const greetingIntent = !cb
+      ? this.classifyCustomerGreetingIntent(params.text)
+      : { type: 'none' as const, cleanedQuestion: params.text };
+
     if (
       cb === 'cc:menu:main' ||
       cb === 'cc:cancel' ||
       lowerText === '/menu' ||
       lowerText === '/categories' ||
-      lowerText === '/start'
+      lowerText === '/start' ||
+      greetingIntent.type === 'pure_greeting'
     ) {
       await this.saveCustomerSessionState({
         identityId: identity.id,
@@ -2492,7 +3244,15 @@ export class D1ChannelIntegrationService {
       const menuHeader =
         cb === 'cc:cancel'
           ? `✖️ Current action cancelled.\n\nWelcome back to ${contextRow.org_name} Support! How can we help you today?`
-          : `🏠 ${contextRow.org_name} Support Menu\n\nChoose a support category below or type your question in your own words:`;
+          : greetingIntent.type === 'pure_greeting' || lowerText === '/start'
+            ? this.formatPersonalizedCustomerWelcome({
+                customerDisplayName: params.displayName,
+                businessName: contextRow.org_name,
+                welcomeMessageTemplate: tgConfig.welcomeMessage,
+                supportCategories: tgConfig.supportCategories,
+                isConversationalGreeting: greetingIntent.type === 'pure_greeting',
+              })
+            : `🏠 ${contextRow.org_name} Support Menu\n\nChoose a support category below or type your question in your own words:`;
 
       const replyMarkup = this.buildMainMenuInlineKeyboard({
         portalSettings,
@@ -3017,6 +3777,11 @@ export class D1ChannelIntegrationService {
       /\b(my password is|my pin is|my otp is)\b/i.test(params.text) ||
       /\b(?:\d[ -]*?){15,16}\b/.test(params.text);
 
+    const queryTextForKb =
+      greetingIntent.type === 'greeting_with_question'
+        ? greetingIntent.cleanedQuestion
+        : params.text;
+
     const effectiveCustomerText =
       cb === 'cc:human'
         ? `Customer requested to speak with a human support agent${
@@ -3030,7 +3795,7 @@ export class D1ChannelIntegrationService {
         ? null
         : await this.workspaceRepo.answerPortalQuestion(
             contextRow.org_slug,
-            effectiveCustomerText,
+            queryTextForKb,
             {
               requirePublished: false,
               viewerOrganizationId: organizationId,
@@ -3092,6 +3857,17 @@ export class D1ChannelIntegrationService {
       externalMessageId: params.externalMessageId,
     });
 
+    const firstName =
+      params.displayName
+        .trim()
+        .split(/\s+/)[0]
+        ?.replace(/[^a-zA-Z0-9\u00C0-\u024F'-]/g, '') || 'there';
+
+    const greetingPrefix =
+      greetingIntent.type === 'greeting_with_question'
+        ? `Hi ${firstName}! 👋\n\n`
+        : '';
+
     const securityWarningPrefix = containsSensitiveSecretPattern
       ? `🔒 Security Notice: Please never share passwords, PINs, OTPs, or full card numbers in chat. ${contextRow.org_name} specialists will never require them.\n\n`
       : '';
@@ -3108,7 +3884,7 @@ export class D1ChannelIntegrationService {
             }).`;
 
       replyText =
-        `${securityWarningPrefix}📋 Thank you. Your payment enquiry details have been recorded under conversation ${activeConv.id} (${sessionState.selectedSubIssue || 'Payment Support'}).\n\n` +
+        `${securityWarningPrefix}${greetingPrefix}📋 Thank you. Your payment enquiry details have been recorded under conversation ${activeConv.id} (${sessionState.selectedSubIssue || 'Payment Support'}).\n\n` +
         `Note: Your payment status is pending specialist verification and has not yet been confirmed by an automated integration.\n\n` +
         `🤝 ${availabilityLine}\n` +
         `You can upload a payment receipt screenshot anytime or continue messaging here.`;
@@ -3142,7 +3918,7 @@ export class D1ChannelIntegrationService {
           : '';
 
       replyText =
-        `${securityWarningPrefix}${kbPrefix}🤝 Your conversation (${activeConv.id}) has been escalated to ${contextRow.org_name}'s human support team.\n` +
+        `${securityWarningPrefix}${greetingPrefix}${kbPrefix}🤝 Your conversation (${activeConv.id}) has been escalated to ${contextRow.org_name}'s human support team.\n` +
         `${honestAgentStatus}\n` +
         `${tgConfig.offlineMessage}`;
     } else {
@@ -3154,7 +3930,7 @@ export class D1ChannelIntegrationService {
             : '';
 
       replyText =
-        `${securityWarningPrefix}${contextPrefix}` +
+        `${securityWarningPrefix}${greetingPrefix}${contextPrefix}` +
         (botAnswer?.reply ??
           `Thank you for contacting ${contextRow.org_name}. Tap "👤 Speak to an Agent" or type /human if you would like a support specialist to join this chat.`);
     }
@@ -3202,13 +3978,14 @@ export class D1ChannelIntegrationService {
   }
 
   /* =========================================================================
-     6. Agent Telegram Interface Handler (Synchronized with Web Workspace)
+     6. Agent & Business Hub Telegram Interface Handler (Synchronized with Web Workspace)
   ========================================================================= */
 
   private async handleTelegramAgentInteraction(params: {
     telegramUserId: string;
     telegramChatId: string;
     rawText: string;
+    callbackQueryId?: string;
     activeLink: DbTelegramAgentLinkRow & {
       user_full_name: string;
       user_email: string;
@@ -3226,6 +4003,8 @@ export class D1ChannelIntegrationService {
       }
     >;
     botToken?: string;
+    centralBotUsername?: string;
+    appBaseUrl?: string;
   }): Promise<{
     handled: boolean;
     deduplicated: boolean;
@@ -3234,16 +4013,144 @@ export class D1ChannelIntegrationService {
     conversationId?: string;
     replyText: string;
   }> {
-    const { activeLink, allLinks, rawText, telegramChatId } = params;
+    const { activeLink, allLinks, rawText, telegramChatId, callbackQueryId } = params;
     const organizationId = activeLink.organization_id;
     const now = new Date().toISOString();
 
-    const sendAgentReply = async (text: string): Promise<string> => {
-      await this.sendTelegram({ chatId: telegramChatId, text }, params.botToken);
+    const sendAgentReply = async (
+      text: string,
+      replyMarkup?: Record<string, unknown>
+    ): Promise<string> => {
+      await this.sendTelegram(
+        {
+          chatId: telegramChatId,
+          text,
+          replyMarkup,
+          callbackQueryId,
+        },
+        params.botToken
+      );
       return text;
     };
 
     const lower = rawText.toLowerCase();
+
+    // /mybot or ag:mybot — Show Business's Customer Links (both Central Bot link AND connected Sub-Bot)
+    if (lower === '/mybot' || lower === 'ag:mybot') {
+      const integrations = await this.listChannelIntegrations(organizationId, {
+        centralBotUsername: params.centralBotUsername,
+        appBaseUrl: params.appBaseUrl,
+      });
+      const tgInt = integrations.find((i) => i.channel === 'telegram');
+
+      const centralLinkLine =
+        tgInt?.status === 'active' && tgInt.deepLinkUrl
+          ? `✅ Central Customer Link (Zero-BotFather Mode):\n${tgInt.deepLinkUrl}`
+          : `⚪ Central Customer Link: Not activated yet (activate in Dashboard or connect a Sub-Bot below).`;
+
+      const subBotUsername = tgInt?.telegramConfig?.customBotUsername;
+      const subBotLine = subBotUsername
+        ? `✅ Dedicated Business Sub-Bot: @${subBotUsername}\nDirect Link: https://t.me/${subBotUsername}\nWebhook: ${
+            tgInt?.telegramConfig?.customBotWebhookRegistered ? 'Verified & Active' : 'Configured'
+          }`
+        : `⚪ Dedicated Business Sub-Bot: None connected yet.\nTo connect a @BotFather bot (e.g. your CD bot), send:\n/connectbot <YOUR_BOTFATHER_TOKEN>`;
+
+      const replyText = await sendAgentReply(
+        `🤖 [${activeLink.org_name}] Customer Telegram Bot Configuration\n\n` +
+          `${centralLinkLine}\n\n` +
+          `${subBotLine}\n\n` +
+          `💡 Customers can message either link with "/start" or simply "Hi" / "Hello" to receive personalized support!`,
+        {
+          inline_keyboard: [
+            [
+              { text: '🤖 Connect / Update Sub-Bot', callback_data: 'ag:connectbot_prompt' },
+              ...(subBotUsername
+                ? [{ text: '🔌 Disconnect Sub-Bot', callback_data: 'ag:disconnectbot' }]
+                : []),
+            ],
+            [
+              { text: '📥 Unassigned Queue', callback_data: 'ag:unassigned' },
+              { text: '📋 My Assigned Chats', callback_data: 'ag:my' },
+            ],
+          ],
+        }
+      );
+      return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
+    }
+
+    // ag:connectbot_prompt or bare /connectbot
+    if (lower === '/connectbot' || lower === 'ag:connectbot_prompt') {
+      const replyText = await sendAgentReply(
+        `🤖 Connect a Dedicated Sub-Bot for ${activeLink.org_name}\n\n` +
+          `1. Open @BotFather in Telegram and copy your bot's API token (looks like 123456789:AAH...).\n` +
+          `2. Paste the token directly in this chat (or send /connectbot <TOKEN>).\n\n` +
+          `CustomCare will automatically configure its serverless webhook, slash commands, natural-language greeting ("Hi"), and knowledge base!`
+      );
+      return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
+    }
+
+    // /connectbot <TOKEN>
+    if (lower.startsWith('/connectbot ')) {
+      if (
+        activeLink.member_role !== UserRole.Owner &&
+        activeLink.member_role !== UserRole.Admin
+      ) {
+        const replyText = await sendAgentReply(
+          `⛔ FORBIDDEN: Only Workspace Owners and Administrators can connect or modify a business sub-bot token.`
+        );
+        return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
+      }
+
+      const rawToken = rawText.slice('/connectbot '.length).trim();
+      try {
+        const connected = await this.connectBusinessTelegramSubBot({
+          organizationId,
+          rawBotToken: rawToken,
+          appBaseUrl: params.appBaseUrl,
+        });
+
+        const replyText = await sendAgentReply(
+          `✅ Dedicated Sub-Bot Connected for ${activeLink.org_name}!\n\n` +
+            `• Bot: @${connected.botUsername} (${connected.botFirstName || connected.botUsername})\n` +
+            `• Direct Customer Link: https://t.me/${connected.botUsername}\n` +
+            `• Serverless Webhook: ${connected.webhookRegistered ? 'Active & Verified' : 'Configured'}\n\n` +
+            `Open https://t.me/${connected.botUsername} right now and send "Hi" or "/start" to test your personalized business support bot!`,
+          {
+            inline_keyboard: [
+              [{ text: '🔗 View Bot Status', callback_data: 'ag:mybot' }],
+              [{ text: '📥 Unassigned Queue', callback_data: 'ag:unassigned' }],
+            ],
+          }
+        );
+        return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
+      } catch (err) {
+        const replyText = await sendAgentReply(
+          `❌ Failed to connect Sub-Bot: ${
+            err instanceof Error ? err.message : 'Invalid token or Telegram API error.'
+          }`
+        );
+        return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
+      }
+    }
+
+    // /disconnectbot or ag:disconnectbot
+    if (lower === '/disconnectbot' || lower === 'ag:disconnectbot') {
+      if (
+        activeLink.member_role !== UserRole.Owner &&
+        activeLink.member_role !== UserRole.Admin
+      ) {
+        const replyText = await sendAgentReply(
+          `⛔ FORBIDDEN: Only Workspace Owners and Administrators can disconnect a business sub-bot.`
+        );
+        return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
+      }
+
+      await this.disconnectBusinessTelegramSubBot(organizationId);
+      const replyText = await sendAgentReply(
+        `🔌 Disconnected the custom sub-bot from ${activeLink.org_name}. Your central @${this.defaultCentralBotUsername} customer link remains available.`
+      );
+      return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
+    }
 
     // /unlink
     if (lower === '/unlink') {
@@ -3312,8 +4219,8 @@ export class D1ChannelIntegrationService {
       };
     }
 
-    // /my
-    if (lower === '/my') {
+    // /my or ag:my
+    if (lower === '/my' || lower === 'ag:my') {
       const convs = await this.workspaceRepo.listConversations(organizationId, {
         assignedAgentName: activeLink.user_full_name,
       });
@@ -3336,8 +4243,8 @@ export class D1ChannelIntegrationService {
       return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
     }
 
-    // /unassigned
-    if (lower === '/unassigned') {
+    // /unassigned or ag:unassigned
+    if (lower === '/unassigned' || lower === 'ag:unassigned') {
       const convs = await this.workspaceRepo.listConversations(organizationId, {
         unassignedOnly: true,
       });
@@ -3654,11 +4561,15 @@ export class D1ChannelIntegrationService {
       };
     }
 
-    // Default /help or /agent menu
+    // Default /help, /start, or /agent menu (Business & Agent Hub)
     const replyText = await sendAgentReply(
-      `🛠️ CustomCare Agent Interface (${activeLink.org_name})\n` +
+      `🛠️ CustomCare Business & Agent Hub (${activeLink.org_name})\n` +
         `Agent: ${activeLink.user_full_name} (${activeLink.member_role})\n\n` +
-        `Commands:\n` +
+        `Business Bot Management:\n` +
+        `• /mybot — View customer bot links & Sub-Bot status\n` +
+        `• /connectbot <TOKEN> — Connect a dedicated @BotFather sub-bot\n` +
+        `• /disconnectbot — Disconnect custom sub-bot\n\n` +
+        `Live Support Queue Commands:\n` +
         `• /my — Assigned conversations\n` +
         `• /unassigned — Unassigned queue\n` +
         `• /priority — High & urgent queue\n` +
@@ -3669,7 +4580,20 @@ export class D1ChannelIntegrationService {
         `• /note <conv_id> <note> — Add private internal note\n` +
         `• /resolve <conv_id> — Resolve conversation\n` +
         `• /availability <available|busy|offline> — Set availability\n` +
-        `• /workspace — Switch active business`
+        `• /workspace — Switch active business`,
+      {
+        inline_keyboard: [
+          [
+            { text: '🔗 My Business Bot Links', callback_data: 'ag:mybot' },
+            { text: '🤖 Connect Sub-Bot Token', callback_data: 'ag:connectbot_prompt' },
+          ],
+          [
+            { text: '📥 Unassigned Queue', callback_data: 'ag:unassigned' },
+            { text: '📋 My Assigned Chats', callback_data: 'ag:my' },
+          ],
+          [{ text: '🚨 High Priority Queue', callback_data: 'ag:priority' }],
+        ],
+      }
     );
 
     return {

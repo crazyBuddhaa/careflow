@@ -1089,4 +1089,177 @@ describe('CustomCare Unified Multi-Channel Support OS (Phases 2–11)', () => {
       ctx.cleanup();
     }
   });
+
+  it('6. Dual-Mode Dedicated Business Sub-Bot (@BotFather), Central Business & Agent Hub, and Natural Greeting ("Hi" / "{name}") Recognition', async () => {
+    const ctx = await createIsolatedTestContext();
+    try {
+      const reg = await ctx.workspaceRepo.registerUserAndFirstBusiness({
+        fullName: 'Chidi Founder',
+        email: 'chidi@cdcommerce.io',
+        password: 'StrongPassword!2026',
+        businessName: 'CD Commerce',
+        industry: 'E-Commerce',
+        country: 'Nigeria',
+      });
+      const orgId = reg.organization.id;
+      const userId = reg.user.id;
+
+      const catShip = await ctx.knowledgeRepo.createCategory(orgId, {
+        name: 'Shipping & Delivery',
+        slug: 'shipping-delivery',
+        description: 'Same-day delivery and tracking',
+        displayOrder: 1,
+      });
+      await ctx.knowledgeRepo.createFaq(orgId, {
+        categoryId: catShip.id,
+        question: 'How fast is CD Express delivery in Lagos?',
+        answer: 'CD Express delivers within 3 hours across Lagos Island and Mainland.',
+        status: KnowledgeStatus.Published,
+        searchKeywords: 'delivery lagos express shipping hours',
+        displayOrder: 1,
+      });
+
+      // Configure custom welcome message using {name} and {business} placeholders
+      await ctx.channelService.configureChannelIntegration(orgId, {
+        channel: 'telegram',
+        action: 'activate',
+        telegramConfig: {
+          welcomeMessage: 'Hi {name}! Welcome to {business} VIP Support. How can we help you today?',
+          supportCategories: ['Shipping & Delivery', 'Refunds'],
+        },
+      });
+
+      // 6a. Plain `/start` on central @getcustomcarebot from an unlinked user opens the Business & Agent Hub guide
+      const unlinkedHubRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 6001,
+        message: {
+          message_id: 601,
+          from: { id: 901001, first_name: 'Chidi', username: 'chidi_owner' },
+          chat: { id: 901001, type: 'private' },
+          text: '/start',
+        },
+      });
+      assert.ok(
+        unlinkedHubRes.replyText?.includes('Welcome to the CustomCare Business & Agent Hub'),
+        'Plain /start on central bot must show the Business & Agent Hub onboarding guide'
+      );
+
+      // 6b. Link Chidi Founder as Owner on @getcustomcarebot, then send `/start` -> opens interactive Business & Agent Hub
+      const linkCode = await ctx.channelService.generateAgentTelegramLinkCode({
+        organizationId: orgId,
+        userId,
+      });
+      await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 6002,
+        message: {
+          message_id: 602,
+          from: { id: 901001, first_name: 'Chidi', username: 'chidi_owner' },
+          chat: { id: 901001, type: 'private' },
+          text: `/link ${linkCode.linkingCode}`,
+        },
+      });
+
+      const ownerHubStart = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 6003,
+        message: {
+          message_id: 603,
+          from: { id: 901001, first_name: 'Chidi', username: 'chidi_owner' },
+          chat: { id: 901001, type: 'private' },
+          text: '/start',
+        },
+      });
+      assert.equal(ownerHubStart.mode, 'agent');
+      assert.ok(ownerHubStart.replyText?.includes('CustomCare Business & Agent Hub (CD Commerce)'));
+
+      // 6c. Owner connects their dedicated @BotFather sub-bot ("CD") by pasting the token directly into @getcustomcarebot!
+      const rawSubBotToken = '8123456789:TEST_SUBBOT_cd_commerce_bot_secret12345';
+      const connectViaBotRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 6004,
+        message: {
+          message_id: 604,
+          from: { id: 901001, first_name: 'Chidi', username: 'chidi_owner' },
+          chat: { id: 901001, type: 'private' },
+          text: rawSubBotToken,
+        },
+      });
+      assert.equal(connectViaBotRes.mode, 'agent');
+      assert.ok(connectViaBotRes.replyText?.includes('Dedicated Sub-Bot Connected for CD Commerce'));
+      assert.ok(connectViaBotRes.replyText?.includes('@cd_commerce_support_bot'));
+
+      // Verify `/mybot` shows both Mode A (Central Link) and Mode B (Dedicated Sub-Bot)
+      const myBotRes = await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 6005,
+        message: {
+          message_id: 605,
+          from: { id: 901001, first_name: 'Chidi', username: 'chidi_owner' },
+          chat: { id: 901001, type: 'private' },
+          text: '/mybot',
+        },
+      });
+      assert.ok(myBotRes.replyText?.includes('Central Customer Link'));
+      assert.ok(myBotRes.replyText?.includes('@cd_commerce_support_bot'));
+
+      // Verify `listChannelIntegrations` masks the sub-bot token and returns customBotDeepLinkUrl
+      const integrations = await ctx.channelService.listChannelIntegrations(orgId);
+      const tgInt = integrations.find((i) => i.channel === 'telegram')!;
+      assert.equal(tgInt.telegramConfig?.customBotUsername, 'cd_commerce_support_bot');
+      assert.equal(tgInt.telegramConfig?.customBotDeepLinkUrl, 'https://t.me/cd_commerce_support_bot');
+      assert.ok(
+        tgInt.telegramConfig?.customBotTokenMasked &&
+          !tgInt.telegramConfig.customBotTokenMasked.includes('TEST_SUBBOT'),
+        'Raw sub-bot token must never be exposed in dashboard API responses'
+      );
+
+      // 6d. Customer opens the Dedicated Business Sub-Bot (`@cd_commerce_bot`) and sends "Hi" (instead of /start)!
+      const subBotHiRes = await ctx.channelService.processTelegramSubBotWebhookUpdate({
+        integrationId: tgInt.id,
+        update: {
+          update_id: 7001,
+          message: {
+            message_id: 701,
+            from: { id: 444555, first_name: 'Amaka', last_name: 'Okafor', username: 'amaka_ng' },
+            chat: { id: 444555, type: 'private' },
+            text: 'Hi',
+          },
+        },
+      });
+      assert.equal(subBotHiRes.handled, true);
+      assert.equal(subBotHiRes.organizationId, orgId);
+      assert.ok(
+        subBotHiRes.replyText?.includes('Hi Amaka! Welcome to CD Commerce VIP Support.'),
+        'Sending "Hi" to the sub-bot must greet the customer by their Telegram first name and use the business welcome message'
+      );
+      const subBotOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
+      assert.ok(
+        subBotOutbound.replyMarkup,
+        'Natural greeting "Hi" must also present the interactive support category buttons'
+      );
+
+      // 6e. Customer sends a combined greeting + question ("Hello, how fast is CD Express delivery in Lagos?")
+      const subBotGreetQuestionRes = await ctx.channelService.processTelegramSubBotWebhookUpdate({
+        integrationId: tgInt.id,
+        update: {
+          update_id: 7002,
+          message: {
+            message_id: 702,
+            from: { id: 444555, first_name: 'Amaka', last_name: 'Okafor', username: 'amaka_ng' },
+            chat: { id: 444555, type: 'private' },
+            text: 'Hello, how fast is CD Express delivery in Lagos?',
+          },
+        },
+      });
+      assert.equal(subBotGreetQuestionRes.organizationId, orgId);
+      assert.ok(
+        subBotGreetQuestionRes.replyText?.includes('Hi Amaka! 👋'),
+        'Combined greeting + question must warmly greet the customer by first name'
+      );
+      assert.ok(
+        subBotGreetQuestionRes.replyText?.includes('3 hours across Lagos'),
+        'Combined greeting + question must answer the question from the business knowledge base'
+      );
+    } finally {
+      ctx.cleanup();
+    }
+  });
 });
+
