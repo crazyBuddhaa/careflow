@@ -416,6 +416,7 @@ export interface PortalAssistantResponseDto {
 }
 
 export type AdminModuleSectionKey =
+  | 'overview'
   | 'onboarding-guide'
   | 'integrations'
   | 'business-profile'

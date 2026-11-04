@@ -36,6 +36,7 @@ interface WorkspaceOperationsManagerProps {
   organizationName: string;
   currentUserName?: string;
   currentUserRole?: UserRole;
+  onNavigateSubView?: (view: OperationsSubView) => void;
 }
 
 function formatDateTime(iso: string): string {
@@ -56,6 +57,7 @@ export function WorkspaceOperationsManager({
   organizationName,
   currentUserName,
   currentUserRole = UserRole.Owner,
+  onNavigateSubView,
 }: WorkspaceOperationsManagerProps) {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -449,8 +451,42 @@ export function WorkspaceOperationsManager({
     }
   }
 
+  const isBusinessManager =
+    currentUserRole === UserRole.Owner || currentUserRole === UserRole.Admin;
+
   return (
     <div className="space-y-6">
+      {onNavigateSubView && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-2 flex flex-wrap items-center gap-1.5">
+          {(
+            isBusinessManager
+              ? ([
+                  ['conversations', 'Support Inbox'],
+                  ['customers', 'Customers'],
+                  ['agents', 'Team & Specialists'],
+                  ['analytics', 'Analytics & Metrics'],
+                ] as const)
+              : ([
+                  ['conversations', 'My Support Inbox'],
+                  ['customers', 'Customer Directory'],
+                ] as const)
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onNavigateSubView(key)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                activeSubView === key
+                  ? 'bg-slate-900 text-white shadow-2xs'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {feedback && (
         <div
           role="status"

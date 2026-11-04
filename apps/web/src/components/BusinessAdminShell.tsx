@@ -50,107 +50,111 @@ import {
 import { WorkspaceOnboardingGuide } from '@/components/admin/WorkspaceOnboardingGuide';
 import { AccountSecurityManager } from '@/components/admin/AccountSecurityManager';
 import { ChannelIntegrationsManager } from '@/components/admin/ChannelIntegrationsManager';
+import { WorkspaceRoleOverview } from '@/components/admin/WorkspaceRoleOverview';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 
-interface AdminModuleDescriptor {
+interface NavModuleDescriptor {
   key: AdminModuleSectionKey;
+  matchKeys: AdminModuleSectionKey[];
   title: string;
-  group: 'Workspace Setup' | 'Knowledge' | 'Configuration' | 'Operations';
+  subtitle: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const ADMIN_MODULES: AdminModuleDescriptor[] = [
+/**
+ * Clean, consolidated 6-item navigation for Business Owners & Admins
+ */
+const BUSINESS_PRIMARY_MODULES: NavModuleDescriptor[] = [
   {
-    key: 'onboarding-guide',
-    title: 'Onboarding Guide (7 Steps)',
-    group: 'Workspace Setup',
-    icon: Sparkles,
+    key: 'overview',
+    matchKeys: ['overview'],
+    title: 'Overview',
+    subtitle: 'Channels, queue & quick links',
+    icon: LayoutDashboard,
+  },
+  {
+    key: 'conversations',
+    matchKeys: ['conversations', 'customers', 'agents', 'analytics'],
+    title: 'Inbox & Team',
+    subtitle: 'Conversations, agents & metrics',
+    icon: MessageSquare,
   },
   {
     key: 'integrations',
-    title: 'Channels & Integrations',
-    group: 'Workspace Setup',
+    matchKeys: ['integrations'],
+    title: 'Telegram & Channels',
+    subtitle: 'Central bot, Sub-Bot & widget',
     icon: Share2,
   },
   {
     key: 'knowledge-overview',
-    title: 'Knowledge Overview',
-    group: 'Knowledge',
-    icon: LayoutDashboard,
-  },
-  {
-    key: 'knowledge-articles',
-    title: 'Knowledge Articles',
-    group: 'Knowledge',
+    matchKeys: ['knowledge-overview', 'knowledge-articles', 'faqs', 'categories'],
+    title: 'Knowledge Base',
+    subtitle: 'Articles, FAQs & categories',
     icon: BookOpen,
   },
   {
-    key: 'faqs',
-    title: 'FAQs',
-    group: 'Knowledge',
-    icon: HelpCircle,
-  },
-  {
-    key: 'categories',
-    title: 'Categories',
-    group: 'Knowledge',
-    icon: FolderTree,
-  },
-  {
-    key: 'support-procedures',
-    title: 'Support Procedures',
-    group: 'Knowledge',
-    icon: GitBranch,
-  },
-  {
     key: 'business-profile',
-    title: 'Business Profile',
-    group: 'Configuration',
-    icon: Building2,
-  },
-  {
-    key: 'branding',
-    title: 'Branding',
-    group: 'Configuration',
-    icon: Palette,
-  },
-  {
-    key: 'chatbot-settings',
-    title: 'Assistant Settings',
-    group: 'Configuration',
+    matchKeys: [
+      'business-profile',
+      'branding',
+      'chatbot-settings',
+      'support-procedures',
+      'onboarding-guide',
+    ],
+    title: 'Brand & AI Rules',
+    subtitle: 'Profile, portal theme & assistant',
     icon: Bot,
   },
   {
+    key: 'account-security',
+    matchKeys: ['account-security'],
+    title: 'Account & Security',
+    subtitle: '2FA, sessions & password',
+    icon: ShieldCheck,
+  },
+];
+
+/**
+ * Focused 4-item navigation strictly for Support Agents (Agent / Supervisor / Viewer)
+ */
+const AGENT_PRIMARY_MODULES: NavModuleDescriptor[] = [
+  {
+    key: 'overview',
+    matchKeys: ['overview'],
+    title: 'My Agent Overview',
+    subtitle: 'Status, queue & Telegram link',
+    icon: LayoutDashboard,
+  },
+  {
     key: 'conversations',
-    title: 'Conversations',
-    group: 'Operations',
+    matchKeys: ['conversations'],
+    title: 'Support Inbox',
+    subtitle: 'Assigned & unassigned chats',
     icon: MessageSquare,
   },
   {
     key: 'customers',
-    title: 'Customers',
-    group: 'Operations',
+    matchKeys: ['customers'],
+    title: 'Customer Directory',
+    subtitle: 'Customer profiles & history',
     icon: Users,
   },
   {
-    key: 'agents',
-    title: 'Specialists',
-    group: 'Operations',
-    icon: UserCog,
-  },
-  {
-    key: 'analytics',
-    title: 'Analytics',
-    group: 'Operations',
-    icon: BarChart3,
-  },
-  {
     key: 'account-security',
-    title: 'Account & Security',
-    group: 'Configuration',
+    matchKeys: ['account-security'],
+    title: 'My Account',
+    subtitle: 'Security & active sessions',
     icon: ShieldCheck,
   },
 ];
+
+const AGENT_ALLOWED_KEYS = new Set<AdminModuleSectionKey>([
+  'overview',
+  'conversations',
+  'customers',
+  'account-security',
+]);
 
 const KNOWLEDGE_KEYS = new Set<AdminModuleSectionKey>([
   'knowledge-overview',
@@ -167,7 +171,7 @@ const SETTINGS_KEYS = new Set<AdminModuleSectionKey>([
 ]);
 
 export function BusinessAdminShell() {
-  const [selectedKey, setSelectedKey] = useState<AdminModuleSectionKey>('onboarding-guide');
+  const [selectedKey, setSelectedKey] = useState<AdminModuleSectionKey>('overview');
   const [sessionState, setSessionState] = useState<AdminSessionStatusDto | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
 
@@ -378,6 +382,13 @@ export function BusinessAdminShell() {
 
   const activeSession = sessionState?.session ?? null;
   const workspaces = sessionState?.workspaces ?? [];
+  const isBusinessManager =
+    activeSession?.role === UserRole.Owner || activeSession?.role === UserRole.Admin;
+
+  const effectiveSelectedKey: AdminModuleSectionKey =
+    !isBusinessManager && !AGENT_ALLOWED_KEYS.has(selectedKey) ? 'overview' : selectedKey;
+
+  const navModules = isBusinessManager ? BUSINESS_PRIMARY_MODULES : AGENT_PRIMARY_MODULES;
 
   return (
     <div className="min-h-screen w-full overflow-x-hidden flex flex-col bg-slate-50 text-slate-900">
@@ -398,14 +409,20 @@ export function BusinessAdminShell() {
                 <button
                   type="button"
                   onClick={() => setSwitcherOpen(!switcherOpen)}
-                  className="flex items-center gap-1.5 sm:gap-2 py-1.5 px-2.5 sm:px-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all text-xs font-bold text-slate-900 max-w-full"
+                  className="flex items-center gap-1.5 sm:gap-2 py-1.5 px-2.5 sm:px-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all text-xs font-bold text-slate-900 max-w-full cursor-pointer"
                 >
                   <Building2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
                   <span className="truncate max-w-[105px] sm:max-w-[200px]">
                     {activeSession.organizationName}
                   </span>
-                  <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] uppercase font-bold bg-slate-100 text-slate-600 shrink-0">
-                    {activeSession.role}
+                  <span
+                    className={`hidden sm:inline-block px-2 py-0.5 rounded text-[10px] uppercase font-bold shrink-0 ${
+                      isBusinessManager
+                        ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                        : 'bg-teal-50 text-teal-800 border border-teal-200'
+                    }`}
+                  >
+                    {isBusinessManager ? `Business · ${activeSession.role}` : `Agent · ${activeSession.role}`}
                   </span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 </button>
@@ -419,7 +436,8 @@ export function BusinessAdminShell() {
                     />
                     <div className="absolute left-0 top-full mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 space-y-1">
                       <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Your Businesses ({workspaces.length > 0 ? workspaces.length : 1})
+                        {isBusinessManager ? 'Your Businesses' : 'Assigned Workspaces'} (
+                        {workspaces.length > 0 ? workspaces.length : 1})
                       </div>
 
                       <div className="max-h-60 overflow-y-auto space-y-0.5">
@@ -431,7 +449,7 @@ export function BusinessAdminShell() {
                               type="button"
                               onClick={() => void handleSwitchWorkspace(ws.organizationId)}
                               disabled={isCurrent || switchingOrgId === ws.organizationId}
-                              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left text-xs transition-colors ${
+                              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left text-xs transition-colors cursor-pointer ${
                                 isCurrent
                                   ? 'bg-teal-50 text-teal-900 font-bold'
                                   : 'text-slate-700 hover:bg-slate-50'
@@ -454,19 +472,21 @@ export function BusinessAdminShell() {
                         })}
                       </div>
 
-                      <div className="pt-1 border-t border-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSwitcherOpen(false);
-                            setCreateModalOpen(true);
-                          }}
-                          className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Create Another Business</span>
-                        </button>
-                      </div>
+                      {isBusinessManager && (
+                        <div className="pt-1 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSwitcherOpen(false);
+                              setCreateModalOpen(true);
+                            }}
+                            className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Create Another Business</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -513,7 +533,7 @@ export function BusinessAdminShell() {
       </header>
 
       {/* "Create Another Business" Modal */}
-      {createModalOpen && (
+      {createModalOpen && isBusinessManager && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
           <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xl space-y-5">
             <div className="flex items-center justify-between">
@@ -839,70 +859,110 @@ export function BusinessAdminShell() {
           </div>
         </main>
       ) : (
-        /* Authenticated Admin Workspace Body */
+        /* Authenticated Workspace Body (Role-Isolated for Business vs Agent) */
         <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
-          {/* Sidebar Navigation */}
+          {/* Clean, Consolidated Sidebar Navigation */}
           <aside
             aria-label="Workspace Navigation"
-            className="min-w-0 w-full lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 space-y-5"
+            className="min-w-0 w-full lg:col-span-4 xl:col-span-3 rounded-2xl border border-slate-200 bg-white p-4 space-y-4"
           >
-            {(['Workspace Setup', 'Knowledge', 'Configuration', 'Operations'] as const).map((groupName) => {
-              const items = ADMIN_MODULES.filter((m) => m.group === groupName);
-              if (items.length === 0) return null;
-              return (
-                <div key={groupName}>
-                  <p className="px-3 text-xs font-semibold text-slate-400">{groupName}</p>
-                  <div className="mt-1.5 space-y-1">
-                    {items.map((item) => {
-                      const Icon = item.icon;
-                      const active = item.key === selectedKey;
-                      const isGuide = item.key === 'onboarding-guide';
-                      return (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onClick={() => setSelectedKey(item.key)}
-                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors text-left cursor-pointer whitespace-nowrap ${
-                            active
-                              ? isGuide
-                                ? 'bg-teal-50 text-teal-800 font-bold'
-                                : 'bg-blue-50 text-blue-700 font-bold'
-                              : isGuide
-                              ? 'text-teal-700 hover:bg-teal-50/60 font-semibold'
-                              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                          }`}
-                        >
-                          <Icon className={`w-4 h-4 shrink-0 ${isGuide && !active ? 'text-teal-600' : ''}`} aria-hidden="true" />
-                          <span className="truncate">{item.title}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </aside>
+            <div className="px-3 py-1 flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                {isBusinessManager ? 'Business Command Center' : 'Agent Support Desk'}
+              </span>
+              <span className="text-[10px] font-semibold text-slate-500 capitalize">
+                {activeSession.role}
+              </span>
+            </div>
 
-          {/* Main Administration Panel */}
-          <main className="min-w-0 w-full lg:col-span-8 xl:col-span-9 space-y-6">
-            {activeSession.emailVerified === false && selectedKey !== 'account-security' && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="text-xs text-amber-900 min-w-0 break-words">
-                  <span className="font-bold">Verify your account email:</span> Please confirm{' '}
-                  <span className="font-mono font-semibold break-all">{activeSession.email}</span> to secure
-                  your CustomCare owner account and enable recovery alerts.
-                </div>
+            <div className="space-y-1">
+              {navModules.map((item) => {
+                const Icon = item.icon;
+                const active = item.matchKeys.includes(effectiveSelectedKey);
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setSelectedKey(item.key)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all cursor-pointer ${
+                      active
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                    }`}
+                  >
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${active ? 'text-teal-400' : 'text-slate-500'}`}
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs sm:text-sm font-bold truncate">{item.title}</div>
+                      <div
+                        className={`text-[11px] truncate ${
+                          active ? 'text-slate-300' : 'text-slate-400'
+                        }`}
+                      >
+                        {item.subtitle}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {isBusinessManager && (
+              <div className="pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setSelectedKey('account-security')}
-                  className="self-start sm:self-auto shrink-0 py-1.5 px-3 rounded-xl bg-amber-900 hover:bg-amber-950 text-white text-xs font-bold transition-colors cursor-pointer"
+                  onClick={() => setSelectedKey('onboarding-guide')}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                    effectiveSelectedKey === 'onboarding-guide'
+                      ? 'bg-teal-50 text-teal-900 border border-teal-200'
+                      : 'text-teal-700 hover:bg-teal-50/60'
+                  }`}
                 >
-                  Verify Email &amp; Security &rarr;
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>7-Step Launch Guide</span>
+                  </span>
+                  <span className="text-[10px] text-teal-600">&rarr;</span>
                 </button>
               </div>
             )}
+          </aside>
 
-            {selectedKey === 'onboarding-guide' ? (
+          {/* Main Workspace Panel */}
+          <main className="min-w-0 w-full lg:col-span-8 xl:col-span-9 space-y-6">
+            {activeSession.emailVerified === false &&
+              effectiveSelectedKey !== 'account-security' && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-xs text-amber-900 min-w-0 break-words">
+                    <span className="font-bold">Verify your account email:</span> Please confirm{' '}
+                    <span className="font-mono font-semibold break-all">{activeSession.email}</span>{' '}
+                    to secure your account and enable recovery alerts.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedKey('account-security')}
+                    className="self-start sm:self-auto shrink-0 py-1.5 px-3 rounded-xl bg-amber-900 hover:bg-amber-950 text-white text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Verify Email &amp; Security &rarr;
+                  </button>
+                </div>
+              )}
+
+            {effectiveSelectedKey === 'overview' ? (
+              <WorkspaceRoleOverview
+                key={`${activeSession.organizationId}:${activeSession.role}`}
+                organizationId={activeSession.organizationId}
+                organizationName={activeSession.organizationName}
+                organizationSlug={activeSession.organizationSlug}
+                currentUserId={activeSession.userId}
+                currentUserName={activeSession.userName || 'Support Member'}
+                currentUserEmail={activeSession.email || ''}
+                currentUserRole={activeSession.role}
+                onNavigateSection={(sec) => setSelectedKey(sec)}
+              />
+            ) : effectiveSelectedKey === 'onboarding-guide' ? (
               <WorkspaceOnboardingGuide
                 key={activeSession.organizationId}
                 organizationId={activeSession.organizationId}
@@ -910,7 +970,7 @@ export function BusinessAdminShell() {
                 onNavigateSection={(sec) => setSelectedKey(sec)}
                 onPortalPublished={() => void loadSession()}
               />
-            ) : selectedKey === 'integrations' ? (
+            ) : effectiveSelectedKey === 'integrations' ? (
               <ChannelIntegrationsManager
                 key={activeSession.organizationId}
                 organizationName={activeSession.organizationName}
@@ -918,33 +978,35 @@ export function BusinessAdminShell() {
                 currentUserId={activeSession.userId}
                 currentUserRole={activeSession.role}
               />
-            ) : selectedKey === 'account-security' ? (
+            ) : effectiveSelectedKey === 'account-security' ? (
               <AccountSecurityManager
                 key={activeSession.userId}
                 onSessionUpdated={() => void loadSession()}
               />
-            ) : KNOWLEDGE_KEYS.has(selectedKey) ? (
+            ) : KNOWLEDGE_KEYS.has(effectiveSelectedKey) ? (
               <KnowledgeAdminManager
                 key={activeSession.organizationId}
-                activeSubView={selectedKey as KnowledgeSubView}
+                activeSubView={effectiveSelectedKey as KnowledgeSubView}
                 organizationName={activeSession.organizationName}
                 organizationId={activeSession.organizationId}
                 onNavigateSubView={(view) => setSelectedKey(view)}
               />
-            ) : SETTINGS_KEYS.has(selectedKey) ? (
+            ) : SETTINGS_KEYS.has(effectiveSelectedKey) ? (
               <WorkspaceSettingsManager
                 key={activeSession.organizationId}
-                activeSubView={selectedKey as SettingsSubView}
+                activeSubView={effectiveSelectedKey as SettingsSubView}
                 organizationName={activeSession.organizationName}
                 organizationSlug={activeSession.organizationSlug}
+                onNavigateSubView={(view) => setSelectedKey(view)}
               />
             ) : (
               <WorkspaceOperationsManager
                 key={activeSession.organizationId}
-                activeSubView={selectedKey as OperationsSubView}
+                activeSubView={effectiveSelectedKey as OperationsSubView}
                 organizationName={activeSession.organizationName}
                 currentUserName={activeSession.userName}
                 currentUserRole={activeSession.role}
+                onNavigateSubView={(view) => setSelectedKey(view)}
               />
             )}
           </main>

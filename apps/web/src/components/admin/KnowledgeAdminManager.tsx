@@ -468,6 +468,31 @@ export function KnowledgeAdminManager({
 
   return (
     <div className="space-y-6">
+      {/* Clean Sub-Navigation Bar */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-2 flex flex-wrap items-center gap-1.5">
+        {(
+          [
+            ['knowledge-overview', 'Knowledge Overview'],
+            ['knowledge-articles', `Help Articles (${articles.length})`],
+            ['faqs', `FAQs (${faqs.length})`],
+            ['categories', `Categories (${categories.length})`],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onNavigateSubView(key)}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+              activeSubView === key
+                ? 'bg-slate-900 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Feedback & Error Alerts */}
       {feedbackBanner && (
         <div
