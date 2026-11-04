@@ -223,16 +223,47 @@ export async function ensureTelegramBotIdentityAndWebhook(): Promise<{
       if (webhookSecret) {
         setPayload.secret_token = webhookSecret;
       }
-      const setRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(setPayload),
-      });
+      const [setRes] = await Promise.all([
+        fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(setPayload),
+        }),
+        fetch(`https://api.telegram.org/bot${botToken}/setMyCommands`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commands: [
+              { command: 'start', description: 'Open support welcome screen' },
+              { command: 'menu', description: 'Show support categories & options' },
+              { command: 'new', description: 'Start a new support enquiry' },
+              { command: 'conversations', description: 'View or switch active conversations' },
+              { command: 'human', description: 'Speak with a human support agent' },
+              { command: 'help', description: 'Show customer & agent commands' },
+            ],
+          }),
+        }).catch(() => null),
+      ]);
       const setJson = (await setRes.json()) as { ok?: boolean };
       if (setJson?.ok) {
         webhookRegistered = true;
         globalThis.__careflowWebhookSyncedAt = now;
       }
+    } else {
+      await fetch(`https://api.telegram.org/bot${botToken}/setMyCommands`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: [
+            { command: 'start', description: 'Open support welcome screen' },
+            { command: 'menu', description: 'Show support categories & options' },
+            { command: 'new', description: 'Start a new support enquiry' },
+            { command: 'conversations', description: 'View or switch active conversations' },
+            { command: 'human', description: 'Speak with a human support agent' },
+            { command: 'help', description: 'Show customer & agent commands' },
+          ],
+        }),
+      }).catch(() => null);
     }
 
     return {

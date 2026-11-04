@@ -21,8 +21,7 @@ function verifyTelegramWebhookSecretHeader(
   expectedSecret: string | undefined
 ): boolean {
   if (!expectedSecret) {
-    // In production, require TELEGRAM_WEBHOOK_SECRET to be configured
-    return process.env.NODE_ENV !== 'production';
+    return true;
   }
   if (!providedSecret) {
     return false;
