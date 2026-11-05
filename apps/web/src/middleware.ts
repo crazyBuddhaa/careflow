@@ -15,7 +15,7 @@ import { classifyTenantHostname } from '@careflow/support-engine';
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip Next.js internals, API routes, static files, and explicit /portal or /admin paths
+  // Skip Next.js internals, API routes, static files, and explicit platform/admin paths
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
@@ -23,6 +23,11 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/admin') ||
     pathname.startsWith('/login') ||
     pathname.startsWith('/onboarding') ||
+    pathname.startsWith('/platform-admin') ||
+    pathname.startsWith('/invite') ||
+    pathname.startsWith('/privacy') ||
+    pathname.startsWith('/terms') ||
+    pathname.startsWith('/compliance') ||
     pathname.includes('.')
   ) {
     return NextResponse.next();

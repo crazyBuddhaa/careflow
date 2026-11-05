@@ -246,7 +246,7 @@ async function main() {
   );
 
   if (databaseId) {
-    console.log(`Applying remote D1 SQL migrations (0001..0006) to "${resolvedDbName}"...`);
+    console.log(`Applying remote D1 SQL migrations (0001..0007) to "${resolvedDbName}"...`);
     execSync(`npx wrangler d1 migrations apply ${resolvedDbName} --remote`, {
       stdio: 'inherit',
       env: { ...process.env, CI: 'true' },
@@ -255,6 +255,26 @@ async function main() {
     const safeAlterColumns = [
       `ALTER TABLE channel_customer_identities ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE telegram_customer_contexts ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'business'`,
+      `ALTER TABLE users ADD COLUMN is_personal_account INTEGER NOT NULL DEFAULT 1`,
+      `ALTER TABLE users ADD COLUMN is_platform_admin INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE organization_members ADD COLUMN agent_identity_id TEXT`,
+      `ALTER TABLE organization_members ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
+      `ALTER TABLE organization_members ADD COLUMN membership_status TEXT NOT NULL DEFAULT 'active'`,
+      `ALTER TABLE organization_members ADD COLUMN department TEXT NOT NULL DEFAULT 'Support'`,
+      `ALTER TABLE organization_members ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE organization_members ADD COLUMN invited_by_user_id TEXT`,
+      `ALTER TABLE organization_members ADD COLUMN joined_at TEXT`,
+      `ALTER TABLE organization_members ADD COLUMN suspended_at TEXT`,
+      `ALTER TABLE organization_members ADD COLUMN revoked_at TEXT`,
+      `ALTER TABLE organization_members ADD COLUMN departed_at TEXT`,
+      `ALTER TABLE support_agents ADD COLUMN user_id TEXT`,
+      `ALTER TABLE support_agents ADD COLUMN agent_identity_id TEXT`,
+      `ALTER TABLE support_agents ADD COLUMN department TEXT NOT NULL DEFAULT 'Support'`,
+      `ALTER TABLE support_agents ADD COLUMN membership_status TEXT NOT NULL DEFAULT 'active'`,
+      `ALTER TABLE support_agents ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE auth_sessions ADD COLUMN agent_identity_id TEXT`,
+      `ALTER TABLE auth_sessions ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'personal_account'`,
     ];
     for (const sql of safeAlterColumns) {
       spawnSync(

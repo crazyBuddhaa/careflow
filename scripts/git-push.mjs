@@ -154,6 +154,20 @@ async function main() {
     runGit(['checkout', '-B', branch]);
   }
 
+  // Ensure incompatible Bun 1.3+ lockfiles (lockfileVersion 2) are never committed to GitHub,
+  // since Cloudflare Workers Builds uses pnpm@9.15.0 with pnpm-lock.yaml.
+  for (const staleLock of ['bun.lock', 'bun.lockb']) {
+    const lockPath = path.join(ROOT_DIR, staleLock);
+    if (fs.existsSync(lockPath)) {
+      fs.unlinkSync(lockPath);
+    }
+    try {
+      runGit(['rm', '--cached', '--ignore-unmatch', staleLock]);
+    } catch {
+      // Ignore if not tracked
+    }
+  }
+
   runGit(['add', '-A']);
 
   const statusOutput = runGit(['status', '--porcelain']);

@@ -938,6 +938,7 @@ export class D1AuthIdentityService {
         emailVerified: Boolean(userRow.email_verified),
         mfaEnabled: Boolean(userRow.mfa_enabled),
         accountType,
+        isPersonalAccount,
         isPlatformAdmin,
         createdAt: userRow.created_at,
       },
@@ -1343,7 +1344,7 @@ export class D1AuthIdentityService {
            o.slug,
            o.name,
            om.role,
-           om.status,
+           COALESCE(om.status, om.membership_status, 'active') AS status,
            om.department,
            om.permissions_json,
            om.agent_identity_id,
@@ -1358,7 +1359,7 @@ export class D1AuthIdentityService {
          JOIN organizations o ON o.id = om.organization_id
          WHERE om.user_id = ?
            AND om.is_active = 1
-           AND COALESCE(om.status, 'active') = 'active'
+           AND COALESCE(om.status, om.membership_status, 'active') = 'active'
            AND o.is_active = 1
            AND COALESCE(o.onboarding_status, 'incomplete') != 'suspended'
          ORDER BY o.name ASC`
@@ -1368,13 +1369,15 @@ export class D1AuthIdentityService {
 
     return results.map((r) => {
       const role = (r.role as UserRole) || UserRole.Viewer;
+      const lifecycleStatus = (r.status as MembershipLifecycleStatus) || 'active';
       return {
         membershipId: r.membership_id,
         organizationId: r.organization_id,
         organizationSlug: r.slug,
         organizationName: r.name,
         role,
-        status: (r.status as MembershipLifecycleStatus) || 'active',
+        status: lifecycleStatus,
+        membershipStatus: lifecycleStatus,
         department: r.department ?? 'Support',
         permissions: parsePermissionsJson(r.permissions_json, role),
         agentIdentityId: r.agent_identity_id ?? null,
@@ -1400,7 +1403,7 @@ export class D1AuthIdentityService {
            o.slug,
            o.name,
            om.role,
-           om.status,
+           COALESCE(om.status, om.membership_status, 'active') AS status,
            om.department,
            om.permissions_json,
            om.agent_identity_id,
@@ -1435,13 +1438,15 @@ export class D1AuthIdentityService {
       return null;
     }
 
+    const lifecycleStatus = (row.status as MembershipLifecycleStatus) || 'active';
     return {
       membershipId: row.membership_id,
       organizationId: row.organization_id,
       organizationSlug: row.slug,
       organizationName: row.name,
       role: memberRole,
-      status: (row.status as MembershipLifecycleStatus) || 'active',
+      status: lifecycleStatus,
+      membershipStatus: lifecycleStatus,
       department: row.department ?? 'Support',
       permissions: parsePermissionsJson(row.permissions_json, memberRole),
       agentIdentityId: row.agent_identity_id ?? null,
@@ -1480,11 +1485,12 @@ export class D1AuthIdentityService {
 
     await this.db
       .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status, department, permissions_json, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'active', ?, ?, 1, ?, ?)
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status, membership_status, department, permissions_json, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'active', 'active', ?, ?, 1, ?, ?)
          ON CONFLICT (organization_id, user_id) DO UPDATE SET
            role = excluded.role,
            status = 'active',
+           membership_status = 'active',
            department = COALESCE(excluded.department, organization_members.department),
            permissions_json = excluded.permissions_json,
            is_active = 1,
@@ -2207,12 +2213,13 @@ export class D1AuthIdentityService {
     await this.db
       .prepare(
         `INSERT INTO organization_members
-           (id, organization_id, user_id, agent_identity_id, role, status, department, permissions_json, invited_by_user_id, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?, ?)
+           (id, organization_id, user_id, agent_identity_id, role, status, membership_status, department, permissions_json, invited_by_user_id, is_active, joined_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'active', 'active', ?, ?, ?, 1, ?, ?, ?)
          ON CONFLICT (organization_id, user_id) DO UPDATE SET
            agent_identity_id = excluded.agent_identity_id,
            role = CASE WHEN organization_members.role = 'owner' THEN 'owner' ELSE excluded.role END,
            status = 'active',
+           membership_status = 'active',
            department = excluded.department,
            permissions_json = excluded.permissions_json,
            is_active = 1,
@@ -2230,6 +2237,7 @@ export class D1AuthIdentityService {
         inv.department,
         JSON.stringify(inv.permissions),
         inv.invitedByUserId ?? null,
+        nowIso,
         nowIso,
         nowIso
       )
@@ -2472,6 +2480,7 @@ export class D1AuthIdentityService {
         emailVerified: true,
         mfaEnabled: Boolean(userRow.mfa_enabled),
         accountType: (userRow.account_type as AccountRegistrationMode) || 'agent',
+        isPersonalAccount: true,
         isPlatformAdmin:
           Boolean(userRow.is_platform_admin) || isSuperAdminEmail(userRow.email),
         createdAt: userRow.created_at,
@@ -2551,7 +2560,7 @@ export class D1AuthIdentityService {
         await this.db
           .prepare(
             `UPDATE organization_members
-             SET status = 'suspended', is_active = 0, suspended_at = ?, updated_at = ?
+             SET status = 'suspended', membership_status = 'suspended', is_active = 0, suspended_at = ?, updated_at = ?
              WHERE organization_id = ? AND user_id = ? AND role != 'owner'`
           )
           .bind(nowIso, nowIso, params.organizationId, resolvedUserId)
@@ -2582,7 +2591,7 @@ export class D1AuthIdentityService {
         await this.db
           .prepare(
             `UPDATE organization_members
-             SET status = 'active', is_active = 1, suspended_at = NULL, revoked_at = NULL, updated_at = ?
+             SET status = 'active', membership_status = 'active', is_active = 1, suspended_at = NULL, revoked_at = NULL, updated_at = ?
              WHERE organization_id = ? AND user_id = ?`
           )
           .bind(nowIso, params.organizationId, resolvedUserId)
@@ -2603,7 +2612,7 @@ export class D1AuthIdentityService {
         await this.db
           .prepare(
             `UPDATE organization_members
-             SET status = 'revoked', is_active = 0, revoked_at = ?, updated_at = ?
+             SET status = 'revoked', membership_status = 'revoked', is_active = 0, revoked_at = ?, updated_at = ?
              WHERE organization_id = ? AND user_id = ? AND role != 'owner'`
           )
           .bind(nowIso, nowIso, params.organizationId, resolvedUserId)
@@ -2737,7 +2746,7 @@ export class D1AuthIdentityService {
     await this.db
       .prepare(
         `UPDATE organization_members
-         SET status = 'departed', is_active = 0, departed_at = ?, updated_at = ?
+         SET status = 'departed', membership_status = 'departed', is_active = 0, departed_at = ?, updated_at = ?
          WHERE organization_id = ? AND user_id = ?`
       )
       .bind(nowIso, nowIso, params.organizationId, params.userId)
@@ -2862,6 +2871,7 @@ export class D1AuthIdentityService {
         emailVerified: Boolean(userRow.email_verified),
         mfaEnabled: Boolean(userRow.mfa_enabled),
         accountType: (userRow.account_type as AccountRegistrationMode) || 'business',
+        isPersonalAccount: Number(userRow.is_personal_account ?? 1) === 1,
         isPlatformAdmin:
           Boolean(userRow.is_platform_admin) || isSuperAdminEmail(userRow.email),
         createdAt: userRow.created_at,

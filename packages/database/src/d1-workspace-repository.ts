@@ -1867,7 +1867,7 @@ export class D1WorkspaceRepository {
           .all<TgLinkJoinRow>(),
         this.db
           .prepare(
-            `SELECT om.user_id, u.email, om.membership_status, om.department, om.permissions_json, om.agent_identity_id, u.is_personal_account, ai.access_mode
+            `SELECT om.user_id, u.email, COALESCE(om.status, om.membership_status, 'active') AS membership_status, om.department, om.permissions_json, om.agent_identity_id, u.is_personal_account, ai.access_mode
              FROM organization_members om
              JOIN users u ON u.id = om.user_id
              LEFT JOIN agent_identities ai ON ai.id = om.agent_identity_id OR LOWER(ai.email) = LOWER(u.email)
@@ -1987,12 +1987,13 @@ export class D1WorkspaceRepository {
       );
       await this.db
         .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, department, permissions_json, membership_status, is_active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)
+          `INSERT INTO organization_members (id, organization_id, user_id, role, department, permissions_json, status, membership_status, is_active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'active', 'active', 1, ?, ?)
            ON CONFLICT (organization_id, user_id) DO UPDATE SET
              role = CASE WHEN organization_members.role = 'owner' THEN 'owner' ELSE excluded.role END,
              department = excluded.department,
              permissions_json = excluded.permissions_json,
+             status = 'active',
              membership_status = 'active',
              is_active = 1,
              updated_at = excluded.updated_at`
@@ -2110,6 +2111,7 @@ export class D1WorkspaceRepository {
           .prepare(
             `UPDATE organization_members
              SET is_active = CASE WHEN role = 'owner' THEN 1 ELSE 0 END,
+                 status = CASE WHEN role = 'owner' THEN 'active' ELSE 'revoked' END,
                  membership_status = CASE WHEN role = 'owner' THEN 'active' ELSE 'revoked' END,
                  revoked_at = CASE WHEN role = 'owner' THEN NULL ELSE ? END,
                  updated_at = ?
@@ -2392,8 +2394,8 @@ export class D1WorkspaceRepository {
     await this.db
       .prepare(
         `INSERT INTO organization_members
-          (id, organization_id, user_id, agent_identity_id, role, department, permissions_json, membership_status, is_active, joined_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'owner', 'Executive & Leadership', ?, 'active', 1, ?, ?, ?)`
+          (id, organization_id, user_id, agent_identity_id, role, department, permissions_json, status, membership_status, is_active, joined_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'owner', 'Executive & Leadership', ?, 'active', 'active', 1, ?, ?, ?)`
       )
       .bind(memberId, organizationId, userId, agentIdentityId, ownerPermissions, now, now, now)
       .run();
@@ -2730,7 +2732,7 @@ export class D1WorkspaceRepository {
            o.website,
            o.onboarding_status,
            o.onboarding_step,
-           om.membership_status,
+           COALESCE(om.status, om.membership_status, 'active') AS membership_status,
            om.department,
            om.permissions_json,
            om.agent_identity_id
@@ -2738,8 +2740,9 @@ export class D1WorkspaceRepository {
          JOIN organizations o ON o.id = om.organization_id
          WHERE om.user_id = ?
            AND om.is_active = 1
-           AND COALESCE(om.membership_status, 'active') = 'active'
+           AND COALESCE(om.status, om.membership_status, 'active') = 'active'
            AND o.is_active = 1
+           AND COALESCE(o.onboarding_status, 'incomplete') != 'suspended'
          ORDER BY o.name ASC`
       )
       .bind(userId)
@@ -2756,6 +2759,7 @@ export class D1WorkspaceRepository {
           // fallback to role defaults
         }
       }
+      const lifecycleStatus = (r.membership_status as MembershipLifecycleStatus) || 'active';
       return {
         organizationId: r.organization_id,
         organizationSlug: r.slug,
@@ -2766,7 +2770,8 @@ export class D1WorkspaceRepository {
         website: r.website ?? '',
         onboardingStatus: (r.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
         onboardingStep: r.onboarding_step ?? 1,
-        membershipStatus: ((r.membership_status as MembershipLifecycleStatus) || 'active'),
+        status: lifecycleStatus,
+        membershipStatus: lifecycleStatus,
         department: r.department ?? '',
         permissions,
         agentIdentityId: r.agent_identity_id ?? null,
@@ -2794,6 +2799,7 @@ export class D1WorkspaceRepository {
           website: '',
           onboardingStatus: 'published',
           onboardingStep: 7,
+          status: 'active',
           membershipStatus: 'active',
           department: 'Support Operations',
           permissions: DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent],
@@ -2813,7 +2819,7 @@ export class D1WorkspaceRepository {
            o.website,
            o.onboarding_status,
            o.onboarding_step,
-           om.membership_status,
+           COALESCE(om.status, om.membership_status, 'active') AS membership_status,
            om.department,
            om.permissions_json,
            om.agent_identity_id
@@ -2822,8 +2828,9 @@ export class D1WorkspaceRepository {
          WHERE om.user_id = ?
            AND om.organization_id = ?
            AND om.is_active = 1
-           AND COALESCE(om.membership_status, 'active') = 'active'
-           AND o.is_active = 1`
+           AND COALESCE(om.status, om.membership_status, 'active') = 'active'
+           AND o.is_active = 1
+           AND COALESCE(o.onboarding_status, 'incomplete') != 'suspended'`
       )
       .bind(userId, organizationId)
       .first<MemberJoinOrgRow>();
@@ -2841,6 +2848,7 @@ export class D1WorkspaceRepository {
       }
     }
 
+    const lifecycleStatus = (row.membership_status as MembershipLifecycleStatus) || 'active';
     return {
       organizationId: row.organization_id,
       organizationSlug: row.slug,
@@ -2851,7 +2859,8 @@ export class D1WorkspaceRepository {
       website: row.website ?? '',
       onboardingStatus: (row.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
       onboardingStep: row.onboarding_step ?? 1,
-      membershipStatus: ((row.membership_status as MembershipLifecycleStatus) || 'active'),
+      status: lifecycleStatus,
+      membershipStatus: lifecycleStatus,
       department: row.department ?? '',
       permissions,
       agentIdentityId: row.agent_identity_id ?? null,
@@ -2935,8 +2944,8 @@ export class D1WorkspaceRepository {
     await this.db
       .prepare(
         `INSERT INTO organization_members
-          (id, organization_id, user_id, role, department, permissions_json, membership_status, is_active, joined_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'owner', 'Executive & Leadership', ?, 'active', 1, ?, ?, ?)`
+          (id, organization_id, user_id, role, department, permissions_json, status, membership_status, is_active, joined_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'owner', 'Executive & Leadership', ?, 'active', 'active', 1, ?, ?, ?)`
       )
       .bind(memberId, organizationId, userId, ownerPermissions, now, now, now)
       .run();
@@ -3250,7 +3259,7 @@ export class D1WorkspaceRepository {
       openConversations: Number(o.open_conversations ?? 0),
       publishedArticles: Number(o.published_articles ?? 0),
       publishedFaqs: Number(o.published_faqs ?? 0),
-      telegramConnected: o.telegram_status === 'connected',
+      telegramConnected: o.telegram_status === 'active' || o.telegram_status === 'connected',
       createdAt: o.created_at ?? new Date().toISOString(),
     }));
 
@@ -3407,11 +3416,51 @@ export class D1WorkspaceRepository {
     const now = new Date().toISOString();
     const { action } = params;
 
+    const actorUser = await this.db
+      .prepare(`SELECT email FROM users WHERE id = ?`)
+      .bind(params.actorUserId)
+      .first<{ email: string }>();
+    const actorEmail = actorUser?.email ?? params.actorName;
+
+    const recordAudit = async (
+      organizationId: string | null,
+      actionName: string,
+      targetType: string,
+      targetId: string,
+      metadata: Record<string, unknown>
+    ) => {
+      await this.db
+        .prepare(
+          `INSERT INTO workspace_audit_logs
+             (id, organization_id, actor_user_id, actor_email, action, target_type, target_id, metadata_json, ip_address, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?)`
+        )
+        .bind(
+          createId('aud'),
+          organizationId,
+          params.actorUserId,
+          actorEmail,
+          actionName,
+          targetType,
+          targetId,
+          JSON.stringify(metadata),
+          now
+        )
+        .run();
+    };
+
     if (action.type === 'toggle_business_active') {
       await this.db
         .prepare(`UPDATE organizations SET is_active = ?, updated_at = ? WHERE id = ?`)
         .bind(action.isActive ? 1 : 0, now, action.organizationId)
         .run();
+      await recordAudit(
+        action.organizationId,
+        action.isActive ? 'platform_admin_business_activated' : 'platform_admin_business_suspended',
+        'organization',
+        action.organizationId,
+        { isActive: action.isActive }
+      );
       return {
         message: action.isActive ? 'Business workspace activated.' : 'Business workspace suspended.',
         organizationId: action.organizationId,
@@ -3423,6 +3472,13 @@ export class D1WorkspaceRepository {
         .prepare(`UPDATE organizations SET onboarding_status = ?, updated_at = ? WHERE id = ?`)
         .bind(action.status, now, action.organizationId)
         .run();
+      await recordAudit(
+        action.organizationId,
+        'platform_admin_onboarding_status_changed',
+        'organization',
+        action.organizationId,
+        { status: action.status }
+      );
       return {
         message: `Business onboarding status updated to "${action.status}".`,
         organizationId: action.organizationId,
@@ -3434,6 +3490,7 @@ export class D1WorkspaceRepository {
         .prepare(`UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?`)
         .bind(now, action.targetUserId)
         .run();
+      await recordAudit(null, 'platform_admin_verified_user_email', 'user', action.targetUserId, {});
       return { message: 'User email marked as verified.' };
     }
 
@@ -3442,6 +3499,13 @@ export class D1WorkspaceRepository {
         .prepare(`UPDATE users SET is_platform_admin = ?, updated_at = ? WHERE id = ?`)
         .bind(action.isPlatformAdmin ? 1 : 0, now, action.targetUserId)
         .run();
+      await recordAudit(
+        null,
+        action.isPlatformAdmin ? 'platform_admin_granted' : 'platform_admin_revoked',
+        'user',
+        action.targetUserId,
+        { isPlatformAdmin: action.isPlatformAdmin }
+      );
       return {
         message: action.isPlatformAdmin
           ? 'Granted CustomCare Platform Admin privileges.'
@@ -3454,6 +3518,7 @@ export class D1WorkspaceRepository {
         .prepare(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`)
         .bind(now, action.targetUserId)
         .run();
+      await recordAudit(null, 'platform_admin_revoked_user_sessions', 'user', action.targetUserId, {});
       return { message: 'All active sessions for user have been revoked.' };
     }
 
@@ -3463,9 +3528,11 @@ export class D1WorkspaceRepository {
           .prepare(`DELETE FROM auth_rate_limits WHERE key = ?`)
           .bind(action.bucketKey)
           .run();
+        await recordAudit(null, 'platform_admin_cleared_rate_limit', 'rate_limit', action.bucketKey, {});
         return { message: `Cleared rate limit bucket "${action.bucketKey}".` };
       }
       await this.db.prepare(`DELETE FROM auth_rate_limits`).run();
+      await recordAudit(null, 'platform_admin_cleared_all_rate_limits', 'rate_limit', 'all', {});
       return { message: 'Cleared all authentication rate limit buckets.' };
     }
 
@@ -3475,15 +3542,24 @@ export class D1WorkspaceRepository {
       await this.db
         .prepare(
           `INSERT INTO organization_members
-             (id, organization_id, user_id, role, department, permissions_json, membership_status, is_active, joined_at, created_at, updated_at)
-           VALUES (?, ?, ?, 'owner', 'Platform Administration', ?, 'active', 1, ?, ?, ?)
+             (id, organization_id, user_id, role, department, permissions_json, status, membership_status, is_active, joined_at, created_at, updated_at)
+           VALUES (?, ?, ?, 'owner', 'Platform Administration', ?, 'active', 'active', 1, ?, ?, ?)
            ON CONFLICT (organization_id, user_id) DO UPDATE SET
              is_active = 1,
+             status = 'active',
              membership_status = 'active',
              updated_at = excluded.updated_at`
         )
         .bind(createId('mem'), action.organizationId, params.actorUserId, ownerPerms, now, now, now)
         .run();
+
+      await recordAudit(
+        action.organizationId,
+        'platform_admin_entered_workspace',
+        'organization',
+        action.organizationId,
+        {}
+      );
 
       return {
         message: 'Entered business workspace as Platform Super-Admin.',
