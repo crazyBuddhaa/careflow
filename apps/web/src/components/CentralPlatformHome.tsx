@@ -1009,9 +1009,6 @@ export function CentralPlatformHome() {
               <Link href="/onboarding" className="hover:text-slate-900 transition-colors">
                 Register Account
               </Link>
-              <Link href="/platform-admin" className="hover:text-slate-900 transition-colors">
-                Platform Admin
-              </Link>
             </div>
           </div>
 
