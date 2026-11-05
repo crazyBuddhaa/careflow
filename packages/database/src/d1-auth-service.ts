@@ -1214,6 +1214,15 @@ export class D1AuthIdentityService {
       .bind(pendingSecret, JSON.stringify(hashedCodes), nowIso, nowIso, userId)
       .run();
 
+    await this.db
+      .prepare(
+        `UPDATE auth_sessions
+         SET mfa_verified = 1
+         WHERE user_id = ? AND revoked_at IS NULL`
+      )
+      .bind(userId)
+      .run();
+
     await this.recordSecurityEvent({
       userId,
       eventType: 'mfa_enrolled',
@@ -2858,10 +2867,13 @@ export class D1AuthIdentityService {
         envSource.TURNSTILE_SECRET_KEY.trim().length > 0
     );
 
+    const isPlatformAdmin =
+      Boolean(userRow.is_platform_admin) || isSuperAdminEmail(userRow.email);
+
     const mfaRequiredForRole =
-      activeRole === UserRole.Owner || activeRole === UserRole.Admin;
+      isPlatformAdmin || activeRole === UserRole.Owner || activeRole === UserRole.Admin;
     const mfaEnforcementActive =
-      envSource.CAREFLOW_ENFORCE_ADMIN_MFA === 'true';
+      isPlatformAdmin || envSource.CAREFLOW_ENFORCE_ADMIN_MFA === 'true';
 
     return {
       user: {
@@ -2872,8 +2884,7 @@ export class D1AuthIdentityService {
         mfaEnabled: Boolean(userRow.mfa_enabled),
         accountType: (userRow.account_type as AccountRegistrationMode) || 'business',
         isPersonalAccount: Number(userRow.is_personal_account ?? 1) === 1,
-        isPlatformAdmin:
-          Boolean(userRow.is_platform_admin) || isSuperAdminEmail(userRow.email),
+        isPlatformAdmin,
         createdAt: userRow.created_at,
       },
       mfaEnabled: Boolean(userRow.mfa_enabled),

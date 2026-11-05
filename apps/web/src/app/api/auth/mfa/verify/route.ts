@@ -1,6 +1,10 @@
+import { cookies } from 'next/headers';
 import { MfaVerifyEnrollmentSchema } from '@careflow/validation';
 import {
+  ADMIN_SESSION_COOKIE_NAME,
+  createSignedAdminSessionToken,
   extractRequestClientMeta,
+  getAdminCookieOptions,
   resolveServerAdminSession,
   verifyRequestOriginCsrf,
 } from '@/lib/admin-auth';
@@ -58,9 +62,28 @@ export async function POST(request: Request) {
       );
       await authService.resetRateLimit('mfa_verify', session.identity.userId);
 
+      if (session.sessionToken) {
+        const updatedSignedToken = createSignedAdminSessionToken({
+          userId: session.identity.userId,
+          email: session.identity.email || '',
+          userName: session.userName,
+          organizationId: session.identity.organizationId,
+          organizationName: session.organizationName || session.identity.organizationId,
+          organizationSlug: session.organizationSlug || '',
+          role: session.identity.role,
+          sessionId: session.sessionId,
+          sessionToken: session.sessionToken,
+          emailVerified: session.emailVerified,
+          mfaEnabled: true,
+        });
+        const cookieStore = await cookies();
+        cookieStore.set(ADMIN_SESSION_COOKIE_NAME, updatedSignedToken, getAdminCookieOptions());
+      }
+
       return jsonApiSuccess({
         enabled: result.enabled,
         recoveryCodes: result.recoveryCodes,
+        message: 'Two-factor authentication (TOTP) is now active on your account.',
       });
     } catch (err) {
       await authService.recordRateLimitAttempt('mfa_verify', session.identity.userId);

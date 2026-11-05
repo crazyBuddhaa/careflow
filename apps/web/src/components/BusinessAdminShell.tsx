@@ -386,9 +386,17 @@ export function BusinessAdminShell() {
   const workspaces = sessionState?.workspaces ?? [];
   const isBusinessManager =
     activeSession?.role === UserRole.Owner || activeSession?.role === UserRole.Admin;
+  const mfaSetupRequired = Boolean(
+    activeSession &&
+      (activeSession.mfaSetupRequired ||
+        (activeSession.isPlatformAdmin && !activeSession.mfaEnabled))
+  );
 
-  const effectiveSelectedKey: AdminModuleSectionKey =
-    !isBusinessManager && !AGENT_ALLOWED_KEYS.has(selectedKey) ? 'overview' : selectedKey;
+  const effectiveSelectedKey: AdminModuleSectionKey = mfaSetupRequired
+    ? 'account-security'
+    : !isBusinessManager && !AGENT_ALLOWED_KEYS.has(selectedKey)
+      ? 'overview'
+      : selectedKey;
 
   const navModules = isBusinessManager ? BUSINESS_PRIMARY_MODULES : AGENT_PRIMARY_MODULES;
 
@@ -957,6 +965,23 @@ export function BusinessAdminShell() {
 
           {/* Main Workspace Panel */}
           <main className="min-w-0 w-full lg:col-span-8 xl:col-span-9 space-y-6">
+            {mfaSetupRequired && (
+              <div className="rounded-2xl border-2 border-teal-600 bg-teal-50/90 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                <div className="space-y-1 min-w-0">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-900">
+                    <ShieldAlert className="w-4 h-4 text-teal-700 shrink-0" />
+                    <span>Mandatory Two-Factor Authentication (2FA) Setup Required</span>
+                  </div>
+                  <p className="text-xs text-teal-900/90 leading-relaxed">
+                    Your account ({activeSession.email}) requires Authenticator App (TOTP) 2FA
+                    protection before accessing workspace modules or Central Platform Admin. Scan
+                    the QR code or enter the Base32 key in your Authenticator app below and verify
+                    your 6-digit code to unlock full access.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {activeSession.emailVerified === false &&
               effectiveSelectedKey !== 'account-security' && (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1011,6 +1036,7 @@ export function BusinessAdminShell() {
             ) : effectiveSelectedKey === 'account-security' ? (
               <AccountSecurityManager
                 key={activeSession.userId}
+                autoStartMfaEnrollment={mfaSetupRequired}
                 onSessionUpdated={() => void loadSession()}
               />
             ) : KNOWLEDGE_KEYS.has(effectiveSelectedKey) ? (

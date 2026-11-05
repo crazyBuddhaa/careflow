@@ -202,16 +202,18 @@ export default function PlatformAdminPage() {
         )}
 
         {errorBanner && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-900 flex items-center justify-between gap-4">
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-700 shrink-0" />
               <span>{errorBanner}</span>
             </div>
             <Link
-              href="/login"
-              className="py-1.5 px-3 rounded-lg bg-rose-800 text-white text-xs font-bold shrink-0"
+              href={errorBanner.toLowerCase().includes('2fa') || errorBanner.toLowerCase().includes('two-factor') ? '/admin' : '/login'}
+              className="py-1.5 px-3 rounded-lg bg-rose-800 hover:bg-rose-900 text-white text-xs font-bold shrink-0 self-start sm:self-auto"
             >
-              Sign In as Platform Owner
+              {errorBanner.toLowerCase().includes('2fa') || errorBanner.toLowerCase().includes('two-factor')
+                ? 'Complete 2FA Setup in Account Security →'
+                : 'Sign In as Platform Owner'}
             </Link>
           </div>
         )}

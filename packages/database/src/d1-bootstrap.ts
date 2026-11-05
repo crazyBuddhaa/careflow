@@ -376,7 +376,7 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     .prepare(
       `UPDATE users
        SET is_platform_admin = 1
-       WHERE LOWER(email) IN ('asuracorps@gmail.com', 'admin@getcustomcare.xyz')`
+       WHERE LOWER(email) IN ('asuracorps@gmail.com', 'oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
     )
     .run();
 

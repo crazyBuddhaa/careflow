@@ -25,10 +25,14 @@ import type {
 } from '@careflow/shared';
 
 interface AccountSecurityManagerProps {
+  autoStartMfaEnrollment?: boolean;
   onSessionUpdated?: () => void;
 }
 
-export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityManagerProps) {
+export function AccountSecurityManager({
+  autoStartMfaEnrollment = false,
+  onSessionUpdated,
+}: AccountSecurityManagerProps) {
   const [overview, setOverview] = useState<AccountSecurityOverviewDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -82,6 +86,24 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
   useEffect(() => {
     void loadSecurityOverview();
   }, [loadSecurityOverview]);
+
+  useEffect(() => {
+    if (
+      overview &&
+      !overview.mfaEnabled &&
+      !mfaSetup &&
+      !mfaBusy &&
+      (autoStartMfaEnrollment || (overview.mfaEnforcementActive && overview.mfaRequiredForRole))
+    ) {
+      void handleStartMfaEnrollment();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    overview?.mfaEnabled,
+    overview?.mfaEnforcementActive,
+    overview?.mfaRequiredForRole,
+    autoStartMfaEnrollment,
+  ]);
 
   async function handleRequestVerificationEmail() {
     setVerifyingEmail(true);
@@ -482,10 +504,16 @@ export function AccountSecurityManager({ onSessionUpdated }: AccountSecurityMana
               className={`self-start shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase ${
                 overview.mfaEnabled
                   ? 'bg-teal-50 text-teal-800 border border-teal-200'
-                  : 'bg-slate-100 text-slate-600'
+                  : overview.mfaRequiredForRole && overview.mfaEnforcementActive
+                    ? 'bg-amber-50 text-amber-900 border border-amber-300'
+                    : 'bg-slate-100 text-slate-600'
               }`}
             >
-              {overview.mfaEnabled ? 'MFA Enabled' : 'Not Enrolled'}
+              {overview.mfaEnabled
+                ? 'MFA Enabled'
+                : overview.mfaRequiredForRole && overview.mfaEnforcementActive
+                  ? '2FA Setup Required'
+                  : 'Not Enrolled'}
             </span>
           </div>
 

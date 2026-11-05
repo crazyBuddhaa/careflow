@@ -70,7 +70,7 @@ function buildWranglerConfig({ databaseName, databaseId, enableCustomDomainRoute
         'https://getcustomcare.xyz,https://www.getcustomcare.xyz,https://customcare.cloud111.workers.dev',
       CAREFLOW_EMAIL_FROM_NAME: 'CustomCare Support',
       CAREFLOW_EMAIL_FROM_ADDRESS: 'support@getcustomcare.xyz',
-      CAREFLOW_ENFORCE_ADMIN_MFA: 'false',
+      CAREFLOW_ENFORCE_ADMIN_MFA: 'true',
       CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME:
         loadRuntimeSecret('CAREFLOW_CENTRAL_TELEGRAM_BOT_USERNAME') || 'getcustomcarebot',
     },
@@ -275,6 +275,7 @@ async function main() {
       `ALTER TABLE support_agents ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'`,
       `ALTER TABLE auth_sessions ADD COLUMN agent_identity_id TEXT`,
       `ALTER TABLE auth_sessions ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'personal_account'`,
+      `UPDATE users SET is_platform_admin = 1 WHERE LOWER(email) IN ('asuracorps@gmail.com', 'oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`,
     ];
     for (const sql of safeAlterColumns) {
       spawnSync(

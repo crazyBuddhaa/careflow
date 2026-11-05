@@ -80,6 +80,14 @@ export async function GET() {
       );
     }
 
+    if (!session.mfaEnabled) {
+      return jsonApiError(
+        'MFA_SETUP_REQUIRED',
+        'Two-Factor Authentication (2FA) setup is required for Platform Super-Administrators. Please complete Authenticator App (TOTP) setup in your Workspace Account Security panel first.',
+        403
+      );
+    }
+
     const centralBotUsername = (
       readRuntimeSecret('CAREFLOW_TELEGRAM_CENTRAL_BOT_USERNAME') || 'getcustomcarebot'
     ).replace(/^@/, '');
@@ -119,6 +127,14 @@ export async function POST(request: Request) {
       return jsonApiError(
         'FORBIDDEN',
         'Access restricted to CustomCare Platform Super-Administrators.',
+        403
+      );
+    }
+
+    if (!session.mfaEnabled) {
+      return jsonApiError(
+        'MFA_SETUP_REQUIRED',
+        'Two-Factor Authentication (2FA) setup is required for Platform Super-Administrators. Please complete Authenticator App (TOTP) setup in your Workspace Account Security panel first.',
         403
       );
     }

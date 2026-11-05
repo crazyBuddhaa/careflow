@@ -38,6 +38,7 @@ export interface AdminSessionStatusDto {
     sessionId?: string;
     emailVerified?: boolean;
     mfaEnabled?: boolean;
+    mfaSetupRequired?: boolean;
     accountType?: AccountRegistrationMode;
     isPersonalAccount?: boolean;
     isPlatformAdmin?: boolean;
@@ -76,6 +77,16 @@ export async function GET() {
       readRuntimeSecret('TURNSTILE_SITE_KEY') ||
       undefined;
 
+    const enforceAdminMfa = readRuntimeSecret('CAREFLOW_ENFORCE_ADMIN_MFA') !== 'false';
+    const mfaRequiredForUser = Boolean(
+      resolved.identity &&
+        (resolved.isPlatformAdmin ||
+          ((resolved.identity.role === UserRole.Owner ||
+            resolved.identity.role === UserRole.Admin) &&
+            enforceAdminMfa))
+    );
+    const mfaSetupRequired = mfaRequiredForUser && !resolved.mfaEnabled;
+
     const response: AdminSessionStatusDto = {
       authenticated: Boolean(resolved.identity),
       turnstileSiteKey,
@@ -91,6 +102,7 @@ export async function GET() {
             sessionId: resolved.sessionId,
             emailVerified: resolved.emailVerified,
             mfaEnabled: resolved.mfaEnabled,
+            mfaSetupRequired,
             accountType: resolved.accountType,
             isPersonalAccount: resolved.isPersonalAccount,
             isPlatformAdmin: resolved.isPlatformAdmin,
