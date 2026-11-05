@@ -633,3 +633,70 @@ test('10. Customer escalation, conversation queue, agent management, and analyti
   }
 });
 
+test('11. Single-file knowledge base upload, auto-categorization, FAQ extraction, and portal answering', async () => {
+  const { service, repository, adapter, workspaceRepo } = await createIsolatedTestService();
+  try {
+    const punterStatMdPath = path.resolve(
+      process.cwd(),
+      'public/assets/aistudio/PunterStat_CustomCare_Knowledge_Base_0973f7c5.md'
+    );
+    assert.equal(fs.existsSync(punterStatMdPath), true, 'Sample knowledge file exists');
+    const rawContent = fs.readFileSync(punterStatMdPath, 'utf8');
+
+    // 1. Test parsing & categorization
+    const result = service.parseDocument(rawContent, 'PunterStat_CustomCare_Knowledge_Base.md');
+    assert.equal(result.documentTitle, 'PunterStat Customer Support Knowledge Base');
+    assert.ok(result.categories.length >= 10, `Expected >= 10 categories, got ${result.categories.length}`);
+    assert.ok(result.faqs.length >= 25, `Expected >= 25 FAQs, got ${result.faqs.length}`);
+    assert.ok(result.articles.length >= 10, `Expected >= 10 articles, got ${result.articles.length}`);
+
+    // Verify categories have clean names and auto-assigned items
+    const faqCat = result.categories.find(c => c.name.toLowerCase().includes('frequently asked questions'));
+    assert.ok(faqCat, 'Found FAQ category');
+    assert.ok(faqCat.faqCount > 0, 'FAQ category contains FAQs');
+
+    // 2. Test database import
+    const importResult = await service.importKnowledgeDocument(ADMIN_ORG_A, {
+      content: rawContent,
+      fileName: 'PunterStat_CustomCare_Knowledge_Base.md',
+      status: KnowledgeStatus.Published,
+      mode: 'replace',
+    });
+
+    assert.equal(importResult.documentTitle, 'PunterStat Customer Support Knowledge Base');
+    assert.ok(importResult.totalCategoriesCreated >= 10);
+    assert.ok(importResult.totalFaqsCreated >= 25);
+    assert.ok(importResult.totalArticlesCreated >= 10);
+
+    // 3. Verify database state
+    const savedCategories = await repository.listCategories('org_ultimatetechapp');
+    const savedArticles = await repository.listArticles('org_ultimatetechapp');
+    const savedFaqs = await repository.listFaqs('org_ultimatetechapp');
+
+    assert.ok(savedCategories.length >= importResult.totalCategoriesCreated);
+    assert.equal(savedArticles.length, importResult.totalArticlesCreated);
+    assert.equal(savedFaqs.length, importResult.totalFaqsCreated);
+
+    // 4. Verify search and retrieval immediately find answers
+    const matches = await service.retrievePublishedKnowledge({
+      organizationId: 'org_ultimatetechapp',
+      query: 'sports football tennis',
+    });
+    assert.ok(matches.length > 0, 'Found matching knowledge source for sports coverage');
+    assert.ok(
+      matches[0].excerpt.toLowerCase().includes('football') ||
+      matches[0].fullBody.toLowerCase().includes('football') ||
+      matches[0].citation.titleOrQuestion.toLowerCase().includes('sports')
+    );
+
+    // 5. Test portal hydration with published knowledge
+    const portalConfig = await workspaceRepo.resolvePortalBySlug('ultimatetechapp');
+    assert.ok(portalConfig, 'Portal config exists');
+    assert.ok(portalConfig.faqs && portalConfig.faqs.length >= 25, 'Portal hydrated with imported FAQs');
+    assert.ok(portalConfig.publishedKnowledge && portalConfig.publishedKnowledge.length >= 10, 'Portal hydrated with imported articles');
+  } finally {
+    adapter.close();
+  }
+});
+
+

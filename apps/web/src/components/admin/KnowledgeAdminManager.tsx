@@ -11,6 +11,9 @@ import {
   Archive,
   X,
   AlertTriangle,
+  Upload,
+  FileUp,
+  Sparkles,
 } from 'lucide-react';
 import {
   KnowledgeStatus,
@@ -20,6 +23,7 @@ import {
   type KnowledgeFaq,
   type KnowledgeOverviewCounts,
 } from '@careflow/shared';
+import { KnowledgeUploadModal } from './KnowledgeUploadModal';
 
 export type KnowledgeSubView =
   | 'knowledge-overview'
@@ -66,6 +70,7 @@ export function KnowledgeAdminManager({
   const [loading, setLoading] = useState(true);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -469,28 +474,38 @@ export function KnowledgeAdminManager({
   return (
     <div className="space-y-6">
       {/* Clean Sub-Navigation Bar */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-2 flex flex-wrap items-center gap-1.5">
-        {(
-          [
-            ['knowledge-overview', 'Knowledge Overview'],
-            ['knowledge-articles', `Help Articles (${articles.length})`],
-            ['faqs', `FAQs (${faqs.length})`],
-            ['categories', `Categories (${categories.length})`],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onNavigateSubView(key)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-              activeSubView === key
-                ? 'bg-slate-900 text-white shadow-2xs'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="rounded-2xl border border-slate-200 bg-white p-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              ['knowledge-overview', 'Knowledge Overview'],
+              ['knowledge-articles', `Help Articles (${articles.length})`],
+              ['faqs', `FAQs (${faqs.length})`],
+              ['categories', `Categories (${categories.length})`],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onNavigateSubView(key)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                activeSubView === key
+                  ? 'bg-slate-900 text-white shadow-2xs'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setUploadModalOpen(true)}
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 transition-colors cursor-pointer"
+        >
+          <Upload className="w-3.5 h-3.5 text-blue-600" aria-hidden="true" />
+          <span>Upload Knowledge File</span>
+        </button>
       </div>
 
       {/* Feedback & Error Alerts */}
@@ -624,6 +639,32 @@ export function KnowledgeAdminManager({
               </div>
             </div>
 
+            {/* Single-File Auto-Categorization Hero Banner */}
+            <div className="mt-6 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/80 via-white to-teal-50/40 p-5 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1 max-w-xl">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-100/70 px-2.5 py-0.5 rounded-full">
+                    <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Single-File Auto-Categorizer</span>
+                  </div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Import Knowledge Base from a Single File
+                  </h2>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Upload your comprehensive support document (like Markdown, text, or export). CustomCare automatically analyzes sections, groups topics into categories, extracts FAQs, and formats help articles.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUploadModalOpen(true)}
+                  className="inline-flex items-center gap-2 py-2 px-3.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto cursor-pointer"
+                >
+                  <FileUp className="w-4 h-4" aria-hidden="true" />
+                  <span>Upload &amp; Categorize</span>
+                </button>
+              </div>
+            </div>
+
             {/* Live Database Counts */}
             <div className="mt-8 pt-6 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-6">
               <div>
@@ -743,14 +784,24 @@ export function KnowledgeAdminManager({
                 </h1>
               </div>
 
-              <button
-                type="button"
-                onClick={openCreateArticleForm}
-                className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto cursor-pointer"
-              >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                <span>New Article</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setUploadModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 py-2.5 px-3.5 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-slate-500" aria-hidden="true" />
+                  <span>Upload File</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateArticleForm}
+                  className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" aria-hidden="true" />
+                  <span>New Article</span>
+                </button>
+              </div>
             </div>
 
             {/* Search & Filters */}
@@ -1123,14 +1174,24 @@ export function KnowledgeAdminManager({
                 </h1>
               </div>
 
-              <button
-                type="button"
-                onClick={openCreateFaqForm}
-                className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto cursor-pointer"
-              >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                <span>New FAQ</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setUploadModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 py-2.5 px-3.5 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-slate-500" aria-hidden="true" />
+                  <span>Upload File</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateFaqForm}
+                  className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" aria-hidden="true" />
+                  <span>New FAQ</span>
+                </button>
+              </div>
             </div>
 
             <div className="mt-6 grid grid-cols-1 md:grid-cols-12 gap-3">
@@ -1628,6 +1689,17 @@ export function KnowledgeAdminManager({
           </div>
         </div>
       )}
+
+      {/* Single-File Knowledge Upload & Auto-Categorization Modal */}
+      <KnowledgeUploadModal
+        isOpen={uploadModalOpen}
+        organizationName={organizationName}
+        onClose={() => setUploadModalOpen(false)}
+        onImportSuccess={(msg) => {
+          showFeedback(msg);
+          void refreshWorkspaceData();
+        }}
+      />
     </div>
   );
 }

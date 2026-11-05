@@ -18,6 +18,7 @@ import type {
   UpdateKnowledgeFaqInput,
 } from '@careflow/validation';
 import { hasMinimumRole, type AuthSessionIdentity } from '../authentication';
+import { parseKnowledgeDocument } from './importer';
 
 export class KnowledgeDomainError extends Error {
   readonly code:
@@ -516,6 +517,157 @@ export class KnowledgeManagementService implements ChatbotKnowledgeRetrievalPort
     }
   }
 
+  // ---- Batch File Import & Auto-Categorization ----
+
+  parseDocument(content: string, fallbackTitle?: string) {
+    return parseKnowledgeDocument(content, fallbackTitle);
+  }
+
+  async importKnowledgeDocument(
+    identity: AuthSessionIdentity | null,
+    input: {
+      content: string;
+      fileName?: string;
+      status?: KnowledgeStatus;
+      mode?: 'merge' | 'replace';
+    }
+  ): Promise<{
+    documentTitle: string;
+    totalCategoriesCreated: number;
+    totalArticlesCreated: number;
+    totalFaqsCreated: number;
+    categories: Array<{ id: string; name: string; slug: string }>;
+    summary: {
+      totalCategories: number;
+      totalArticles: number;
+      totalFaqs: number;
+    };
+  }> {
+    const session = assertAuthorizedKnowledgeAdmin(identity);
+    const parseResult = parseKnowledgeDocument(input.content, input.fileName || 'Knowledge Base');
+    const targetStatus = input.status ?? KnowledgeStatus.Published;
+
+    if (input.mode === 'replace') {
+      const existingArticles = await this.repository.listArticles(session.organizationId);
+      for (const a of existingArticles) {
+        await this.repository.deleteArticle(session.organizationId, a.id);
+      }
+      const existingFaqs = await this.repository.listFaqs(session.organizationId);
+      for (const f of existingFaqs) {
+        await this.repository.deleteFaq(session.organizationId, f.id);
+      }
+    }
+
+    const existingCategories = await this.repository.listCategories(session.organizationId);
+    const catMapByName = new Map<string, KnowledgeCategory>();
+    const catMapBySlug = new Map<string, KnowledgeCategory>();
+    for (const c of existingCategories) {
+      catMapByName.set(c.name.toLowerCase().trim(), c);
+      catMapBySlug.set(c.slug.toLowerCase().trim(), c);
+    }
+
+    let totalCategoriesCreated = 0;
+    let totalArticlesCreated = 0;
+    let totalFaqsCreated = 0;
+
+    // 1. Ensure/create categories
+    for (let i = 0; i < parseResult.categories.length; i++) {
+      const parsedCat = parseResult.categories[i]!;
+      const keyName = parsedCat.name.toLowerCase().trim();
+      const keySlug = parsedCat.slug.toLowerCase().trim();
+
+      let category = catMapByName.get(keyName) || catMapBySlug.get(keySlug);
+      if (!category) {
+        category = await this.repository.createCategory(session.organizationId, {
+          name: parsedCat.name,
+          slug: parsedCat.slug,
+          description: parsedCat.description,
+          displayOrder: (existingCategories.length + totalCategoriesCreated) * 10,
+        });
+        catMapByName.set(keyName, category);
+        catMapBySlug.set(keySlug, category);
+        totalCategoriesCreated++;
+      }
+    }
+
+    // 2. Create Articles
+    for (const parsedArt of parseResult.articles) {
+      const category = catMapByName.get(parsedArt.categoryName.toLowerCase().trim());
+      let slug = generateKnowledgeSlug(parsedArt.title);
+      const existing = await this.repository.getArticleBySlugScoped(session.organizationId, slug);
+      if (existing) {
+        if (input.mode === 'replace') {
+          await this.repository.updateArticle(session.organizationId, existing.id, {
+            title: parsedArt.title,
+            shortDescription: parsedArt.shortDescription,
+            content: parsedArt.content,
+            categoryId: category?.id ?? null,
+            tags: parsedArt.tags,
+            status: targetStatus,
+            searchKeywords: buildSearchKeywords([
+              parsedArt.title,
+              parsedArt.shortDescription,
+              parsedArt.tags,
+              parsedArt.content,
+            ]),
+          });
+          totalArticlesCreated++;
+          continue;
+        } else {
+          slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
+        }
+      }
+
+      await this.repository.createArticle(session.organizationId, {
+        title: parsedArt.title,
+        slug,
+        shortDescription: parsedArt.shortDescription,
+        content: parsedArt.content,
+        categoryId: category?.id ?? null,
+        tags: parsedArt.tags,
+        status: targetStatus,
+        searchKeywords: buildSearchKeywords([
+          parsedArt.title,
+          parsedArt.shortDescription,
+          parsedArt.tags,
+          parsedArt.content,
+        ]),
+      });
+      totalArticlesCreated++;
+    }
+
+    // 3. Create FAQs
+    let faqOrder = 10;
+    for (const parsedFaq of parseResult.faqs) {
+      const category = catMapByName.get(parsedFaq.categoryName.toLowerCase().trim());
+      await this.repository.createFaq(session.organizationId, {
+        question: parsedFaq.question,
+        answer: parsedFaq.answer,
+        categoryId: category?.id ?? null,
+        displayOrder: faqOrder,
+        status: targetStatus,
+        searchKeywords: buildSearchKeywords([parsedFaq.question, parsedFaq.answer]),
+      });
+      faqOrder += 10;
+      totalFaqsCreated++;
+    }
+
+    const allCategories = await this.repository.listCategories(session.organizationId);
+
+    return {
+      documentTitle: parseResult.documentTitle,
+      totalCategoriesCreated,
+      totalArticlesCreated,
+      totalFaqsCreated,
+      categories: allCategories.map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
+      summary: {
+        totalCategories: parseResult.summary.totalCategories,
+        totalArticles: parseResult.summary.totalArticles,
+        totalFaqs: parseResult.summary.totalFaqs,
+      },
+    };
+  }
+
   // ---- Future Chatbot Retrieval Preparation (Published-Only, Business-Scoped) ----
 
   async retrievePublishedKnowledge(
@@ -619,3 +771,5 @@ export class KnowledgeManagementService implements ChatbotKnowledgeRetrievalPort
     return matches.slice(0, params.limit ?? 5);
   }
 }
+
+export * from './importer';
