@@ -6,13 +6,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowRight,
-  Lock,
   CheckCircle2,
   Mail,
   Eye,
   EyeOff,
-  Smartphone,
-  KeyRound,
 } from 'lucide-react';
 import { CAREFLOW_NAME, type ApiResponse } from '@careflow/shared';
 import type { AdminSessionStatusDto } from '@/app/api/admin/session/route';
@@ -276,23 +273,7 @@ export function WorkspaceLoginForm() {
   return (
     <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-8 sm:p-9 shadow-sm space-y-6">
       <div>
-        <div className="flex items-center gap-3">
-          <img
-            src="/assets/aistudio/Black_White_Minimalist_Simple_Modern_Bold_Letter_Q_Atelier_Logo_20261104_000821_1_12ad5e9f.png"
-            alt={`${CAREFLOW_NAME} logo`}
-            className="w-12 h-12 rounded-2xl border border-slate-200 object-contain bg-white p-1"
-          />
-          <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
-            {authMode === 'mfa' ? (
-              <Smartphone className="w-5 h-5" aria-hidden="true" />
-            ) : authMode === 'forgot-request' || authMode === 'forgot-confirm' ? (
-              <KeyRound className="w-5 h-5" aria-hidden="true" />
-            ) : (
-              <Lock className="w-5 h-5" aria-hidden="true" />
-            )}
-          </div>
-        </div>
-        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
           {authMode === 'mfa'
             ? 'Two-Factor Verification'
             : authMode === 'forgot-request' || authMode === 'forgot-confirm'

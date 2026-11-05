@@ -10,6 +10,7 @@ import {
   handleKnowledgeApiException,
   jsonApiError,
   jsonApiSuccess,
+  logInternalErrorForPlatformAdmin,
 } from '@/lib/api-response';
 import { getAuthIdentityService } from '@/lib/knowledge-runtime';
 
@@ -18,7 +19,7 @@ export const dynamic = 'force-dynamic';
 async function handleIssueAndSendVerificationEmail() {
   const session = await resolveServerAdminSession();
   if (!session.identity || !session.identity.email) {
-    return jsonApiError('UNAUTHORIZED', 'Sign in to request a verification email.', 401);
+    return jsonApiError('UNAUTHORIZED', 'Please sign in to request a verification email.', 401);
   }
 
   const authService = await getAuthIdentityService();
@@ -55,16 +56,30 @@ async function handleIssueAndSendVerificationEmail() {
   );
 
   const sent = Boolean(emailDelivery.sent);
+  if (!sent && emailDelivery.errorMessage) {
+    logInternalErrorForPlatformAdmin({
+      errorCode: 'EMAIL-VERIFY-DELIVERY',
+      internalMessage: `Verification email to ${session.identity.email} not sent via provider (${emailDelivery.provider}): ${emailDelivery.errorMessage}`,
+      routeOrContext: 'api/auth/verify-email',
+    });
+  }
+
   const message = sent
-    ? `Verification email sent to ${session.identity.email}. Check your inbox (and spam folder) for your verification link or token.`
-    : `Transactional email delivery via Resend is not active yet (${emailDelivery.errorMessage || 'verify sender domain in Resend'}). Use the single-use verification token below to verify your email immediately.`;
+    ? `We've sent a verification email to ${session.identity.email}. Please check your inbox for your verification link or single-use code.`
+    : emailDelivery.devToken
+      ? 'Your single-use verification code is ready below. Enter it to verify your email address immediately.'
+      : `Your verification request has been recorded for ${session.identity.email}. If the email does not arrive within a few minutes, please try again shortly.`;
 
   return jsonApiSuccess({
     issued: true,
     sent,
     message,
     expiresAt,
-    emailDelivery,
+    emailDelivery: {
+      sent: emailDelivery.sent,
+      provider: emailDelivery.provider,
+      ...(emailDelivery.devToken ? { devToken: emailDelivery.devToken, devPreviewUrl: emailDelivery.devPreviewUrl } : {}),
+    },
     devToken: emailDelivery.devToken,
   });
 }

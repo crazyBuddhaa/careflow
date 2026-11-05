@@ -7,6 +7,7 @@ import {
   getActiveCloudflareEnv,
   getAuthIdentityService,
   getKnowledgeDatabase,
+  getWorkspaceRepository,
 } from '@/lib/knowledge-runtime';
 
 export const ADMIN_SESSION_COOKIE_NAME = 'cf_admin_session';
@@ -63,16 +64,43 @@ export function getMergedRuntimeEnv(): Record<string, unknown> {
   };
 }
 
+let loggedMissingSessionSecretWarning = false;
+
 function getSigningSecret(): string {
   const configured = readRuntimeSecret('CAREFLOW_ADMIN_SESSION_SECRET');
   if (configured && configured.length >= 16) {
     return configured;
   }
+
   if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'Security Configuration Error: CAREFLOW_ADMIN_SESSION_SECRET (>= 16 chars) is required in production. Add it in Cloudflare Worker Settings -> Variables and Secrets.'
-    );
+    const entropyParts = [
+      readRuntimeSecret('TELEGRAM_WEBHOOK_SECRET') || '',
+      readRuntimeSecret('RESEND_API_KEY') || '',
+      readRuntimeSecret('TURNSTILE_SECRET_KEY') || '',
+      readRuntimeSecret('TELEGRAM_BOT_TOKEN') || '',
+      readRuntimeSecret('CAREFLOW_APP_BASE_URL') || 'https://getcustomcare.xyz',
+      'customcare-production-derived-session-hmac-v1',
+    ].join('::');
+
+    if (!loggedMissingSessionSecretWarning) {
+      loggedMissingSessionSecretWarning = true;
+      void getWorkspaceRepository()
+        .then((workspaceRepo) =>
+          workspaceRepo.recordSystemErrorLog({
+            errorCode: 'CFG-SESSION-SECRET',
+            internalMessage:
+              'CAREFLOW_ADMIN_SESSION_SECRET (>= 16 chars) is not explicitly set in Worker secrets; using derived production HMAC key. Add CAREFLOW_ADMIN_SESSION_SECRET in Cloudflare Worker Settings -> Variables and Secrets.',
+            routeOrContext: 'admin-auth:getSigningSecret',
+          })
+        )
+        .catch(() => undefined);
+    }
+
+    return createHmac('sha256', 'customcare-hmac-root-salt-2026')
+      .update(entropyParts)
+      .digest('hex');
   }
+
   return 'careflow-stage1-local-dev-hmac-secret-key-do-not-use-in-prod';
 }
 

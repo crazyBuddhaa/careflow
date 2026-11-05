@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Activity,
   ArrowLeft,
+  Mail,
 } from 'lucide-react';
 import {
   CAREFLOW_LOGO_ICON_PATH,
@@ -27,7 +28,7 @@ import {
   type PlatformAdminOverviewDto,
 } from '@careflow/shared';
 
-type PlatformTab = 'organizations' | 'users' | 'agents_invites' | 'logs';
+type PlatformTab = 'organizations' | 'users' | 'agents_invites' | 'mail_ui' | 'logs';
 
 function formatShortDate(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -54,6 +55,9 @@ export default function PlatformAdminPage() {
 
   const [orgSearch, setOrgSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
+  const [selectedMailTemplateKey, setSelectedMailTemplateKey] = useState<string>('email_verification');
+  const [mailPreviewMode, setMailPreviewMode] = useState<'html' | 'text' | 'headers'>('html');
+  const [testEmailRecipient, setTestEmailRecipient] = useState('oluwafemiadekanmi76@gmail.com');
 
   const showFeedback = useCallback((msg: string) => {
     setFeedback(msg);
@@ -352,8 +356,12 @@ export default function PlatformAdminPage() {
                     `Agent Identities & Invites (${overview.agentIdentities.length} / ${overview.recentInvitations.length})`,
                   ],
                   [
+                    'mail_ui',
+                    `Custom Mail UI & Google Compliance (${overview.emailSystem?.templates.length ?? 5})`,
+                  ],
+                  [
                     'logs',
-                    `Security, Audit & Webhook Logs (${overview.recentAuditLogs.length + overview.recentWebhookEvents.length})`,
+                    `System Errors, Security & Webhook Logs (${overview.recentAuditLogs.length + overview.recentWebhookEvents.length})`,
                   ],
                 ] as const
               ).map(([key, label]) => (
@@ -771,47 +779,353 @@ export default function PlatformAdminPage() {
               </div>
             )}
 
-            {/* TAB 4: SECURITY, AUDIT & WEBHOOK LOGS */}
+            {/* TAB 4: CUSTOM MAIL UI & GOOGLE SENDER COMPLIANCE STUDIO */}
+            {activeTab === 'mail_ui' && overview.emailSystem && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Left Sidebar: Template Selector, Google Deliverability Checklist & Live Test Dispatch */}
+                <div className="lg:col-span-4 space-y-5">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-base font-bold text-slate-900">
+                          CustomCare Mail UI Templates
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          Branded, watermarked transactional templates
+                        </p>
+                      </div>
+                      <Mail className="w-4 h-4 text-teal-600" />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {overview.emailSystem.templates.map((tpl) => {
+                        const isSelected = tpl.templateKey === selectedMailTemplateKey;
+                        return (
+                          <button
+                            key={tpl.templateKey}
+                            type="button"
+                            onClick={() => setSelectedMailTemplateKey(tpl.templateKey)}
+                            className={`w-full text-left px-3.5 py-2.5 rounded-xl border text-xs transition-all cursor-pointer flex items-center justify-between ${
+                              isSelected
+                                ? 'border-teal-600 bg-teal-50/70 text-teal-950 font-bold'
+                                : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold'
+                            }`}
+                          >
+                            <span>{tpl.categoryBadge}</span>
+                            <span className="font-mono text-[10px] text-slate-500">
+                              {tpl.watermarkId.slice(0, 11)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Google / Gmail Bulk & Transactional Sender Compliance Card */}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Google / Gmail Anti-Spam Compliance
+                      </h3>
+                      <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold uppercase">
+                        RFC 5322 / 8058 Ready
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Every outbound CustomCare email is structured to pass Gmail and Google Workspace spam filters without clipping or blocking:
+                    </p>
+                    <ul className="space-y-2 text-xs text-slate-700">
+                      <li className="flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Official Logo &amp; Anti-Phishing Watermark:</strong> Embedded Q Atelier Logo + unique <code className="font-mono text-[11px] bg-slate-100 px-1 rounded">CC-*-VERIFIED</code> watermark ribbon &amp; seal.
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Monitored Reply-To Alignment:</strong> Uses{' '}
+                          <code className="font-mono text-[11px] bg-slate-100 px-1 rounded">
+                            {overview.emailSystem.fromAddress}
+                          </code>{' '}
+                          (no <code className="font-mono text-[11px]">no-reply@</code> penalty).
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Anti-Clipping &amp; Loop Prevention Headers:</strong> Sends{' '}
+                          <code className="font-mono text-[11px] bg-slate-100 px-1 rounded">
+                            X-Entity-Ref-ID
+                          </code>{' '}
+                          and{' '}
+                          <code className="font-mono text-[11px] bg-slate-100 px-1 rounded">
+                            Auto-Submitted: auto-generated
+                          </code>
+                          .
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>1:1 Multipart Plain-Text + HTML Parity:</strong> Synchronized{' '}
+                          <code className="font-mono text-[11px] bg-slate-100 px-1 rounded">
+                            text/plain
+                          </code>{' '}
+                          and{' '}
+                          <code className="font-mono text-[11px] bg-slate-100 px-1 rounded">
+                            text/html
+                          </code>{' '}
+                          bodies with matching HTTPS domain links.
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Google Terms Attribution Footer:</strong> Includes recipient reason, Privacy Policy, Terms of Service, and Acceptable Use links.
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Send Test Email Card */}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Dispatch Live Test Email
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Send the selected watermarked template to verify inbox rendering and SPF/DKIM alignment.
+                    </p>
+                    <input
+                      type="email"
+                      value={testEmailRecipient}
+                      onChange={(e) => setTestEmailRecipient(e.target.value)}
+                      placeholder="recipient@example.com"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs text-slate-900 focus:border-teal-600 focus:bg-white focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={actionBusy === 'send_test_email' || !testEmailRecipient.trim()}
+                      onClick={() =>
+                        void runPlatformAction('send_test_email', {
+                          type: 'send_test_email',
+                          templateKey: selectedMailTemplateKey,
+                          recipientEmail: testEmailRecipient.trim(),
+                        })
+                      }
+                      className="w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+                    >
+                      {actionBusy === 'send_test_email'
+                        ? 'Dispatching Test Email...'
+                        : 'Send Watermarked Test Email'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right Column: Live Mail Client Preview */}
+                <div className="lg:col-span-8 rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                  {(() => {
+                    const activeTemplate =
+                      overview.emailSystem.templates.find(
+                        (t) => t.templateKey === selectedMailTemplateKey
+                      ) ?? overview.emailSystem.templates[0];
+
+                    if (!activeTemplate) return null;
+
+                    return (
+                      <div>
+                        {/* Simulated Email Client Envelope Header */}
+                        <div className="p-5 border-b border-slate-200 bg-slate-50/70 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-0.5 rounded-md bg-slate-900 text-teal-400 text-[10px] font-bold uppercase">
+                                {activeTemplate.categoryBadge}
+                              </span>
+                              <span className="font-mono text-[11px] text-slate-500">
+                                Watermark: {activeTemplate.watermarkId}
+                              </span>
+                            </div>
+
+                            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
+                              {(
+                                [
+                                  ['html', 'Branded Mail UI'],
+                                  ['text', 'Plain-Text Multipart'],
+                                  ['headers', 'RFC / Google Headers'],
+                                ] as const
+                              ).map(([mode, label]) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => setMailPreviewMode(mode)}
+                                  className={`px-3 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                                    mailPreviewMode === mode
+                                      ? 'bg-slate-900 text-white'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 text-xs">
+                            <p className="font-bold text-slate-900 text-sm">
+                              {activeTemplate.subject}
+                            </p>
+                            <p className="text-slate-600 font-mono text-[11px]">
+                              From: {overview.emailSystem.fromName} &lt;
+                              {overview.emailSystem.fromAddress}&gt; · Reply-To:{' '}
+                              {activeTemplate.replyTo}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Mail Preview Body */}
+                        {mailPreviewMode === 'html' && (
+                          <div className="bg-slate-100 p-3 sm:p-5">
+                            <iframe
+                              title={`CustomCare Mail Preview - ${activeTemplate.categoryBadge}`}
+                              srcDoc={activeTemplate.html}
+                              className="w-full h-[680px] rounded-2xl border border-slate-200 bg-white shadow-xs"
+                            />
+                          </div>
+                        )}
+
+                        {mailPreviewMode === 'text' && (
+                          <div className="p-6 bg-slate-950 text-slate-100 font-mono text-xs whitespace-pre-wrap leading-relaxed min-h-[420px]">
+                            {activeTemplate.text}
+                          </div>
+                        )}
+
+                        {mailPreviewMode === 'headers' && (
+                          <div className="p-6 space-y-4 text-xs">
+                            <p className="text-slate-600">
+                              These headers are attached to every Resend API dispatch to comply with Google Workspace and Gmail bulk/transactional sender standards:
+                            </p>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono space-y-2">
+                              <div>
+                                <span className="font-bold text-teal-800">From:</span>{' '}
+                                {overview.emailSystem.fromName} &lt;
+                                {overview.emailSystem.fromAddress}&gt;
+                              </div>
+                              <div>
+                                <span className="font-bold text-teal-800">Reply-To:</span>{' '}
+                                {activeTemplate.replyTo}
+                              </div>
+                              {Object.entries(activeTemplate.headers).map(([hKey, hVal]) => (
+                                <div key={hKey}>
+                                  <span className="font-bold text-teal-800">{hKey}:</span> {hVal}
+                                </div>
+                              ))}
+                              <div>
+                                <span className="font-bold text-teal-800">Content-Type:</span>{' '}
+                                multipart/alternative; boundary=&quot;customcare-mime-boundary&quot;
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 5: SYSTEM ERRORS, SECURITY, AUDIT & WEBHOOK LOGS */}
             {activeTab === 'logs' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                 <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
                   <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                     <div>
                       <h2 className="text-base font-bold text-slate-900">
-                        Security &amp; Lifecycle Audit Logs
+                        System Internal Errors &amp; Security Audit Logs
                       </h2>
                       <p className="text-xs text-slate-500">
-                        Invitations, identity linking, suspensions, revocations, and admin actions
+                        Internal exceptions shielded from end users, plus invitations and admin actions
                       </p>
                     </div>
                     <Activity className="w-4 h-4 text-teal-600" />
                   </div>
-                  <div className="divide-y divide-slate-100 max-h-[480px] overflow-y-auto text-xs">
+                  <div className="divide-y divide-slate-100 max-h-[540px] overflow-y-auto text-xs">
                     {overview.recentAuditLogs.length === 0 ? (
                       <p className="p-6 text-slate-500 text-center">No audit events recorded yet.</p>
                     ) : (
-                      overview.recentAuditLogs.map((log) => (
-                        <div key={log.id} className="p-4 space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono font-bold text-teal-800 uppercase text-[11px]">
-                              {log.actionType}
-                            </span>
-                            <span className="font-mono text-[11px] text-slate-400">
-                              {formatShortDate(log.createdAt)}
-                            </span>
+                      overview.recentAuditLogs.map((log) => {
+                        const isInternalError = log.actionType === 'system_internal_error';
+                        const rawDetails = log.details || log.metadataJson || '';
+                        let parsedError: {
+                          errorCode?: string;
+                          internalMessage?: string;
+                          routeOrContext?: string;
+                          stack?: string;
+                        } | null = null;
+                        if (rawDetails.startsWith('{')) {
+                          try {
+                            parsedError = JSON.parse(rawDetails);
+                          } catch {
+                            parsedError = null;
+                          }
+                        }
+
+                        return (
+                          <div
+                            key={log.id}
+                            className={`p-4 space-y-1.5 ${
+                              isInternalError ? 'bg-rose-50/50' : ''
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`font-mono font-bold uppercase text-[11px] ${
+                                    isInternalError
+                                      ? 'px-2 py-0.5 rounded bg-rose-100 text-rose-900 border border-rose-200'
+                                      : 'text-teal-800'
+                                  }`}
+                                >
+                                  {isInternalError
+                                    ? 'INTERNAL SYSTEM ERROR (SHIELDED FROM USER)'
+                                    : log.actionType}
+                                </span>
+                              </div>
+                              <span className="font-mono text-[11px] text-slate-400">
+                                {formatShortDate(log.createdAt)}
+                              </span>
+                            </div>
+                            <p className="text-slate-800 font-mono text-[11px]">
+                              Ref / Target: {log.targetType} ({log.targetId || '—'})
+                            </p>
+                            <p className="text-[11px] text-slate-500 font-mono">
+                              Org: {log.organizationId || 'Platform'} · Actor:{' '}
+                              {log.actorEmail || log.actorUserId || 'System Runtime'}
+                            </p>
+                            {parsedError?.internalMessage ? (
+                              <div className="rounded-lg border border-rose-200 bg-white p-2.5 font-mono text-[11px] text-rose-900 space-y-1">
+                                <div>
+                                  <strong>Route / Context:</strong>{' '}
+                                  {parsedError.routeOrContext || 'api'}
+                                </div>
+                                <div className="break-all">
+                                  <strong>Internal Detail:</strong> {parsedError.internalMessage}
+                                </div>
+                                {parsedError.stack && (
+                                  <div className="text-[10px] text-slate-500 break-all">
+                                    {parsedError.stack}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              rawDetails && (
+                                <p className="text-[11px] text-slate-600 font-mono break-all">
+                                  {rawDetails}
+                                </p>
+                              )
+                            )}
                           </div>
-                          <p className="text-slate-800 font-mono text-[11px]">
-                            Target: {log.targetType} ({log.targetId || '—'})
-                          </p>
-                          <p className="text-[11px] text-slate-500 font-mono">
-                            Org: {log.organizationId || 'Platform'} · Actor:{' '}
-                            {log.actorEmail || log.actorUserId || 'System'}
-                          </p>
-                          {log.details && (
-                            <p className="text-[11px] text-slate-600">{log.details}</p>
-                          )}
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -828,7 +1142,7 @@ export default function PlatformAdminPage() {
                     </div>
                     <Globe className="w-4 h-4 text-blue-600" />
                   </div>
-                  <div className="divide-y divide-slate-100 max-h-[480px] overflow-y-auto text-xs">
+                  <div className="divide-y divide-slate-100 max-h-[540px] overflow-y-auto text-xs">
                     {overview.recentWebhookEvents.length === 0 ? (
                       <p className="p-6 text-slate-500 text-center">
                         No webhook events recorded yet.
@@ -873,3 +1187,4 @@ export default function PlatformAdminPage() {
     </div>
   );
 }
+

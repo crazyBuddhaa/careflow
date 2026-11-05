@@ -2,10 +2,16 @@ import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { UserRole } from '@careflow/shared';
 import {
+  getCustomCareEmailTemplateGallery,
+  resolveResendConfig,
+  sendTransactionalEmail,
+} from '@careflow/database/d1';
+import {
   ADMIN_SESSION_COOKIE_NAME,
   createSignedAdminSessionToken,
   extractRequestClientMeta,
   getAdminCookieOptions,
+  getMergedRuntimeEnv,
   readRuntimeSecret,
   resolveServerAdminSession,
   verifyRequestOriginCsrf,
@@ -14,6 +20,7 @@ import {
   handleKnowledgeApiException,
   jsonApiError,
   jsonApiSuccess,
+  logInternalErrorForPlatformAdmin,
 } from '@/lib/api-response';
 import {
   ensureTelegramBotIdentityAndWebhook,
@@ -58,6 +65,17 @@ const PlatformAdminActionSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('sync_central_telegram_bot'),
   }),
+  z.object({
+    type: z.literal('send_test_email'),
+    templateKey: z.enum([
+      'email_verification',
+      'password_reset',
+      'password_changed',
+      'new_login_alert',
+      'workspace_invitation',
+    ]),
+    recipientEmail: z.string().trim().email().optional(),
+  }),
 ]);
 
 export async function GET() {
@@ -94,15 +112,29 @@ export async function GET() {
     const centralBotToken = readRuntimeSecret('TELEGRAM_BOT_TOKEN');
     const centralBotSecret = readRuntimeSecret('TELEGRAM_WEBHOOK_SECRET');
 
+    const runtimeEnv = getMergedRuntimeEnv();
+    const resendCfg = resolveResendConfig(undefined, runtimeEnv);
+    const emailGallery = getCustomCareEmailTemplateGallery(runtimeEnv);
+
     const overview = await repo.getPlatformAdminOverview({
       centralTelegramBotUsername: centralBotUsername,
       centralTelegramTokenConfigured: Boolean(centralBotToken && centralBotToken.length >= 10),
       centralTelegramSecretConfigured: Boolean(centralBotSecret && centralBotSecret.length >= 8),
     });
 
-    return jsonApiSuccess(overview);
+    return jsonApiSuccess({
+      ...overview,
+      emailSystem: {
+        configured: resendCfg.isConfigured,
+        fromName: resendCfg.fromName,
+        fromAddress: resendCfg.fromAddress || 'support@getcustomcare.xyz',
+        appBaseUrl: resendCfg.appBaseUrl,
+        hasCustomSenderDomain: resendCfg.hasCustomSenderDomain,
+        templates: emailGallery,
+      },
+    });
   } catch (err) {
-    return handleKnowledgeApiException(err);
+    return handleKnowledgeApiException(err, 'api/platform-admin:GET');
   }
 }
 
@@ -148,13 +180,55 @@ export async function POST(request: Request) {
 
     const action = PlatformAdminActionSchema.parse(rawBody);
 
+    if (action.type === 'send_test_email') {
+      const runtimeEnv = getMergedRuntimeEnv();
+      const templates = getCustomCareEmailTemplateGallery(runtimeEnv);
+      const selected =
+        templates.find((t) => t.templateKey === action.templateKey) ?? templates[0]!;
+      const targetEmail =
+        action.recipientEmail?.trim().toLowerCase() ||
+        session.identity.email ||
+        'oluwafemiadekanmi76@gmail.com';
+
+      const delivery = await sendTransactionalEmail(
+        {
+          to: targetEmail,
+          subject: `[Test Dispatch] ${selected.subject}`,
+          html: selected.html,
+          text: selected.text,
+          headers: selected.headers,
+          replyTo: selected.replyTo,
+        },
+        undefined,
+        runtimeEnv
+      );
+
+      if (!delivery.sent && delivery.errorMessage) {
+        logInternalErrorForPlatformAdmin({
+          errorCode: 'TEST-EMAIL-DIAG',
+          internalMessage: `Platform Admin test email (${selected.templateKey}) to ${targetEmail} status: ${delivery.errorMessage}`,
+          routeOrContext: 'api/platform-admin:send_test_email',
+        });
+      }
+
+      return jsonApiSuccess({
+        message: delivery.sent
+          ? `Dispatched watermarked "${selected.categoryBadge}" email to ${targetEmail} (Message ID: ${delivery.messageId || 'sent'}).`
+          : `Rendered watermarked "${selected.categoryBadge}" template for ${targetEmail}. Connect RESEND_API_KEY in Worker secrets to enable live outbound SMTP/HTTP delivery.`,
+      });
+    }
+
     if (action.type === 'sync_central_telegram_bot') {
       const centralBotToken = readRuntimeSecret('TELEGRAM_BOT_TOKEN');
-      const centralBotSecret = readRuntimeSecret('TELEGRAM_WEBHOOK_SECRET');
       if (!centralBotToken) {
+        logInternalErrorForPlatformAdmin({
+          errorCode: 'TELEGRAM-TOKEN-MISSING',
+          internalMessage: 'TELEGRAM_BOT_TOKEN is not configured in runtime environment secrets.',
+          routeOrContext: 'api/platform-admin:sync_central_telegram_bot',
+        });
         return jsonApiError(
           'TELEGRAM_TOKEN_MISSING',
-          'TELEGRAM_BOT_TOKEN is not configured in runtime environment secrets.',
+          'Telegram bot integration is not yet connected on this server.',
           400
         );
       }
@@ -225,6 +299,7 @@ export async function POST(request: Request) {
 
     return jsonApiSuccess(result);
   } catch (err) {
-    return handleKnowledgeApiException(err);
+    return handleKnowledgeApiException(err, 'api/platform-admin:POST');
   }
 }
+

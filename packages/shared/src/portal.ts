@@ -577,5 +577,23 @@ export interface PlatformAdminOverviewDto {
   }>;
   recentWebhookEvents: PlatformAdminWebhookEventItem[];
   rateLimitBuckets: PlatformAdminRateLimitItem[];
+  emailSystem?: {
+    configured: boolean;
+    fromName: string;
+    fromAddress: string;
+    appBaseUrl: string;
+    hasCustomSenderDomain: boolean;
+    templates: Array<{
+      templateKey: string;
+      categoryBadge: string;
+      watermarkId: string;
+      subject: string;
+      html: string;
+      text: string;
+      replyTo: string;
+      headers: Record<string, string>;
+    }>;
+  };
 }
+
 

@@ -18,6 +18,7 @@ import {
   handleKnowledgeApiException,
   jsonApiError,
   jsonApiSuccess,
+  logInternalErrorForPlatformAdmin,
 } from '@/lib/api-response';
 import {
   getAuthIdentityService,
@@ -69,11 +70,18 @@ export async function POST(request: Request) {
       },
       runtimeEnv
     );
+    if (turnstile.internalReason) {
+      logInternalErrorForPlatformAdmin({
+        errorCode: turnstile.errorCode || 'TURNSTILE-DIAG',
+        internalMessage: turnstile.internalReason,
+        routeOrContext: 'api/auth/register',
+      });
+    }
     if (!turnstile.success) {
       await authService.recordRateLimitAttempt('register', ipAddress);
       return jsonApiError(
         turnstile.errorCode || 'TURNSTILE_FAILED',
-        turnstile.errorMessage || 'Bot protection check failed.',
+        turnstile.errorMessage || 'Please complete the security verification check and try again.',
         403
       );
     }

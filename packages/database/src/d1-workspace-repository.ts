@@ -3326,6 +3326,7 @@ export class D1WorkspaceRepository {
       actionType: r.action,
       targetType: r.target_type,
       targetId: r.target_id,
+      details: r.metadata_json,
       metadataJson: r.metadata_json,
       ipAddress: r.ip_address,
       createdAt: r.created_at,
@@ -3399,6 +3400,44 @@ export class D1WorkspaceRepository {
       recentWebhookEvents,
       rateLimitBuckets,
     };
+  }
+
+  async recordSystemErrorLog(params: {
+    errorCode: string;
+    internalMessage: string;
+    routeOrContext?: string;
+    stack?: string;
+    organizationId?: string | null;
+    actorUserId?: string | null;
+    actorEmail?: string | null;
+    ipAddress?: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    const metadata = {
+      errorCode: params.errorCode,
+      internalMessage: params.internalMessage.slice(0, 1000),
+      routeOrContext: params.routeOrContext || 'api',
+      stack: params.stack ? params.stack.split('\n').slice(0, 4).join(' | ') : undefined,
+      recordedAt: now,
+    };
+
+    await this.db
+      .prepare(
+        `INSERT INTO workspace_audit_logs
+           (id, organization_id, actor_user_id, actor_email, action, target_type, target_id, metadata_json, ip_address, created_at)
+         VALUES (?, ?, ?, ?, 'system_internal_error', 'system_error', ?, ?, ?, ?)`
+      )
+      .bind(
+        createId('aud'),
+        params.organizationId ?? null,
+        params.actorUserId ?? null,
+        params.actorEmail ?? 'System Runtime',
+        params.errorCode,
+        JSON.stringify(metadata),
+        params.ipAddress ?? '',
+        now
+      )
+      .run();
   }
 
   async executePlatformAdminAction(params: {

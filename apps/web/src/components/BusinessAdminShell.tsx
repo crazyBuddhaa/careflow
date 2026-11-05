@@ -693,10 +693,7 @@ export function BusinessAdminShell() {
         <main className="flex-1 flex items-center justify-center px-6 py-14">
           <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-8 space-y-6 shadow-sm">
             <div>
-              <div className="w-12 h-12 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center">
-                <Lock className="w-6 h-6" aria-hidden="true" />
-              </div>
-              <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                 Sign In to Your Workspace
               </h1>
               <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">

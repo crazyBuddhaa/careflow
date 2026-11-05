@@ -3,6 +3,7 @@ export interface TurnstileVerificationResult {
   configured: boolean;
   errorCode?: string;
   errorMessage?: string;
+  internalReason?: string;
 }
 
 export interface VerifyTurnstileOptions {
@@ -51,7 +52,6 @@ export async function verifyTurnstileToken(
 
   // In non-production development runtime (where NEXT_PUBLIC_APP_NAME or CAREFLOW_APP_BASE_URL is set),
   // only enforce Turnstile when the frontend also has a Site Key to render the widget.
-  // In production, Turnstile is strictly enforced.
   const isDevAppRuntimeWithoutSiteKey =
     !isProduction &&
     Boolean(envSource.NEXT_PUBLIC_APP_NAME || envSource.CAREFLOW_APP_BASE_URL) &&
@@ -66,7 +66,7 @@ export async function verifyTurnstileToken(
       success: false,
       configured: Boolean(configuredSecret),
       errorCode: 'TURNSTILE_VERIFICATION_FAILED',
-      errorMessage: 'Bot protection verification failed. Please complete the security challenge and try again.',
+      errorMessage: 'Security verification failed. Please complete the challenge and try again.',
     };
   }
 
@@ -79,21 +79,39 @@ export async function verifyTurnstileToken(
   }
 
   if (!configuredSecret) {
-    if (isProduction && (options.requireToken ?? Boolean(configuredSiteKey || envSource.CAREFLOW_ENFORCE_TURNSTILE !== 'false'))) {
+    if (
+      isProduction &&
+      (options.requireToken ??
+        Boolean(configuredSiteKey || envSource.CAREFLOW_ENFORCE_TURNSTILE !== 'false'))
+    ) {
       return {
         success: false,
         configured: false,
         errorCode: 'TURNSTILE_NOT_CONFIGURED',
-        errorMessage: 'Bot protection is required in production (TURNSTILE_SECRET_KEY is not configured).',
+        errorMessage:
+          'Security verification is temporarily unavailable. Please try again in a few moments.',
+        internalReason:
+          'TURNSTILE_SECRET_KEY is missing in Cloudflare Worker secrets while production Turnstile enforcement is active.',
       };
     }
 
-    if (!options.requireToken) {
+    if (options.requireToken) {
       return {
-        success: true,
+        success: false,
         configured: false,
+        errorCode: 'TURNSTILE_TOKEN_REQUIRED',
+        errorMessage: 'Please complete the security verification check before continuing.',
+        internalReason: 'TURNSTILE_SECRET_KEY is not configured while requireToken=true.',
       };
     }
+
+    return {
+      success: true,
+      configured: false,
+      internalReason: isProduction
+        ? 'TURNSTILE_SECRET_KEY is not set in Worker secrets; server-side siteverify was skipped.'
+        : undefined,
+    };
   }
 
   if (!token) {
@@ -101,7 +119,7 @@ export async function verifyTurnstileToken(
       success: false,
       configured: true,
       errorCode: 'TURNSTILE_TOKEN_REQUIRED',
-      errorMessage: 'Please complete the bot protection challenge before continuing.',
+      errorMessage: 'Please complete the security verification challenge before continuing.',
     };
   }
 
