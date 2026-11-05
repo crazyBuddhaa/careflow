@@ -3227,13 +3227,13 @@ export class D1ChannelIntegrationService {
       ? this.classifyCustomerGreetingIntent(params.text)
       : { type: 'none' as const, cleanedQuestion: params.text };
 
+    // 1. Explicit Support Menu requests: /menu, /categories, /start, cc:menu:main, cc:cancel
     if (
       cb === 'cc:menu:main' ||
       cb === 'cc:cancel' ||
       lowerText === '/menu' ||
       lowerText === '/categories' ||
-      lowerText === '/start' ||
-      greetingIntent.type === 'pure_greeting'
+      lowerText === '/start'
     ) {
       await this.saveCustomerSessionState({
         identityId: identity.id,
@@ -3244,13 +3244,13 @@ export class D1ChannelIntegrationService {
       const menuHeader =
         cb === 'cc:cancel'
           ? `✖️ Current action cancelled.\n\nWelcome back to ${contextRow.org_name} Support! How can we help you today?`
-          : greetingIntent.type === 'pure_greeting' || lowerText === '/start'
+          : lowerText === '/start'
             ? this.formatPersonalizedCustomerWelcome({
                 customerDisplayName: params.displayName,
                 businessName: contextRow.org_name,
                 welcomeMessageTemplate: tgConfig.welcomeMessage,
                 supportCategories: tgConfig.supportCategories,
-                isConversationalGreeting: greetingIntent.type === 'pure_greeting',
+                isConversationalGreeting: false,
               })
             : `🏠 ${contextRow.org_name} Support Menu\n\nChoose a support category below or type your question in your own words:`;
 
@@ -3267,6 +3267,74 @@ export class D1ChannelIntegrationService {
         mode: 'customer',
         organizationId,
         conversationId: activeConv?.id,
+        replyText,
+      };
+    }
+
+    // 2. Natural Casual Greetings ("Hi", "Hello", "Hey", "Good morning", "How are you?")
+    // Acts the same as the web bot: sends a friendly, casual greeting WITHOUT dumping the command menu or inline keyboards!
+    if (greetingIntent.type === 'pure_greeting') {
+      const firstName =
+        params.displayName
+          .trim()
+          .split(/\s+/)[0]
+          ?.replace(/[^a-zA-Z0-9\u00C0-\u024F'-]/g, '') || 'there';
+
+      const template = (tgConfig.welcomeMessage || '').trim();
+      let casualGreeting: string;
+
+      if (
+        template &&
+        !template.includes('Available Support Topics') &&
+        !template.includes('Choose an option') &&
+        !template.includes('Ask a question below or choose')
+      ) {
+        casualGreeting = template
+          .replace(/\{(name|first_name|customer_name)\}/gi, firstName)
+          .replace(/\{(business|business_name|company)\}/gi, contextRow.org_name);
+      } else {
+        casualGreeting = `Hi there! How can ${contextRow.org_name} help you today?`;
+      }
+
+      await this.saveCustomerSessionState({
+        identityId: identity.id,
+        telegramUserId: params.telegramUserId,
+        state: { step: 'other_enquiry', updatedAt: now },
+      });
+
+      activeConv = await this.ensureOrAppendCustomerConversation({
+        organizationId,
+        displayName: params.displayName,
+        email: identity.email || syntheticEmail,
+        telegramUserId: params.telegramUserId,
+        telegramChatId: params.telegramChatId,
+        identityId: identity.id,
+        activeConv,
+        category: tgConfig.supportCategories[0] || 'General Support',
+        subject: params.text.slice(0, 90),
+        messageBody: params.text,
+        targetStatus: ConversationStatus.Open,
+        priority: EscalationPriority.Normal,
+        externalMessageId: params.externalMessageId,
+      });
+
+      activeConv = await this.workspaceRepo.replyToConversation({
+        organizationId,
+        conversationId: activeConv.id,
+        senderName: `${contextRow.org_name} Assistant`,
+        senderType: MessageSenderType.Bot,
+        body: casualGreeting,
+        nextStatus: ConversationStatus.Open,
+      });
+
+      // No inline keyboard attached: keeps chat clean and casual like the web bot!
+      const replyText = await sendCustomerOutput(casualGreeting);
+      return {
+        handled: true,
+        deduplicated: false,
+        mode: 'customer',
+        organizationId,
+        conversationId: activeConv.id,
         replyText,
       };
     }
@@ -3903,24 +3971,14 @@ export class D1ChannelIntegrationService {
       const { availableCount } = await this.countAvailableAgentsForOrg(organizationId);
       const honestAgentStatus =
         availableCount > 0
-          ? activeConv.assignedAgentName
-            ? `Your conversation has been assigned to ${activeConv.assignedAgentName} and our team has been notified.`
-            : `Our support team has been notified and an available specialist will reply here shortly.`
+          ? `A specialist will reply here shortly.`
           : `No human support agents are currently online (${
               portalSettings.supportHours ? `Operating hours: ${portalSettings.supportHours}` : 'currently offline'
-            }). Your request and full conversation history have been placed in ${contextRow.org_name}'s support queue so a specialist can respond as soon as they are available.`;
-
-      const kbPrefix =
-        !explicitHumanRequest &&
-        botAnswer?.reply &&
-        botAnswer.resolutionLayer !== 'human-escalation'
-          ? `${botAnswer.reply}\n\n`
-          : '';
+            }). A specialist will reply as soon as they are available.`;
 
       replyText =
-        `${securityWarningPrefix}${greetingPrefix}${kbPrefix}🤝 Your conversation (${activeConv.id}) has been escalated to ${contextRow.org_name}'s human support team.\n` +
-        `${honestAgentStatus}\n` +
-        `${tgConfig.offlineMessage}`;
+        `${securityWarningPrefix}${greetingPrefix}` +
+        `Your conversation has been escalated to ${contextRow.org_name}'s human support team. ${honestAgentStatus}`;
     } else {
       const contextPrefix =
         isProductIssueSubmission && sessionState.selectedProduct
@@ -3932,7 +3990,7 @@ export class D1ChannelIntegrationService {
       replyText =
         `${securityWarningPrefix}${greetingPrefix}${contextPrefix}` +
         (botAnswer?.reply ??
-          `Thank you for contacting ${contextRow.org_name}. Tap "👤 Speak to an Agent" or type /human if you would like a support specialist to join this chat.`);
+          `Thank you for contacting ${contextRow.org_name}. How can we help you today?`);
     }
 
     // Record bot response inside the unified conversation timeline
@@ -3945,18 +4003,8 @@ export class D1ChannelIntegrationService {
       nextStatus: targetStatus,
     });
 
-    const footerMarkup = shouldEscalate
-      ? {
-          inline_keyboard: [
-            [
-              { text: '🏠 Main Menu', callback_data: 'cc:menu:main' },
-              { text: '🆕 Start New Enquiry', callback_data: 'cc:conv:new' },
-            ],
-          ],
-        }
-      : this.buildNavigationFooterKeyboard('cc:menu:main', tgConfig.allowHumanEscalation);
-
-    await sendCustomerOutput(replyText, footerMarkup);
+    // Send without bot feature buttons on regular chat / answers / escalations to match web bot experience
+    await sendCustomerOutput(replyText);
 
     if (shouldEscalate && tgConfig.notifyAssignedAgentOnTelegram) {
       await this.notifyLinkedAgentsOfEscalation({

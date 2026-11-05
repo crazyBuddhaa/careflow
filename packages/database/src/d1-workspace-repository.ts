@@ -823,9 +823,88 @@ export class D1WorkspaceRepository {
       )
     ) {
       return {
-        reply: `Certainly. Use the "Send to Human Support" button right below to share your details with ${portal.branding.displayName}'s team—your conversation context will be included automatically.`,
+        reply: `Your conversation has been escalated to ${portal.branding.displayName}'s human support team. A specialist will reply here shortly.`,
         resolutionLayer: 'human-escalation',
         suggestEscalation: true,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    // 1b. Conversational Casual Chat & Pleasantries (Natural chat parity with web bot)
+    if (
+      /^(?:hi+|hello+|hey+|howdy|hola|greetings|yo|sup|good\s*(?:morning|afternoon|evening|day)|hi\s+there|hello\s+there|hey\s+there)[!.?,\s]*$/i.test(
+        questionLower
+      )
+    ) {
+      return {
+        reply: `Hi there! How can ${portal.branding.displayName} help you today?`,
+        resolutionLayer: 'business-rules',
+        suggestEscalation: false,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    if (
+      /^(?:thanks?|thank\s+you|thank\s+you\s+so\s+much|thanks\s+a\s+lot|many\s+thanks|much\s+appreciated|appreciate\s+it|cheers)[!.?,\s]*$/i.test(
+        questionLower
+      )
+    ) {
+      return {
+        reply: `You're very welcome! Feel free to ask if you need help with anything else.`,
+        resolutionLayer: 'business-rules',
+        suggestEscalation: false,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    if (
+      /^(?:how\s+are\s+you(?:\s+doing)?|how\s+is\s+it\s+going|hows\s+it\s+going|how\s+are\s+things|how\s+do\s+you\s+do)[!.?,\s]*$/i.test(
+        questionLower
+      )
+    ) {
+      return {
+        reply: `I'm doing well, thank you! How can I assist you with ${portal.branding.displayName} today?`,
+        resolutionLayer: 'business-rules',
+        suggestEscalation: false,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    if (
+      /^(?:ok|okay|k|cool|great|awesome|perfect|sounds\s+good|got\s+it|understood|alright|fine)[!.?,\s]*$/i.test(
+        questionLower
+      )
+    ) {
+      return {
+        reply: `Great! Let me know whenever you need assistance.`,
+        resolutionLayer: 'business-rules',
+        suggestEscalation: false,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    if (
+      /^(?:bye|goodbye|bye\s+bye|see\s+ya|see\s+you|have\s+a\s+great\s+day|have\s+a\s+nice\s+day|take\s+care)[!.?,\s]*$/i.test(
+        questionLower
+      )
+    ) {
+      return {
+        reply: `Goodbye! Have a great day and feel free to reach out anytime.`,
+        resolutionLayer: 'business-rules',
+        suggestEscalation: false,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    if (
+      /^(?:who\s+are\s+you|what\s+are\s+you|what\s+can\s+you\s+do|who\s+made\s+you|what\s+is\s+your\s+name)[!.?,\s]*$/i.test(
+        questionLower
+      )
+    ) {
+      return {
+        reply: `I'm ${portal.branding.displayName}'s support assistant. You can ask me questions about our services or account, or I can connect you directly with a specialist.`,
+        resolutionLayer: 'business-rules',
+        suggestEscalation: false,
         suggestedTopic: portal.categories[0]?.title ?? 'General Support',
       };
     }

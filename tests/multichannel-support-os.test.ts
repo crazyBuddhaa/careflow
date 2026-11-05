@@ -1230,9 +1230,30 @@ describe('CustomCare Unified Multi-Channel Support OS (Phases 2–11)', () => {
         'Sending "Hi" to the sub-bot must greet the customer by their Telegram first name and use the business welcome message'
       );
       const subBotOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
-      assert.ok(
+      assert.equal(
         subBotOutbound.replyMarkup,
-        'Natural greeting "Hi" must also present the interactive support category buttons'
+        undefined,
+        'Natural greeting "Hi" must not spam command menu buttons, keeping chat casual like the web bot'
+      );
+
+      // Verify the menu is kept available when explicitly requested via /menu
+      const menuRes = await ctx.channelService.processTelegramSubBotWebhookUpdate({
+        integrationId: tgInt.id,
+        update: {
+          update_id: 70015,
+          message: {
+            message_id: 7015,
+            from: { id: 444555, first_name: 'Amaka', last_name: 'Okafor', username: 'amaka_ng' },
+            chat: { id: 444555, type: 'private' },
+            text: '/menu',
+          },
+        },
+      });
+      assert.equal(menuRes.handled, true);
+      const menuOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
+      assert.ok(
+        menuOutbound.replyMarkup,
+        'Explicit /menu request must present the interactive support category buttons'
       );
 
       // 6e. Customer sends a combined greeting + question ("Hello, how fast is CD Express delivery in Lagos?")
