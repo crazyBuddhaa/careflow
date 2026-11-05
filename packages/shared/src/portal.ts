@@ -4,10 +4,16 @@ import {
   MessageSenderType,
   SupportChannel,
   UserRole,
+  type AccountRegistrationMode,
+  type AgentAccessMode,
   type BusinessOnboardingStatus,
   type ChannelIntegrationCategory,
   type ChannelIntegrationLifecycleStatus,
+  type MembershipLifecycleStatus,
   type MessageDeliveryStatus,
+  type WorkspaceAuditLogRecord,
+  type WorkspaceInvitationRecord,
+  type WorkspacePermissionKey,
 } from './types';
 
 export type PortalIconKey = 'wallet' | 'compass' | 'user-check' | 'help-circle';
@@ -362,11 +368,17 @@ export interface WorkspaceAgentRecord {
   id: string;
   organizationId: string;
   userId?: string | null;
+  agentIdentityId?: string | null;
+  membershipId?: string | null;
   displayName: string;
   email: string;
-  role: UserRole.Agent | UserRole.Supervisor | UserRole.Admin;
+  role: UserRole.Owner | UserRole.Admin | UserRole.Supervisor | UserRole.Agent | UserRole.Viewer;
+  department?: string;
   specialty: string;
   availability: AgentAvailability;
+  membershipStatus?: MembershipLifecycleStatus;
+  accessMode?: AgentAccessMode;
+  permissions?: WorkspacePermissionKey[];
   activeConversations: number;
   telegramLinked?: boolean;
   telegramUsername?: string | null;
@@ -460,3 +472,110 @@ export interface OnboardingProgressReport {
   steps: OnboardingStepItemStatus[];
   lastSavedAt: string;
 }
+
+export interface PlatformAdminBusinessItem {
+  id: string;
+  slug: string;
+  name: string;
+  country: string;
+  industry: string;
+  website: string;
+  onboardingStatus: BusinessOnboardingStatus;
+  onboardingStep: number;
+  isActive: boolean;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  totalAgents: number;
+  totalConversations: number;
+  openConversations: number;
+  publishedArticles: number;
+  publishedFaqs: number;
+  telegramConnected: boolean;
+  createdAt: string;
+}
+
+export interface PlatformAdminUserItem {
+  id: string;
+  email: string;
+  fullName: string;
+  accountType: AccountRegistrationMode;
+  isPersonalAccount: boolean;
+  emailVerified: boolean;
+  mfaEnabled: boolean;
+  isPlatformAdmin: boolean;
+  workspaceCount: number;
+  activeSessions: number;
+  createdAt: string;
+}
+
+export interface PlatformAdminAgentIdentityItem {
+  id: string;
+  email: string;
+  displayName: string;
+  userId?: string | null;
+  emailVerified: boolean;
+  accessMode: AgentAccessMode;
+  status: 'active' | 'suspended' | 'revoked';
+  workspaceCount: number;
+  createdAt: string;
+}
+
+export interface PlatformAdminRateLimitItem {
+  bucketKey: string;
+  attemptCount: number;
+  windowStartedAt: string;
+  blockedUntil?: string | null;
+  updatedAt: string;
+}
+
+export interface PlatformAdminWebhookEventItem {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  channelType: string;
+  externalEventId: string;
+  eventSummary: string;
+  status: string;
+  errorDetail?: string | null;
+  processedAt: string;
+}
+
+export interface PlatformAdminOverviewDto {
+  stats: {
+    totalBusinesses: number;
+    publishedBusinesses: number;
+    activeBusinesses: number;
+    totalUsers: number;
+    personalAccounts: number;
+    businessManagedAgents: number;
+    pendingInvitations: number;
+    totalConversations: number;
+    openConversations: number;
+    activeSessions: number;
+  };
+  centralTelegramBot: {
+    botUsername: string;
+    tokenConfigured: boolean;
+    secretConfigured: boolean;
+    businessOnboardingOnHold: boolean;
+    connectedWorkspaceChannels: number;
+  };
+  businesses: PlatformAdminBusinessItem[];
+  users: PlatformAdminUserItem[];
+  agentIdentities: PlatformAdminAgentIdentityItem[];
+  recentInvitations: WorkspaceInvitationRecord[];
+  recentAuditLogs: WorkspaceAuditLogRecord[];
+  recentSecurityEvents: Array<{
+    id: string;
+    userId: string | null;
+    organizationId: string | null;
+    eventType: string;
+    ipAddress: string;
+    userAgent: string;
+    metadata: Record<string, unknown>;
+    createdAt: string;
+  }>;
+  recentWebhookEvents: PlatformAdminWebhookEventItem[];
+  rateLimitBuckets: PlatformAdminRateLimitItem[];
+}
+

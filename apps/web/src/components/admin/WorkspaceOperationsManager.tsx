@@ -14,6 +14,11 @@ import {
   Bookmark,
   History,
   UserCheck,
+  Mail,
+  Copy,
+  ShieldAlert,
+  RotateCcw,
+  Ban,
 } from 'lucide-react';
 import {
   ConversationStatus,
@@ -27,6 +32,7 @@ import {
   type WorkspaceAnalyticsSummary,
   type WorkspaceConversationItem,
   type WorkspaceCustomerRecord,
+  type WorkspaceInvitationRecord,
 } from '@careflow/shared';
 
 export type OperationsSubView = 'conversations' | 'customers' | 'agents' | 'analytics';
@@ -96,10 +102,20 @@ export function WorkspaceOperationsManager({
   const [customerSearch, setCustomerSearch] = useState('');
   const [loadingCustomers, setLoadingCustomers] = useState(false);
 
-  // Agents state
+  // Agents & Invitations state
   const [agents, setAgents] = useState<WorkspaceAgentRecord[]>([]);
+  const [invitations, setInvitations] = useState<WorkspaceInvitationRecord[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [agentFormOpen, setAgentFormOpen] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<
+    UserRole.Agent | UserRole.Supervisor | UserRole.Admin | UserRole.Viewer
+  >(UserRole.Agent);
+  const [inviteDepartment, setInviteDepartment] = useState('Customer Support');
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [issuedInviteUrl, setIssuedInviteUrl] = useState<string | null>(null);
+
   const [agentName, setAgentName] = useState('');
   const [agentEmail, setAgentEmail] = useState('');
   const [agentRole, setAgentRole] = useState<
@@ -198,13 +214,26 @@ export function WorkspaceOperationsManager({
     setLoadingAgents(true);
     setErrorBanner(null);
     try {
-      const res = await fetch('/api/admin/agents', { cache: 'no-store' });
+      const [res, invRes] = await Promise.all([
+        fetch('/api/admin/agents', { cache: 'no-store' }),
+        fetch('/api/admin/invitations', { cache: 'no-store' }),
+      ]);
       const body = (await res.json()) as ApiResponse<WorkspaceAgentRecord[]>;
       if (!body.ok) {
         setErrorBanner(body.error.message);
         return;
       }
       setAgents(body.data);
+
+      const invBody = (await invRes.json()) as ApiResponse<
+        WorkspaceInvitationRecord[] | { invitations: WorkspaceInvitationRecord[] }
+      >;
+      if (invBody.ok) {
+        const list = Array.isArray(invBody.data)
+          ? invBody.data
+          : invBody.data.invitations ?? [];
+        setInvitations(list);
+      }
     } catch {
       setErrorBanner('Unable to load support specialists.');
     } finally {
@@ -448,6 +477,93 @@ export function WorkspaceOperationsManager({
       }
     } catch {
       setErrorBanner('Unable to remove specialist.');
+    }
+  }
+
+  async function handleInviteAgentSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setSendingInvite(true);
+    setErrorBanner(null);
+    setIssuedInviteUrl(null);
+    try {
+      const res = await fetch('/api/admin/invitations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail.trim().toLowerCase(),
+          role: inviteRole,
+          department: inviteDepartment.trim() || 'Customer Support',
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<{
+        invitation: WorkspaceInvitationRecord;
+        inviteUrl?: string;
+        invitationUrl?: string;
+        emailDelivery?: { sent?: boolean };
+      }>;
+      if (!body.ok) {
+        setErrorBanner(body.error.message);
+        return;
+      }
+      setIssuedInviteUrl(body.data.invitationUrl || body.data.inviteUrl || null);
+      setInviteEmail('');
+      showFeedback(
+        body.data.emailDelivery?.sent
+          ? `Sent single-use workspace invitation email to ${body.data.invitation.email}.`
+          : `Created single-use invitation link for ${body.data.invitation.email}. Copy and share the link below.`
+      );
+      await loadAgents();
+    } catch {
+      setErrorBanner('Unable to create workspace invitation.');
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
+  async function handleRevokeInvitation(invitationId: string, emailAddr: string) {
+    try {
+      const res = await fetch(
+        `/api/admin/invitations?id=${encodeURIComponent(invitationId)}`,
+        { method: 'DELETE' }
+      );
+      const body = (await res.json()) as ApiResponse<{ revoked: boolean }>;
+      if (!body.ok) {
+        setErrorBanner(body.error.message);
+        return;
+      }
+      showFeedback(`Revoked invitation for ${emailAddr}.`);
+      await loadAgents();
+    } catch {
+      setErrorBanner('Unable to revoke invitation.');
+    }
+  }
+
+  async function handleAgentLifecycleAction(
+    agentId: string,
+    lifecycleAction: 'suspend' | 'reactivate' | 'revoke',
+    displayName: string
+  ) {
+    try {
+      const res = await fetch(`/api/admin/agents/${encodeURIComponent(agentId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lifecycleAction }),
+      });
+      const body = (await res.json()) as ApiResponse<WorkspaceAgentRecord>;
+      if (!body.ok) {
+        setErrorBanner(body.error.message);
+        return;
+      }
+      const actionVerb =
+        lifecycleAction === 'suspend'
+          ? 'Suspended'
+          : lifecycleAction === 'reactivate'
+            ? 'Reactivated'
+            : 'Revoked';
+      showFeedback(`${actionVerb} workspace access for ${displayName}.`);
+      await loadAgents();
+    } catch {
+      setErrorBanner('Unable to update member lifecycle status.');
     }
   }
 
@@ -1275,34 +1391,196 @@ export function WorkspaceOperationsManager({
       )}
 
       {/* =====================================================================
-          3. SUPPORT AGENTS & SPECIALISTS
+          3. SUPPORT AGENTS, INVITATIONS & ACCESS LIFECYCLE
       ====================================================================== */}
       {activeSubView === 'agents' && (
         <div className="space-y-6">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <p className="text-xs font-semibold text-teal-700">
-                Operations · {organizationName}
+                Team Management · {organizationName}
               </p>
               <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
-                Human Support Specialists
+                Support Team &amp; Agent Invitations
               </h1>
               <p className="mt-1 text-sm text-slate-600">
-                Manage specialist roles, queue availability, Telegram Agent connection status, and
-                escalation routing for {organizationName}.
+                Invite employees with time-limited single-use links (Business-Managed or Personal
+                CustomCare Account) and manage workspace access lifecycle.
               </p>
             </div>
             {(currentUserRole === UserRole.Owner || currentUserRole === UserRole.Admin) && (
-              <button
-                type="button"
-                onClick={() => setAgentFormOpen(true)}
-                className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl whitespace-nowrap self-start sm:self-auto cursor-pointer"
-              >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                <span>Add Specialist</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteModalOpen((v) => !v);
+                    setAgentFormOpen(false);
+                    setIssuedInviteUrl(null);
+                  }}
+                  className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 rounded-xl whitespace-nowrap cursor-pointer shadow-2xs"
+                >
+                  <Mail className="w-4 h-4" aria-hidden="true" />
+                  <span>Invite Agent</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgentFormOpen((v) => !v);
+                    setInviteModalOpen(false);
+                  }}
+                  className="inline-flex items-center gap-2 py-2.5 px-4 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 rounded-xl whitespace-nowrap cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" aria-hidden="true" />
+                  <span>Add Roster Entry</span>
+                </button>
+              </div>
             )}
           </div>
+
+          {/* INVITE AGENT MODAL / DRAWER */}
+          {inviteModalOpen && (
+            <form
+              onSubmit={handleInviteAgentSubmit}
+              className="rounded-2xl border border-teal-200 bg-white p-6 space-y-5 shadow-xs"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700">
+                    Single-Use 72-Hour Invitation Token
+                  </span>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Invite Agent to {organizationName}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInviteModalOpen(false)}
+                  aria-label="Close invite form"
+                  className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Invited employees do not need to create a personal CustomCare account unless they
+                choose to. By default, accepting this invitation activates a{' '}
+                <strong>Business-Managed Agent</strong> profile scoped strictly to{' '}
+                <strong>{organizationName}</strong>.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label
+                    htmlFor="inv-email"
+                    className="block text-xs font-semibold text-slate-700"
+                  >
+                    Agent Email Address <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    id="inv-email"
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="agent@company.com"
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="inv-role"
+                    className="block text-xs font-semibold text-slate-700"
+                  >
+                    Assigned Role <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    id="inv-role"
+                    value={inviteRole}
+                    onChange={(e) =>
+                      setInviteRole(
+                        e.target.value as
+                          | UserRole.Agent
+                          | UserRole.Supervisor
+                          | UserRole.Admin
+                          | UserRole.Viewer
+                      )
+                    }
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
+                  >
+                    <option value={UserRole.Agent}>Support Agent</option>
+                    <option value={UserRole.Supervisor}>Supervisor / Senior Agent</option>
+                    <option value={UserRole.Admin}>Workspace Administrator</option>
+                    <option value={UserRole.Viewer}>Viewer (Read-Only)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="inv-dept"
+                    className="block text-xs font-semibold text-slate-700"
+                  >
+                    Department / Team (Optional)
+                  </label>
+                  <input
+                    id="inv-dept"
+                    type="text"
+                    value={inviteDepartment}
+                    onChange={(e) => setInviteDepartment(e.target.value)}
+                    placeholder="e.g. Technical Support, Billing"
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {issuedInviteUrl && (
+                <div className="rounded-xl border border-teal-200 bg-teal-50/70 p-4 space-y-2">
+                  <div className="text-xs font-bold text-teal-900">
+                    Single-Use Invitation Link Generated (Expires in 72 hours):
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={issuedInviteUrl}
+                      className="flex-1 rounded-lg border border-teal-200 bg-white px-3 py-2 text-xs font-mono text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                          void navigator.clipboard.writeText(issuedInviteUrl);
+                          showFeedback('Copied invitation link to clipboard.');
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 py-2 px-3 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Link</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setInviteModalOpen(false)}
+                  className="py-2 px-4 text-xs font-semibold text-slate-600 cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingInvite || !inviteEmail.trim()}
+                  className="py-2 px-5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 rounded-xl cursor-pointer"
+                >
+                  {sendingInvite ? 'Sending Invitation...' : 'Generate & Send Invitation'}
+                </button>
+              </div>
+            </form>
+          )}
 
           {agentFormOpen && (
             <form
@@ -1413,6 +1691,75 @@ export function WorkspaceOperationsManager({
             </form>
           )}
 
+          {/* PENDING & RECENT WORKSPACE INVITATIONS */}
+          {invitations.length > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white overflow-x-auto">
+              <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Workspace Invitations ({invitations.length})
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Time-limited, single-use agent invitations for {organizationName}
+                  </p>
+                </div>
+              </div>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
+                    <th className="py-3 px-5">Invited Email</th>
+                    <th className="py-3 px-5">Assigned Role &amp; Team</th>
+                    <th className="py-3 px-5">Status</th>
+                    <th className="py-3 px-5">Expires</th>
+                    <th className="py-3 px-5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {invitations.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-slate-50/70">
+                      <td className="py-3 px-5 font-semibold text-slate-900">{inv.email}</td>
+                      <td className="py-3 px-5 text-slate-600">
+                        <span className="font-semibold text-slate-800 uppercase">{inv.role}</span>
+                        {inv.department ? ` · ${inv.department}` : ''}
+                      </td>
+                      <td className="py-3 px-5">
+                        <span
+                          className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
+                            inv.status === 'pending'
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                              : inv.status === 'accepted'
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {inv.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-5 font-mono text-slate-500">
+                        {formatDateTime(inv.expiresAt)}
+                      </td>
+                      <td className="py-3 px-5 text-right">
+                        {inv.status === 'pending' &&
+                          (currentUserRole === UserRole.Owner ||
+                            currentUserRole === UserRole.Admin) && (
+                            <button
+                              type="button"
+                              onClick={() => void handleRevokeInvitation(inv.id, inv.email)}
+                              className="inline-flex items-center gap-1 font-bold text-rose-700 hover:underline cursor-pointer"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              <span>Revoke</span>
+                            </button>
+                          )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* TEAM ROSTER & LIFECYCLE CONTROLS */}
           <div className="rounded-2xl border border-slate-200 bg-white overflow-x-auto">
             {loadingAgents ? (
               <div className="p-8 space-y-3">
@@ -1429,71 +1776,156 @@ export function WorkspaceOperationsManager({
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
-                    <th className="py-3.5 px-5">Specialist</th>
-                    <th className="py-3.5 px-5">Role &amp; Specialty</th>
+                    <th className="py-3.5 px-5">Specialist &amp; Access Model</th>
+                    <th className="py-3.5 px-5">Role &amp; Department</th>
+                    <th className="py-3.5 px-5">Membership Status</th>
                     <th className="py-3.5 px-5">Telegram App</th>
                     <th className="py-3.5 px-5 text-right">Active Load</th>
                     <th className="py-3.5 px-5">Availability</th>
-                    <th className="py-3.5 px-5 text-right">Action</th>
+                    <th className="py-3.5 px-5 text-right">Lifecycle &amp; Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
-                  {agents.map((agt) => (
-                    <tr key={agt.id} className="hover:bg-slate-50/70">
-                      <td className="py-3.5 px-5">
-                        <p className="font-semibold text-slate-900">{agt.displayName}</p>
-                        <p className="text-xs text-slate-500">{agt.email}</p>
-                      </td>
-                      <td className="py-3.5 px-5 text-xs text-slate-600">
-                        <span className="font-semibold text-slate-800">
-                          {agt.role.charAt(0).toUpperCase() + agt.role.slice(1)}
-                        </span>{' '}
-                        · {agt.specialty}
-                      </td>
-                      <td className="py-3.5 px-5 text-xs">
-                        {agt.telegramLinked ? (
-                          <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 font-semibold">
-                            {agt.telegramUsername ? `@${agt.telegramUsername}` : 'Linked'}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">Not Linked</span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-5 text-right font-mono tabular-nums text-slate-900">
-                        {agt.activeConversations}
-                      </td>
-                      <td className="py-3.5 px-5">
-                        <select
-                          aria-label={`Availability for ${agt.displayName}`}
-                          value={agt.availability}
-                          onChange={(e) =>
-                            handleAgentAvailabilityChange(
-                              agt.id,
-                              e.target.value as AgentAvailability
-                            )
-                          }
-                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800 focus:border-blue-600 focus:outline-none"
-                        >
-                          <option value="available">Available</option>
-                          <option value="busy">Busy</option>
-                          <option value="offline">Offline</option>
-                        </select>
-                      </td>
-                      <td className="py-3.5 px-5 text-right">
-                        {(currentUserRole === UserRole.Owner ||
-                          currentUserRole === UserRole.Admin) && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveAgent(agt.id, agt.displayName)}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:underline cursor-pointer"
+                  {agents.map((agt) => {
+                    const memberStatus = agt.membershipStatus || 'active';
+                    const accessMode = agt.accessMode || 'business_managed';
+                    return (
+                      <tr key={agt.id} className="hover:bg-slate-50/70">
+                        <td className="py-3.5 px-5">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-slate-900">{agt.displayName}</p>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                accessMode === 'personal_account'
+                                  ? 'bg-indigo-50 text-indigo-800 border border-indigo-200'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {accessMode === 'personal_account'
+                                ? 'Personal Account'
+                                : 'Business-Managed'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500">{agt.email}</p>
+                        </td>
+                        <td className="py-3.5 px-5 text-xs text-slate-600">
+                          <span className="font-semibold text-slate-800">
+                            {agt.role.charAt(0).toUpperCase() + agt.role.slice(1)}
+                          </span>{' '}
+                          · {agt.department || agt.specialty}
+                        </td>
+                        <td className="py-3.5 px-5 text-xs">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              memberStatus === 'active'
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : memberStatus === 'suspended'
+                                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                  : 'bg-rose-50 text-rose-800 border border-rose-200'
+                            }`}
                           >
-                            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                            <span>Remove</span>
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                            {memberStatus}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-5 text-xs">
+                          {agt.telegramLinked ? (
+                            <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 font-semibold">
+                              {agt.telegramUsername ? `@${agt.telegramUsername}` : 'Linked'}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Not Linked</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-5 text-right font-mono tabular-nums text-slate-900">
+                          {agt.activeConversations}
+                        </td>
+                        <td className="py-3.5 px-5">
+                          <select
+                            aria-label={`Availability for ${agt.displayName}`}
+                            disabled={memberStatus !== 'active'}
+                            value={agt.availability}
+                            onChange={(e) =>
+                              handleAgentAvailabilityChange(
+                                agt.id,
+                                e.target.value as AgentAvailability
+                              )
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800 focus:border-blue-600 focus:outline-none disabled:opacity-50"
+                          >
+                            <option value="available">Available</option>
+                            <option value="busy">Busy</option>
+                            <option value="offline">Offline</option>
+                          </select>
+                        </td>
+                        <td className="py-3.5 px-5 text-right">
+                          {(currentUserRole === UserRole.Owner ||
+                            currentUserRole === UserRole.Admin) && (
+                            <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                              {memberStatus === 'active' && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleAgentLifecycleAction(
+                                      agt.id,
+                                      'suspend',
+                                      agt.displayName
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:underline cursor-pointer"
+                                  title="Temporarily suspend workspace access"
+                                >
+                                  <ShieldAlert className="w-3.5 h-3.5" />
+                                  <span>Suspend</span>
+                                </button>
+                              )}
+                              {memberStatus === 'suspended' && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleAgentLifecycleAction(
+                                      agt.id,
+                                      'reactivate',
+                                      agt.displayName
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:underline cursor-pointer"
+                                  title="Restore workspace access"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>Reactivate</span>
+                                </button>
+                              )}
+                              {memberStatus !== 'revoked' && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleAgentLifecycleAction(
+                                      agt.id,
+                                      'revoke',
+                                      agt.displayName
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700 hover:underline cursor-pointer"
+                                  title="Permanently revoke membership while preserving history"
+                                >
+                                  <Ban className="w-3.5 h-3.5" />
+                                  <span>Revoke</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveAgent(agt.id, agt.displayName)}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-red-700 cursor-pointer"
+                                title="Delete roster record"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

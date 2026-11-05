@@ -1,12 +1,12 @@
 import React, { Suspense } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { CAREFLOW_NAME } from '@careflow/shared';
+import { CAREFLOW_LOGO_ICON_PATH, CAREFLOW_NAME } from '@careflow/shared';
 import { WorkspaceLoginForm } from '@/components/WorkspaceLoginForm';
 
 export const metadata: Metadata = {
   title: 'Workspace Sign In — CustomCare',
-  description: 'Sign in to manage your business support workspace on CustomCare.',
+  description: 'Sign in to manage your business support workspace or agent dashboard on CustomCare.',
 };
 
 export default function LoginPage() {
@@ -16,9 +16,14 @@ export default function LoginPage() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
           <Link
             href="/"
-            className="text-xl font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2.5 text-xl font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
-            {CAREFLOW_NAME}
+            <img
+              src={CAREFLOW_LOGO_ICON_PATH}
+              alt={`${CAREFLOW_NAME} logo`}
+              className="w-8 h-8 rounded-lg object-contain"
+            />
+            <span>.CUSTOMCARE</span>
           </Link>
           <nav className="hidden sm:flex items-center gap-6 text-sm font-semibold text-slate-600">
             <Link href="/#what-we-do" className="hover:text-slate-900 whitespace-nowrap">
@@ -38,12 +43,12 @@ export default function LoginPage() {
             href="/onboarding"
             className="py-2 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors whitespace-nowrap shrink-0"
           >
-            Get Started
+            Register Account
           </Link>
         </div>
       </header>
 
-      <main className="flex-1 flex items-center justify-center px-6 py-16">
+      <main className="flex-1 flex flex-col items-center justify-center px-6 py-14 gap-8">
         <Suspense
           fallback={
             <div className="max-w-md w-full rounded-2xl border border-slate-200 bg-white p-8 space-y-4">
@@ -54,6 +59,18 @@ export default function LoginPage() {
         >
           <WorkspaceLoginForm />
         </Suspense>
+
+        <div className="flex flex-wrap items-center justify-center gap-5 text-xs font-semibold text-slate-500">
+          <Link href="/privacy" className="hover:text-slate-900">
+            Privacy Policy
+          </Link>
+          <Link href="/terms" className="hover:text-slate-900">
+            Terms of Use
+          </Link>
+          <Link href="/compliance" className="hover:text-slate-900">
+            Security &amp; Compliance
+          </Link>
+        </div>
       </main>
     </div>
   );

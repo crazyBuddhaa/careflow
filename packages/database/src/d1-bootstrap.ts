@@ -43,7 +43,27 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     `ALTER TABLE users ADD COLUMN mfa_recovery_codes_json TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE users ADD COLUMN mfa_verified_at TEXT`,
     `ALTER TABLE users ADD COLUMN password_changed_at TEXT`,
+    `ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'business'`,
+    `ALTER TABLE users ADD COLUMN is_platform_admin INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN is_personal_account INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE organization_members ADD COLUMN agent_identity_id TEXT`,
+    `ALTER TABLE organization_members ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
+    `ALTER TABLE organization_members ADD COLUMN membership_status TEXT NOT NULL DEFAULT 'active'`,
+    `ALTER TABLE organization_members ADD COLUMN department TEXT NOT NULL DEFAULT 'Support'`,
+    `ALTER TABLE organization_members ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE organization_members ADD COLUMN invited_by_user_id TEXT`,
+    `ALTER TABLE organization_members ADD COLUMN joined_at TEXT`,
+    `ALTER TABLE organization_members ADD COLUMN suspended_at TEXT`,
+    `ALTER TABLE organization_members ADD COLUMN revoked_at TEXT`,
+    `ALTER TABLE organization_members ADD COLUMN departed_at TEXT`,
+    `ALTER TABLE agent_identities ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
+    `ALTER TABLE auth_sessions ADD COLUMN agent_identity_id TEXT`,
+    `ALTER TABLE auth_sessions ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'personal_account'`,
     `ALTER TABLE support_agents ADD COLUMN user_id TEXT`,
+    `ALTER TABLE support_agents ADD COLUMN agent_identity_id TEXT`,
+    `ALTER TABLE support_agents ADD COLUMN department TEXT NOT NULL DEFAULT 'Support'`,
+    `ALTER TABLE support_agents ADD COLUMN membership_status TEXT NOT NULL DEFAULT 'active'`,
+    `ALTER TABLE support_agents ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE support_conversations ADD COLUMN customer_identity_id TEXT`,
     `ALTER TABLE support_conversations ADD COLUMN source_channel_ref TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE support_conversations ADD COLUMN assigned_agent_id TEXT`,
@@ -289,6 +309,76 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
   }
 
   const now = new Date().toISOString();
+
+  // Upgrade support_agents CHECK constraint if pre-existing table only allowed ('agent', 'supervisor', 'admin')
+  try {
+    const agtMeta = await db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'support_agents'`)
+      .first<{ sql: string }>();
+    if (agtMeta?.sql && !agtMeta.sql.includes("'viewer'")) {
+      await db.prepare(`PRAGMA foreign_keys = OFF`).run();
+      await db
+        .prepare(
+          `CREATE TABLE support_agents_v2 (
+            id TEXT PRIMARY KEY NOT NULL,
+            organization_id TEXT NOT NULL,
+            user_id TEXT,
+            agent_identity_id TEXT,
+            display_name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'agent' CHECK (role IN ('owner', 'admin', 'supervisor', 'agent', 'viewer')),
+            department TEXT NOT NULL DEFAULT 'Support',
+            specialty TEXT NOT NULL DEFAULT 'General Support',
+            availability TEXT NOT NULL DEFAULT 'available' CHECK (availability IN ('available', 'busy', 'offline')),
+            membership_status TEXT NOT NULL DEFAULT 'active',
+            permissions_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+            UNIQUE (organization_id, email)
+          )`
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO support_agents_v2
+             (id, organization_id, user_id, agent_identity_id, display_name, email, role, department, specialty, availability, membership_status, permissions_json, created_at, updated_at)
+           SELECT id, organization_id, user_id, agent_identity_id, display_name, email, role, COALESCE(department, 'Support'), specialty, availability, COALESCE(membership_status, 'active'), COALESCE(permissions_json, '[]'), created_at, updated_at
+           FROM support_agents`
+        )
+        .run();
+      await db.prepare(`DROP TABLE support_agents`).run();
+      await db.prepare(`ALTER TABLE support_agents_v2 RENAME TO support_agents`).run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_support_agents_org ON support_agents (organization_id, availability, display_name)`
+        )
+        .run();
+      await db.prepare(`PRAGMA foreign_keys = ON`).run();
+    }
+  } catch {
+    // Table already upgraded
+  }
+
+  // Ensure internal Agent Hub organization row exists (is_active = 0) so standalone registered agents
+  // with 0 business workspaces can hold valid D1 sessions without violating foreign keys.
+  await db
+    .prepare(
+      `INSERT INTO organizations (id, slug, name, country, industry, onboarding_status, is_active, created_at, updated_at)
+       VALUES ('org_customcare_agent_hub', 'customcare-agent-hub', 'CustomCare Agent Hub', 'United States', 'Customer Support', 'incomplete', 0, ?, ?)
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(now, now)
+    .run();
+
+  // Promote primary owner emails to platform super-admin automatically
+  await db
+    .prepare(
+      `UPDATE users
+       SET is_platform_admin = 1
+       WHERE LOWER(email) IN ('asuracorps@gmail.com', 'admin@getcustomcare.xyz')`
+    )
+    .run();
 
   for (const org of DEFAULT_TENANTS) {
     await db

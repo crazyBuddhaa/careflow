@@ -82,6 +82,99 @@ export async function POST(request: Request) {
     const repo = await getWorkspaceRepository();
 
     try {
+      if (input.registrationRole === 'agent') {
+        const agentResult = await repo.registerAgentAccount({
+          fullName: input.fullName,
+          email: input.email,
+          password: input.password,
+          specialty: input.specialty,
+          department: input.department,
+          requireEmailVerification: true,
+          ipAddress,
+          userAgent,
+        });
+
+        let targetOrgId = agentResult.activeMembership.organizationId;
+        let targetOrgName = agentResult.activeMembership.organizationName;
+        let targetOrgSlug = agentResult.activeMembership.organizationSlug;
+        let targetRole = agentResult.activeMembership.role;
+        let d1SessionId = '';
+        let d1RawSessionToken = '';
+
+        // If the agent also provided an invitation token during registration, accept it right away
+        if (input.invitationToken && input.invitationToken.trim().length >= 8) {
+          const accepted = await authService.acceptWorkspaceInvitation({
+            rawToken: input.invitationToken.trim(),
+            email: input.email,
+            displayName: input.fullName,
+            password: input.password,
+            accessMode: 'personal_account',
+            consentToLinkPersonalAccount: true,
+            ipAddress,
+            userAgent,
+          });
+          targetOrgId = accepted.membership.organizationId;
+          targetOrgName = accepted.membership.organizationName;
+          targetOrgSlug = accepted.membership.organizationSlug;
+          targetRole = accepted.membership.role;
+        }
+
+        const d1Session = await authService.createSession({
+          userId: agentResult.user.id,
+          organizationId: targetOrgId,
+          mfaVerified: false,
+          ipAddress,
+          userAgent,
+        });
+        d1SessionId = d1Session.sessionId;
+        d1RawSessionToken = d1Session.rawSessionToken;
+
+        const emailDelivery = await sendEmailVerificationMessage(
+          {
+            to: agentResult.user.email,
+            fullName: agentResult.user.fullName,
+            rawToken: agentResult.verificationToken,
+          },
+          undefined,
+          runtimeEnv
+        );
+
+        const token = createSignedAdminSessionToken({
+          userId: agentResult.user.id,
+          email: agentResult.user.email,
+          userName: agentResult.user.fullName,
+          organizationId: targetOrgId,
+          organizationName: targetOrgName,
+          organizationSlug: targetOrgSlug,
+          role: targetRole,
+          sessionId: d1SessionId,
+          sessionToken: d1RawSessionToken,
+          emailVerified: agentResult.user.emailVerified,
+          mfaEnabled: false,
+        });
+
+        const cookieStore = await cookies();
+        cookieStore.set(ADMIN_SESSION_COOKIE_NAME, token, getAdminCookieOptions());
+
+        return jsonApiSuccess(
+          {
+            user: agentResult.user,
+            organization: {
+              id: targetOrgId,
+              slug: targetOrgSlug,
+              name: targetOrgName,
+              role: targetRole,
+              country: 'Global',
+              industry: 'Customer Support',
+              onboardingStatus: 'published',
+            },
+            emailDelivery,
+            redirectUrl: redirectCheck.sanitizedUrl,
+          },
+          201
+        );
+      }
+
       const result = await repo.registerUserAndFirstBusiness({
         fullName: input.fullName,
         email: input.email,

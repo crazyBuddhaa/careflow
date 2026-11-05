@@ -27,11 +27,31 @@ export const metadata: Metadata = {
   title: 'CustomCare — Smarter Support. Better Experiences.',
   description:
     'CustomCare helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
+  icons: {
+    icon: [
+      {
+        url: '/assets/aistudio/Black_White_Minimalist_Simple_Modern_Bold_Letter_Q_Atelier_Logo_20261104_000821_1_12ad5e9f.png',
+        type: 'image/png',
+      },
+      { url: '/favicon.png', type: 'image/png' },
+    ],
+    shortcut: '/favicon.png',
+    apple:
+      '/assets/aistudio/Black_White_Minimalist_Simple_Modern_Bold_Letter_Q_Atelier_Logo_20261104_000821_1_12ad5e9f.png',
+  },
   openGraph: {
     title: 'CustomCare — Smarter Support. Better Experiences.',
     description:
       'CustomCare helps businesses deliver faster, smarter customer support through intelligent assistance, organized knowledge and seamless human handoff.',
     type: 'website',
+    images: [
+      {
+        url: '/assets/aistudio/Black_White_Minimalist_Simple_Modern_Bold_Letter_Q_Atelier_Logo_20261104_000639_0000_84dc5aab.png',
+        width: 1200,
+        height: 1200,
+        alt: '.CUSTOMCARE — Smarter Support. Better Experiences.',
+      },
+    ],
   },
 };
 

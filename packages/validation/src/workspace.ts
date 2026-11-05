@@ -216,18 +216,84 @@ export const PublicWidgetMessageSchema = z.object({
   idempotencyKey: z.string().trim().max(120).optional(),
 });
 
+export const WorkspacePermissionKeySchema = z.enum([
+  'conversations:view',
+  'conversations:reply',
+  'conversations:assign',
+  'customers:view',
+  'knowledge:view',
+  'knowledge:edit',
+  'channels:manage',
+  'team:invite',
+  'team:manage',
+  'settings:manage',
+  'analytics:view',
+]);
+
 export const CreateAgentSchema = z.object({
   displayName: z.string().trim().min(2).max(100),
   email: z.string().trim().email().max(160),
   role: z.enum([UserRole.Agent, UserRole.Supervisor, UserRole.Admin]),
+  department: z.string().trim().max(100).optional().default(''),
   specialty: z.string().trim().min(2).max(120),
   availability: z.enum(['available', 'busy', 'offline']).default('available'),
+  permissions: z.array(WorkspacePermissionKeySchema).max(20).optional(),
 });
 
 export const UpdateAgentSchema = z.object({
   role: z.enum([UserRole.Agent, UserRole.Supervisor, UserRole.Admin]).optional(),
+  department: z.string().trim().max(100).optional(),
   specialty: z.string().trim().min(2).max(120).optional(),
   availability: z.enum(['available', 'busy', 'offline']).optional(),
+  permissions: z.array(WorkspacePermissionKeySchema).max(20).optional(),
+  lifecycleAction: z.enum(['suspend', 'reactivate', 'revoke']).optional(),
+});
+
+export const CreateWorkspaceInvitationSchema = z.object({
+  email: z.string().trim().email('Please provide a valid agent email address.').max(160),
+  role: z.enum([UserRole.Admin, UserRole.Supervisor, UserRole.Agent, UserRole.Viewer]),
+  department: z.string().trim().max(100).optional().default(''),
+  permissions: z.array(WorkspacePermissionKeySchema).max(20).optional(),
+  expiresInHours: z.number().int().min(1).max(168).optional().default(72),
+});
+
+export const AcceptWorkspaceInvitationSchema = z.object({
+  displayName: z.string().trim().min(2, 'Please enter your display name.').max(100),
+  password: z.string().min(8, 'Password must be at least 8 characters.').max(128).optional(),
+  accessMode: z.enum(['business_managed', 'personal_account']).default('business_managed'),
+  consentToLinkPersonalAccount: z.boolean().optional().default(false),
+});
+
+export const StrongPasswordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters long.')
+  .max(128, 'Password must not exceed 128 characters.')
+  .regex(/[A-Za-z]/, 'Password must contain at least one letter.')
+  .regex(
+    /^(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
+    'Password must contain at least one number or special character.'
+  );
+
+export const LinkAgentIdentitySchema = z
+  .object({
+    fullName: z.string().trim().min(2).max(100).optional(),
+    password: StrongPasswordSchema.optional(),
+    confirmPassword: z.string().optional(),
+    consentConfirmed: z
+      .boolean()
+      .refine((v) => v === true, 'Explicit consent is required to link your agent identity to a personal CustomCare account.'),
+  })
+  .refine(
+    (data) => !data.password || data.password === data.confirmPassword,
+    {
+      message: 'Passwords do not match.',
+      path: ['confirmPassword'],
+    }
+  );
+
+export const LeaveWorkspaceSchema = z.object({
+  organizationId: z.string().trim().min(2).max(100),
+  confirmLeave: z.boolean().refine((v) => v === true, 'Please confirm that you want to leave this workspace.'),
 });
 
 export const CreateDemoConversationSchema = z.object({
@@ -250,16 +316,6 @@ export const BusinessCategoryEnum = z.enum([
   'Logistics and transportation',
   'Other',
 ]);
-
-export const StrongPasswordSchema = z
-  .string()
-  .min(8, 'Password must be at least 8 characters long.')
-  .max(128, 'Password must not exceed 128 characters.')
-  .regex(/[A-Za-z]/, 'Password must contain at least one letter.')
-  .regex(
-    /^(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
-    'Password must contain at least one number or special character.'
-  );
 
 export const RegisterUserAccountSchema = z
   .object({
@@ -286,6 +342,7 @@ export const RegisterInitialBusinessSchema = z.object({
 
 export const FullRegistrationSchema = z
   .object({
+    registrationRole: z.enum(['business', 'agent']).optional().default('business'),
     fullName: z.string().trim().min(2, 'Full name must be at least 2 characters.').max(100),
     email: z.string().trim().email('Please provide a valid email address.').max(160),
     password: StrongPasswordSchema,
@@ -293,17 +350,31 @@ export const FullRegistrationSchema = z
     agreeToTerms: z
       .boolean()
       .refine((val) => val === true, 'You must accept the Terms of Service and Privacy Policy.'),
-    businessName: z.string().trim().min(2, 'Business name must be at least 2 characters.').max(90),
-    industry: z.string().trim().min(2, 'Please select or enter an industry.').max(60),
-    country: z.string().trim().min(2, 'Please select a country of operation.').max(80),
+    businessName: z.string().trim().max(90).optional().default(''),
+    industry: z.string().trim().max(60).optional().default('Technology'),
+    country: z.string().trim().max(80).optional().default('United States'),
     website: z.string().trim().max(180).optional().default(''),
+    specialty: z.string().trim().max(120).optional().default('Customer Support'),
+    department: z.string().trim().max(100).optional().default('Support Operations'),
+    invitationToken: z.string().trim().max(256).optional(),
     turnstileToken: z.string().trim().max(2048).optional(),
     redirectTo: z.string().trim().max(300).optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match.',
     path: ['confirmPassword'],
-  });
+  })
+  .refine(
+    (data) =>
+      data.registrationRole === 'agent' ||
+      (data.businessName.trim().length >= 2 &&
+        data.industry.trim().length >= 2 &&
+        data.country.trim().length >= 2),
+    {
+      message: 'Business name, industry, and country are required when registering a business.',
+      path: ['businessName'],
+    }
+  );
 
 export const UserLoginSchema = z.object({
   email: z.string().trim().email('Please enter a valid email.').max(160),

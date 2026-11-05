@@ -26,8 +26,10 @@ import {
   X,
   ShieldCheck,
   Share2,
+  ShieldAlert,
 } from 'lucide-react';
 import {
+  CAREFLOW_LOGO_ICON_PATH,
   CAREFLOW_NAME,
   type AdminModuleSectionKey,
   type ApiResponse,
@@ -397,8 +399,16 @@ export function BusinessAdminShell() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4 px-4 sm:px-6 py-3 sm:py-3.5">
           {/* Left: Breadcrumbs & Workspace Switcher */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <Link href="/" className="text-base sm:text-lg font-bold tracking-tight text-slate-900 shrink-0">
-              {CAREFLOW_NAME}
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-slate-900 shrink-0"
+            >
+              <img
+                src={CAREFLOW_LOGO_ICON_PATH}
+                alt={`${CAREFLOW_NAME} logo`}
+                className="w-7 h-7 rounded-lg object-contain"
+              />
+              <span>.CUSTOMCARE</span>
             </Link>
             <span className="text-slate-300 shrink-0" aria-hidden="true">
               /
@@ -472,21 +482,23 @@ export function BusinessAdminShell() {
                         })}
                       </div>
 
-                      {isBusinessManager && (
-                        <div className="pt-1 border-t border-slate-100">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSwitcherOpen(false);
-                              setCreateModalOpen(true);
-                            }}
-                            className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors cursor-pointer"
-                          >
-                            <Plus className="w-4 h-4" />
-                            <span>Create Another Business</span>
-                          </button>
-                        </div>
-                      )}
+                      <div className="pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSwitcherOpen(false);
+                            setCreateModalOpen(true);
+                          }}
+                          className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>
+                            {isBusinessManager
+                              ? 'Create Another Business'
+                              : 'Register a Business Workspace'}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}
@@ -497,20 +509,31 @@ export function BusinessAdminShell() {
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {sessionState?.authenticated && activeSession ? (
               <>
-                {activeSession.organizationSlug && (
+                {activeSession.isPlatformAdmin && (
                   <Link
-                    href={`/portal/${activeSession.organizationSlug}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hidden sm:inline-flex items-center gap-1.5 py-2 px-3 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors whitespace-nowrap shrink-0"
+                    href="/platform-admin"
+                    className="inline-flex items-center gap-1.5 py-2 px-3 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors whitespace-nowrap shrink-0"
                   >
-                    <span>Customer Portal</span>
-                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                    <ShieldAlert className="w-3.5 h-3.5 text-teal-400" aria-hidden="true" />
+                    <span className="hidden sm:inline">Platform Admin</span>
+                    <span className="sm:hidden">Admin</span>
                   </Link>
                 )}
+                {activeSession.organizationSlug &&
+                  activeSession.organizationId !== 'org_customcare_agent_hub' && (
+                    <Link
+                      href={`/portal/${activeSession.organizationSlug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hidden sm:inline-flex items-center gap-1.5 py-2 px-3 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors whitespace-nowrap shrink-0"
+                    >
+                      <span>Customer Portal</span>
+                      <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                    </Link>
+                  )}
                 <button
                   type="button"
                   onClick={handleSignOut}
@@ -532,14 +555,16 @@ export function BusinessAdminShell() {
         </div>
       </header>
 
-      {/* "Create Another Business" Modal */}
-      {createModalOpen && isBusinessManager && (
+      {/* "Create / Register a Business" Modal (Available to both Business Owners and Support Agents) */}
+      {createModalOpen && activeSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
           <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xl space-y-5">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-teal-600" />
-                <span>Create Another Business</span>
+                <span>
+                  {isBusinessManager ? 'Create Another Business' : 'Register a Business Workspace'}
+                </span>
               </h3>
               <button
                 type="button"
@@ -952,7 +977,7 @@ export function BusinessAdminShell() {
 
             {effectiveSelectedKey === 'overview' ? (
               <WorkspaceRoleOverview
-                key={`${activeSession.organizationId}:${activeSession.role}`}
+                key={`${activeSession.organizationId}:${activeSession.role}:${String(activeSession.isPersonalAccount)}`}
                 organizationId={activeSession.organizationId}
                 organizationName={activeSession.organizationName}
                 organizationSlug={activeSession.organizationSlug}
@@ -960,7 +985,12 @@ export function BusinessAdminShell() {
                 currentUserName={activeSession.userName || 'Support Member'}
                 currentUserEmail={activeSession.email || ''}
                 currentUserRole={activeSession.role}
+                isPersonalAccount={activeSession.isPersonalAccount !== false}
+                pendingInvitations={sessionState?.pendingInvitations ?? []}
+                workspaces={workspaces}
                 onNavigateSection={(sec) => setSelectedKey(sec)}
+                onOpenCreateBusinessModal={() => setCreateModalOpen(true)}
+                onSessionMutated={() => void loadSession()}
               />
             ) : effectiveSelectedKey === 'onboarding-guide' ? (
               <WorkspaceOnboardingGuide
@@ -1012,6 +1042,30 @@ export function BusinessAdminShell() {
           </main>
         </div>
       )}
+
+      <footer className="border-t border-slate-200 bg-white mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+          <div className="flex items-center gap-2 font-semibold text-slate-700">
+            <img
+              src={CAREFLOW_LOGO_ICON_PATH}
+              alt={`${CAREFLOW_NAME} icon`}
+              className="w-5 h-5 rounded object-contain"
+            />
+            <span>.CUSTOMCARE — Smarter Support. Better Experiences.</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 font-semibold">
+            <Link href="/privacy" className="hover:text-slate-900">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="hover:text-slate-900">
+              Terms of Use
+            </Link>
+            <Link href="/compliance" className="hover:text-slate-900">
+              Compliance Notes
+            </Link>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

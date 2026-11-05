@@ -2,12 +2,13 @@ import React from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
-import { CAREFLOW_NAME } from '@careflow/shared';
+import { CAREFLOW_LOGO_ICON_PATH, CAREFLOW_NAME } from '@careflow/shared';
 import { BusinessOnboardingFlow } from '@/components/BusinessOnboardingFlow';
 
 export const metadata: Metadata = {
-  title: 'Get Started — CustomCare',
-  description: 'Launch your branded customer support portal and workspace on CustomCare.',
+  title: 'Register Account — CustomCare',
+  description:
+    'Register as a Business or Support Agent on CustomCare to manage customer support, automate conversations, and collaborate across workspaces.',
 };
 
 export default function OnboardingPage() {
@@ -17,9 +18,14 @@ export default function OnboardingPage() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-8 px-6 py-4">
           <Link
             href="/"
-            className="text-xl font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2.5 text-xl font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
-            {CAREFLOW_NAME}
+            <img
+              src={CAREFLOW_LOGO_ICON_PATH}
+              alt={`${CAREFLOW_NAME} logo`}
+              className="w-8 h-8 rounded-lg object-contain"
+            />
+            <span>.CUSTOMCARE</span>
           </Link>
           <nav className="hidden sm:flex items-center gap-6 text-sm font-semibold text-slate-600">
             <Link href="/#what-we-do" className="hover:text-slate-900 whitespace-nowrap">
@@ -46,19 +52,22 @@ export default function OnboardingPage() {
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-12 sm:py-16">
         <div className="max-w-2xl mb-10">
-          <p className="text-xs font-semibold text-teal-700">{CAREFLOW_NAME} Workspace Setup</p>
+          <p className="text-xs font-semibold text-teal-700">
+            {CAREFLOW_NAME} Account &amp; Workspace Registration
+          </p>
           <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 text-balance">
-            Launch your dedicated support portal on CustomCare
+            Register as a Business or Support Agent on CustomCare
           </h1>
           <p className="mt-3 text-base text-slate-600 leading-relaxed">
-            Set up your branded customer support portal, organized knowledge base, and guided
-            assistant in minutes.
+            Choose whether you are launching a business support workspace or creating a personal
+            Support Agent account. You can always expand to the other role anytime from your web
+            dashboard.
           </p>
         </div>
 
         <BusinessOnboardingFlow />
 
-        <div className="mt-10">
+        <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 pt-6 text-xs text-slate-500">
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900"
@@ -66,6 +75,17 @@ export default function OnboardingPage() {
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
             <span>Back to {CAREFLOW_NAME}</span>
           </Link>
+          <div className="flex flex-wrap items-center gap-4 font-semibold">
+            <Link href="/privacy" className="hover:text-slate-900">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="hover:text-slate-900">
+              Terms of Use
+            </Link>
+            <Link href="/compliance" className="hover:text-slate-900">
+              Compliance Notes
+            </Link>
+          </div>
         </div>
       </main>
     </div>

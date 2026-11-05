@@ -1,9 +1,13 @@
 import {
   ConversationStatus,
+  DEFAULT_PERMISSIONS_BY_ROLE,
+  DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS,
   EscalationPriority,
   MessageSenderType,
   SupportChannel,
   UserRole,
+  type AccountRegistrationMode,
+  type AgentAccessMode,
   type AgentAvailability,
   type BusinessOnboardingStatus,
   type BusinessPortalConfig,
@@ -12,9 +16,11 @@ import {
   type ConversationActivityLogItem,
   type ConversationAttachmentRecord,
   type ExternalAiProviderKey,
+  type MembershipLifecycleStatus,
   type MessageDeliveryStatus,
   type OnboardingProgressReport,
   type OnboardingStepItemStatus,
+  type PlatformAdminOverviewDto,
   type PortalAccentTheme,
   type PortalAssistantResponseDto,
   type PortalFaqItem,
@@ -25,9 +31,12 @@ import {
   type UserWorkspaceMembership,
   type WorkspaceAgentRecord,
   type WorkspaceAnalyticsSummary,
+  type WorkspaceAuditLogRecord,
   type WorkspaceConversationItem,
   type WorkspaceCustomerRecord,
+  type WorkspaceInvitationRecord,
   type WorkspaceMessageItem,
+  type WorkspacePermissionKey,
 } from '@careflow/shared';
 import type { D1DatabaseLike } from './d1-types';
 import {
@@ -52,6 +61,7 @@ interface OrgRow {
   onboarding_step?: number;
   created_by_user_id?: string | null;
   is_active: number;
+  created_at?: string;
 }
 
 interface UserRow {
@@ -61,6 +71,9 @@ interface UserRow {
   password_hash: string;
   email_verified: number;
   mfa_enabled?: number;
+  account_type?: string;
+  is_personal_account?: number;
+  is_platform_admin?: number;
   created_at: string;
   updated_at: string;
 }
@@ -75,6 +88,10 @@ interface MemberJoinOrgRow {
   website: string | null;
   onboarding_status: string | null;
   onboarding_step: number | null;
+  membership_status?: string | null;
+  department?: string | null;
+  permissions_json?: string | null;
+  agent_identity_id?: string | null;
 }
 
 interface SettingsRow {
@@ -192,11 +209,14 @@ interface AgentRow {
   id: string;
   organization_id: string;
   user_id?: string | null;
+  agent_identity_id?: string | null;
   display_name: string;
   email: string;
   role: string;
+  department?: string;
   specialty: string;
   availability: string;
+  membership_status?: string;
   created_at: string;
 }
 
@@ -1806,7 +1826,18 @@ export class D1WorkspaceRepository {
       status: string;
     }
 
-    const [{ results: agentRows }, { results: openCounts }, { results: tgLinks }] =
+    interface MemberExtrasRow {
+      user_id: string;
+      email: string;
+      membership_status: string | null;
+      department: string | null;
+      permissions_json: string | null;
+      agent_identity_id: string | null;
+      is_personal_account: number | null;
+      access_mode: string | null;
+    }
+
+    const [{ results: agentRows }, { results: openCounts }, { results: tgLinks }, { results: memberExtras }] =
       await Promise.all([
         this.db
           .prepare(
@@ -1834,6 +1865,16 @@ export class D1WorkspaceRepository {
           )
           .bind(organizationId)
           .all<TgLinkJoinRow>(),
+        this.db
+          .prepare(
+            `SELECT om.user_id, u.email, om.membership_status, om.department, om.permissions_json, om.agent_identity_id, u.is_personal_account, ai.access_mode
+             FROM organization_members om
+             JOIN users u ON u.id = om.user_id
+             LEFT JOIN agent_identities ai ON ai.id = om.agent_identity_id OR LOWER(ai.email) = LOWER(u.email)
+             WHERE om.organization_id = ?`
+          )
+          .bind(organizationId)
+          .all<MemberExtrasRow>(),
       ]);
 
     const loadMap = new Map<string, number>();
@@ -1846,17 +1887,47 @@ export class D1WorkspaceRepository {
       tgByEmail.set(link.user_email.toLowerCase(), link);
     }
 
+    const memByEmail = new Map<string, MemberExtrasRow>();
+    for (const m of memberExtras) {
+      memByEmail.set(m.email.toLowerCase(), m);
+    }
+
     return agentRows.map((a) => {
-      const tg = tgByEmail.get(a.email.toLowerCase());
+      const emailKey = a.email.toLowerCase();
+      const tg = tgByEmail.get(emailKey);
+      const mem = memByEmail.get(emailKey);
+      let parsedPermissions: WorkspacePermissionKey[] = [];
+      if (mem?.permissions_json) {
+        try {
+          parsedPermissions = JSON.parse(mem.permissions_json) as WorkspacePermissionKey[];
+        } catch {
+          parsedPermissions = [];
+        }
+      }
+      const resolvedRole = (a.role as UserRole) || UserRole.Agent;
+      if (parsedPermissions.length === 0) {
+        parsedPermissions = DEFAULT_PERMISSIONS_BY_ROLE[resolvedRole] ?? DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent];
+      }
+
+      const accessMode: AgentAccessMode =
+        mem?.access_mode === 'business_managed' || mem?.is_personal_account === 0
+          ? 'business_managed'
+          : 'personal_account';
+
       return {
         id: a.id,
         organizationId: a.organization_id,
-        userId: a.user_id ?? tg?.user_id ?? null,
+        userId: a.user_id ?? mem?.user_id ?? tg?.user_id ?? null,
+        agentIdentityId: a.agent_identity_id ?? mem?.agent_identity_id ?? null,
         displayName: a.display_name,
         email: a.email,
         role: a.role as WorkspaceAgentRecord['role'],
+        department: a.department || mem?.department || '',
         specialty: a.specialty,
         availability: a.availability as AgentAvailability,
+        membershipStatus: ((a.membership_status || mem?.membership_status || 'active') as MembershipLifecycleStatus),
+        accessMode,
+        permissions: parsedPermissions,
         activeConversations: loadMap.get(a.display_name) ?? 0,
         telegramLinked: Boolean(tg),
         telegramUsername: tg?.telegram_username ?? null,
@@ -1871,13 +1942,16 @@ export class D1WorkspaceRepository {
       displayName: string;
       email: string;
       role: UserRole.Agent | UserRole.Supervisor | UserRole.Admin;
+      department?: string;
       specialty: string;
       availability: AgentAvailability;
+      permissions?: WorkspacePermissionKey[];
     }
   ): Promise<WorkspaceAgentRecord> {
     const now = new Date().toISOString();
     const id = createId('agt');
     const normalizedEmail = input.email.trim().toLowerCase();
+    const department = input.department?.trim() ?? '';
 
     const existingUser = await this.db
       .prepare(`SELECT id FROM users WHERE email = ?`)
@@ -1887,8 +1961,8 @@ export class D1WorkspaceRepository {
     await this.db
       .prepare(
         `INSERT INTO support_agents
-           (id, organization_id, user_id, display_name, email, role, specialty, availability, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, user_id, display_name, email, role, department, specialty, availability, membership_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
       )
       .bind(
         id,
@@ -1897,6 +1971,7 @@ export class D1WorkspaceRepository {
         input.displayName.trim(),
         normalizedEmail,
         input.role,
+        department,
         input.specialty.trim(),
         input.availability,
         now,
@@ -1905,16 +1980,24 @@ export class D1WorkspaceRepository {
       .run();
 
     if (existingUser) {
+      const permissionsJson = JSON.stringify(
+        input.permissions && input.permissions.length > 0
+          ? input.permissions
+          : DEFAULT_PERMISSIONS_BY_ROLE[input.role] ?? DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent]
+      );
       await this.db
         .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, is_active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 1, ?, ?)
+          `INSERT INTO organization_members (id, organization_id, user_id, role, department, permissions_json, membership_status, is_active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)
            ON CONFLICT (organization_id, user_id) DO UPDATE SET
              role = CASE WHEN organization_members.role = 'owner' THEN 'owner' ELSE excluded.role END,
+             department = excluded.department,
+             permissions_json = excluded.permissions_json,
+             membership_status = 'active',
              is_active = 1,
              updated_at = excluded.updated_at`
         )
-        .bind(createId('mem'), organizationId, existingUser.id, input.role, now, now)
+        .bind(createId('mem'), organizationId, existingUser.id, input.role, department, permissionsJson, now, now)
         .run();
     }
 
@@ -1931,8 +2014,10 @@ export class D1WorkspaceRepository {
       displayName?: string;
       email?: string;
       role?: UserRole.Agent | UserRole.Supervisor | UserRole.Admin;
+      department?: string;
       specialty?: string;
       availability?: AgentAvailability;
+      permissions?: WorkspacePermissionKey[];
     }
   ): Promise<WorkspaceAgentRecord> {
     const existing = await this.db
@@ -1947,17 +2032,19 @@ export class D1WorkspaceRepository {
     const now = new Date().toISOString();
     const nextRole = patch.role ?? existing.role;
     const nextEmail = patch.email ? patch.email.trim().toLowerCase() : existing.email;
+    const nextDepartment = patch.department !== undefined ? patch.department.trim() : (existing.department ?? '');
 
     await this.db
       .prepare(
         `UPDATE support_agents
-         SET display_name = ?, email = ?, role = ?, specialty = ?, availability = ?, updated_at = ?
+         SET display_name = ?, email = ?, role = ?, department = ?, specialty = ?, availability = ?, updated_at = ?
          WHERE id = ? AND organization_id = ?`
       )
       .bind(
         patch.displayName?.trim() || existing.display_name,
         nextEmail,
         nextRole,
+        nextDepartment,
         patch.specialty ?? existing.specialty,
         patch.availability ?? existing.availability,
         now,
@@ -1966,19 +2053,32 @@ export class D1WorkspaceRepository {
       )
       .run();
 
-    if (patch.role) {
+    if (patch.role || patch.department !== undefined || patch.permissions) {
       const targetUser = await this.db
         .prepare(`SELECT id FROM users WHERE email = ?`)
         .bind(nextEmail)
         .first<{ id: string }>();
       if (targetUser) {
+        const nextPermsJson = patch.permissions
+          ? JSON.stringify(patch.permissions)
+          : JSON.stringify(DEFAULT_PERMISSIONS_BY_ROLE[nextRole as UserRole] ?? DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent]);
         await this.db
           .prepare(
             `UPDATE organization_members
-             SET role = CASE WHEN role = 'owner' THEN 'owner' ELSE ? END, updated_at = ?
+             SET role = CASE WHEN role = 'owner' THEN 'owner' ELSE ? END,
+                 department = ?,
+                 permissions_json = COALESCE(?, permissions_json),
+                 updated_at = ?
              WHERE organization_id = ? AND user_id = ?`
           )
-          .bind(nextRole, now, organizationId, targetUser.id)
+          .bind(
+            nextRole,
+            nextDepartment,
+            patch.permissions ? nextPermsJson : null,
+            now,
+            organizationId,
+            targetUser.id
+          )
           .run();
       }
     }
@@ -2005,14 +2105,26 @@ export class D1WorkspaceRepository {
             .first<{ id: string }>();
 
       if (targetUser) {
-        // Revoke non-owner membership and any active Telegram agent link for this business
+        // Revoke non-owner membership, sessions, and any active Telegram agent link for this business
         await this.db
           .prepare(
             `UPDATE organization_members
-             SET is_active = CASE WHEN role = 'owner' THEN 1 ELSE 0 END, updated_at = ?
+             SET is_active = CASE WHEN role = 'owner' THEN 1 ELSE 0 END,
+                 membership_status = CASE WHEN role = 'owner' THEN 'active' ELSE 'revoked' END,
+                 revoked_at = CASE WHEN role = 'owner' THEN NULL ELSE ? END,
+                 updated_at = ?
              WHERE organization_id = ? AND user_id = ?`
           )
-          .bind(now, organizationId, targetUser.id)
+          .bind(now, now, organizationId, targetUser.id)
+          .run();
+
+        await this.db
+          .prepare(
+            `UPDATE auth_sessions
+             SET revoked_at = ?
+             WHERE user_id = ? AND organization_id = ? AND revoked_at IS NULL`
+          )
+          .bind(now, targetUser.id, organizationId)
           .run();
 
         await this.db
@@ -2168,26 +2280,55 @@ export class D1WorkspaceRepository {
   }> {
     const email = input.email.trim().toLowerCase();
     const existingUser = await this.db
-      .prepare(`SELECT id FROM users WHERE email = ?`)
+      .prepare(`SELECT id, is_personal_account FROM users WHERE email = ?`)
       .bind(email)
-      .first<{ id: string }>();
+      .first<{ id: string; is_personal_account: number }>();
 
-    if (existingUser) {
+    if (existingUser && Number(existingUser.is_personal_account ?? 1) === 1) {
       throw new Error('An account with this email address already exists. Please sign in.');
     }
 
     const nowMs = Date.now();
     const now = new Date(nowMs).toISOString();
-    const userId = `usr_${Math.random().toString(36).slice(2, 10)}`;
+    const userId = existingUser?.id ?? `usr_${Math.random().toString(36).slice(2, 10)}`;
     const passwordHash = hashPassword(input.password);
     const initialVerifiedFlag = input.requireEmailVerification ? 0 : 1;
+    const isSuperAdmin = (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email) ? 1 : 0;
 
+    if (existingUser) {
+      await this.db
+        .prepare(
+          `UPDATE users
+           SET full_name = ?, password_hash = ?, email_verified = MAX(email_verified, ?),
+               account_type = 'both', is_personal_account = 1, is_platform_admin = MAX(is_platform_admin, ?), updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(input.fullName.trim(), passwordHash, initialVerifiedFlag, isSuperAdmin, now, userId)
+        .run();
+    } else {
+      await this.db
+        .prepare(
+          `INSERT INTO users
+             (id, email, full_name, password_hash, email_verified, mfa_enabled, account_type, is_personal_account, is_platform_admin, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 0, 'business', 1, ?, ?, ?)`
+        )
+        .bind(userId, email, input.fullName.trim(), passwordHash, initialVerifiedFlag, isSuperAdmin, now, now)
+        .run();
+    }
+
+    // Ensure personal agent_identities record exists for cross-workspace use
+    const agentIdentityId = createId('aid');
     await this.db
       .prepare(
-        `INSERT INTO users (id, email, full_name, password_hash, email_verified, mfa_enabled, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?)`
+        `INSERT INTO agent_identities
+           (id, email, display_name, password_hash, email_verified, user_id, access_mode, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'personal_account', 'active', ?, ?)
+         ON CONFLICT (email) DO UPDATE SET
+           user_id = excluded.user_id,
+           access_mode = 'personal_account',
+           updated_at = excluded.updated_at`
       )
-      .bind(userId, email, input.fullName.trim(), passwordHash, initialVerifiedFlag, now, now)
+      .bind(agentIdentityId, email, input.fullName.trim(), passwordHash, initialVerifiedFlag, userId, now, now)
       .run();
 
     // Generate cryptographically random single-use email verification token (store only SHA-256 hash)
@@ -2209,7 +2350,7 @@ export class D1WorkspaceRepository {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 36);
-    if (!baseSlug || ['admin', 'api', 'login', 'onboarding', 'portals', 'www'].includes(baseSlug)) {
+    if (!baseSlug || ['admin', 'api', 'login', 'onboarding', 'portals', 'www', 'platform-admin', 'invite', 'privacy', 'terms', 'compliance'].includes(baseSlug)) {
       baseSlug = `biz-${Math.random().toString(36).slice(2, 6)}`;
     }
 
@@ -2247,13 +2388,14 @@ export class D1WorkspaceRepository {
 
     // Assign registering user as owner of the organization
     const memberId = `mem_${Math.random().toString(36).slice(2, 10)}`;
+    const ownerPermissions = JSON.stringify(DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Owner]);
     await this.db
       .prepare(
         `INSERT INTO organization_members
-          (id, organization_id, user_id, role, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, 'owner', 1, ?, ?)`
+          (id, organization_id, user_id, agent_identity_id, role, department, permissions_json, membership_status, is_active, joined_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'owner', 'Executive & Leadership', ?, 'active', 1, ?, ?, ?)`
       )
-      .bind(memberId, organizationId, userId, now, now)
+      .bind(memberId, organizationId, userId, agentIdentityId, ownerPermissions, now, now, now)
       .run();
 
     // Record account registration security event
@@ -2269,7 +2411,7 @@ export class D1WorkspaceRepository {
         organizationId,
         input.ipAddress ?? '',
         input.userAgent ?? '',
-        JSON.stringify({ businessName: input.businessName.trim() }),
+        JSON.stringify({ businessName: input.businessName.trim(), registrationRole: 'business' }),
         now
       )
       .run();
@@ -2312,10 +2454,10 @@ export class D1WorkspaceRepository {
     await this.db
       .prepare(
         `INSERT INTO support_agents
-          (id, organization_id, display_name, email, role, specialty, availability, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'admin', 'Primary Administrator', 'available', ?, ?)`
+          (id, organization_id, user_id, agent_identity_id, display_name, email, role, department, specialty, availability, membership_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'admin', 'Executive & Leadership', 'Primary Administrator', 'available', 'active', ?, ?)`
       )
-      .bind(agentId, organizationId, input.fullName.trim(), email, now, now)
+      .bind(agentId, organizationId, userId, agentIdentityId, input.fullName.trim(), email, now, now)
       .run();
 
     return {
@@ -2325,6 +2467,9 @@ export class D1WorkspaceRepository {
         fullName: input.fullName.trim(),
         emailVerified: Boolean(initialVerifiedFlag),
         mfaEnabled: false,
+        accountType: existingUser ? 'both' : 'business',
+        isPersonalAccount: true,
+        isPlatformAdmin: Boolean(isSuperAdmin),
         createdAt: now,
       },
       organization: {
@@ -2342,6 +2487,147 @@ export class D1WorkspaceRepository {
     };
   }
 
+  /**
+   * Registers an independent personal CustomCare Support Agent account without forcing them to create a business.
+   * If they already had a Business-Managed Agent identity for that email, upgrades it to a personal CustomCare account
+   * while preserving all existing workspace memberships and permissions.
+   */
+  async registerAgentAccount(input: {
+    fullName: string;
+    email: string;
+    password: string;
+    specialty?: string;
+    department?: string;
+    requireEmailVerification?: boolean;
+    ipAddress?: string;
+    userAgent?: string;
+  }): Promise<{
+    user: CareFlowUserRecord;
+    activeMembership: UserWorkspaceMembership;
+    workspaces: UserWorkspaceMembership[];
+    verificationToken: string;
+    verificationExpiresAt: string;
+  }> {
+    const email = input.email.trim().toLowerCase();
+    const existingUser = await this.db
+      .prepare(`SELECT id, is_personal_account, account_type FROM users WHERE email = ?`)
+      .bind(email)
+      .first<{ id: string; is_personal_account: number; account_type: string }>();
+
+    if (existingUser && Number(existingUser.is_personal_account ?? 1) === 1) {
+      throw new Error('An account with this email address already exists. Please sign in.');
+    }
+
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    const userId = existingUser?.id ?? `usr_${Math.random().toString(36).slice(2, 10)}`;
+    const passwordHash = hashPassword(input.password);
+    const initialVerifiedFlag = input.requireEmailVerification ? 0 : 1;
+    const isSuperAdmin = (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email) ? 1 : 0;
+
+    if (existingUser) {
+      await this.db
+        .prepare(
+          `UPDATE users
+           SET full_name = ?, password_hash = ?, email_verified = MAX(email_verified, ?),
+               account_type = 'agent', is_personal_account = 1, is_platform_admin = MAX(is_platform_admin, ?), updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(input.fullName.trim(), passwordHash, initialVerifiedFlag, isSuperAdmin, now, userId)
+        .run();
+    } else {
+      await this.db
+        .prepare(
+          `INSERT INTO users
+             (id, email, full_name, password_hash, email_verified, mfa_enabled, account_type, is_personal_account, is_platform_admin, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 0, 'agent', 1, ?, ?, ?)`
+        )
+        .bind(userId, email, input.fullName.trim(), passwordHash, initialVerifiedFlag, isSuperAdmin, now, now)
+        .run();
+    }
+
+    const agentIdentityId = createId('aid');
+    await this.db
+      .prepare(
+        `INSERT INTO agent_identities
+           (id, email, display_name, password_hash, email_verified, user_id, access_mode, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'personal_account', 'active', ?, ?)
+         ON CONFLICT (email) DO UPDATE SET
+           display_name = excluded.display_name,
+           password_hash = excluded.password_hash,
+           user_id = excluded.user_id,
+           access_mode = 'personal_account',
+           updated_at = excluded.updated_at`
+      )
+      .bind(agentIdentityId, email, input.fullName.trim(), passwordHash, initialVerifiedFlag, userId, now, now)
+      .run();
+
+    // Generate cryptographically random single-use email verification token
+    const { rawToken: verificationToken, tokenHash } = generateSecureToken(32);
+    const verificationExpiresAt = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
+
+    await this.db
+      .prepare(
+        `INSERT INTO auth_tokens (id, user_id, token_hash, token_type, expires_at, used_at, created_at)
+         VALUES (?, ?, ?, 'email_verification', ?, NULL, ?)`
+      )
+      .bind(createId('tok'), userId, tokenHash, verificationExpiresAt, now)
+      .run();
+
+    const workspaces = await this.getUserWorkspaces(userId);
+    const defaultHubMembership: UserWorkspaceMembership = {
+      organizationId: 'org_customcare_agent_hub',
+      organizationSlug: 'customcare-agent-hub',
+      organizationName: 'CustomCare Agent Hub',
+      role: UserRole.Agent,
+      country: 'Global',
+      industry: 'Customer Support',
+      website: '',
+      onboardingStatus: 'published',
+      onboardingStep: 7,
+      membershipStatus: 'active',
+      department: input.department?.trim() || 'Support Operations',
+      permissions: DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent],
+    };
+
+    const activeMembership = workspaces[0] ?? defaultHubMembership;
+
+    await this.db
+      .prepare(
+        `INSERT INTO auth_security_events
+           (id, user_id, organization_id, event_type, ip_address, user_agent, metadata_json, created_at)
+         VALUES (?, ?, ?, 'account_registered', ?, ?, ?, ?)`
+      )
+      .bind(
+        createId('sec'),
+        userId,
+        activeMembership.organizationId,
+        input.ipAddress ?? '',
+        input.userAgent ?? '',
+        JSON.stringify({ registrationRole: 'agent', specialty: input.specialty ?? '' }),
+        now
+      )
+      .run();
+
+    return {
+      user: {
+        id: userId,
+        email,
+        fullName: input.fullName.trim(),
+        emailVerified: Boolean(initialVerifiedFlag),
+        mfaEnabled: false,
+        accountType: 'agent',
+        isPersonalAccount: true,
+        isPlatformAdmin: Boolean(isSuperAdmin),
+        createdAt: now,
+      },
+      activeMembership,
+      workspaces,
+      verificationToken,
+      verificationExpiresAt,
+    };
+  }
+
   async authenticateUser(
     emailInput: string,
     passwordInput: string
@@ -2353,7 +2639,7 @@ export class D1WorkspaceRepository {
     const email = emailInput.trim().toLowerCase();
     const userRow = await this.db
       .prepare(
-        `SELECT id, email, full_name, password_hash, email_verified, mfa_enabled, created_at, updated_at
+        `SELECT id, email, full_name, password_hash, email_verified, mfa_enabled, account_type, is_personal_account, is_platform_admin, created_at, updated_at
          FROM users WHERE email = ?`
       )
       .bind(email)
@@ -2370,9 +2656,48 @@ export class D1WorkspaceRepository {
       return null;
     }
 
+    const isPersonalAccount = Number(userRow.is_personal_account ?? 1) === 1;
+    const isPlatformAdmin =
+      Number(userRow.is_platform_admin ?? 0) === 1 ||
+      (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email);
+
     const workspaces = await this.getUserWorkspaces(userRow.id);
     if (workspaces.length === 0) {
-      return null;
+      // Business-Managed Agents with no active workspace membership cannot sign in
+      if (!isPersonalAccount && !isPlatformAdmin) {
+        return null;
+      }
+      // Registered personal CustomCare agents can sign in to their Agent Hub even with 0 active workspaces
+      const hubMembership: UserWorkspaceMembership = {
+        organizationId: 'org_customcare_agent_hub',
+        organizationSlug: 'customcare-agent-hub',
+        organizationName: 'CustomCare Agent Hub',
+        role: UserRole.Agent,
+        country: 'Global',
+        industry: 'Customer Support',
+        website: '',
+        onboardingStatus: 'published',
+        onboardingStep: 7,
+        membershipStatus: 'active',
+        department: 'Support Operations',
+        permissions: DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent],
+      };
+
+      return {
+        user: {
+          id: userRow.id,
+          email: userRow.email,
+          fullName: userRow.full_name,
+          emailVerified: Boolean(userRow.email_verified),
+          mfaEnabled: Boolean(userRow.mfa_enabled),
+          accountType: (userRow.account_type as AccountRegistrationMode) || 'agent',
+          isPersonalAccount,
+          isPlatformAdmin,
+          createdAt: userRow.created_at,
+        },
+        activeMembership: hubMembership,
+        workspaces: [],
+      };
     }
 
     return {
@@ -2382,6 +2707,9 @@ export class D1WorkspaceRepository {
         fullName: userRow.full_name,
         emailVerified: Boolean(userRow.email_verified),
         mfaEnabled: Boolean(userRow.mfa_enabled),
+        accountType: (userRow.account_type as AccountRegistrationMode) || 'business',
+        isPersonalAccount,
+        isPlatformAdmin,
         createdAt: userRow.created_at,
       },
       activeMembership: workspaces[0],
@@ -2401,32 +2729,78 @@ export class D1WorkspaceRepository {
            o.industry,
            o.website,
            o.onboarding_status,
-           o.onboarding_step
+           o.onboarding_step,
+           om.membership_status,
+           om.department,
+           om.permissions_json,
+           om.agent_identity_id
          FROM organization_members om
          JOIN organizations o ON o.id = om.organization_id
-         WHERE om.user_id = ? AND om.is_active = 1 AND o.is_active = 1
+         WHERE om.user_id = ?
+           AND om.is_active = 1
+           AND COALESCE(om.membership_status, 'active') = 'active'
+           AND o.is_active = 1
          ORDER BY o.name ASC`
       )
       .bind(userId)
       .all<MemberJoinOrgRow>();
 
-    return results.map((r) => ({
-      organizationId: r.organization_id,
-      organizationSlug: r.slug,
-      organizationName: r.name,
-      role: (r.role as UserRole) || UserRole.Admin,
-      country: r.country ?? 'United States',
-      industry: r.industry ?? 'Technology',
-      website: r.website ?? '',
-      onboardingStatus: (r.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
-      onboardingStep: r.onboarding_step ?? 1,
-    }));
+    return results.map((r) => {
+      const role = (r.role as UserRole) || UserRole.Admin;
+      let permissions: WorkspacePermissionKey[] = DEFAULT_PERMISSIONS_BY_ROLE[role] ?? DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent];
+      if (r.permissions_json) {
+        try {
+          const parsed = JSON.parse(r.permissions_json) as WorkspacePermissionKey[];
+          if (Array.isArray(parsed) && parsed.length > 0) permissions = parsed;
+        } catch {
+          // fallback to role defaults
+        }
+      }
+      return {
+        organizationId: r.organization_id,
+        organizationSlug: r.slug,
+        organizationName: r.name,
+        role,
+        country: r.country ?? 'United States',
+        industry: r.industry ?? 'Technology',
+        website: r.website ?? '',
+        onboardingStatus: (r.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
+        onboardingStep: r.onboarding_step ?? 1,
+        membershipStatus: ((r.membership_status as MembershipLifecycleStatus) || 'active'),
+        department: r.department ?? '',
+        permissions,
+        agentIdentityId: r.agent_identity_id ?? null,
+      };
+    });
   }
 
   async getUserActiveMembership(
     userId: string,
     organizationId: string
   ): Promise<UserWorkspaceMembership | null> {
+    if (organizationId === 'org_customcare_agent_hub') {
+      const user = await this.db
+        .prepare(`SELECT id, is_personal_account, is_platform_admin FROM users WHERE id = ?`)
+        .bind(userId)
+        .first<{ id: string; is_personal_account: number; is_platform_admin: number }>();
+      if (user && (Number(user.is_personal_account ?? 1) === 1 || Number(user.is_platform_admin ?? 0) === 1)) {
+        return {
+          organizationId: 'org_customcare_agent_hub',
+          organizationSlug: 'customcare-agent-hub',
+          organizationName: 'CustomCare Agent Hub',
+          role: UserRole.Agent,
+          country: 'Global',
+          industry: 'Customer Support',
+          website: '',
+          onboardingStatus: 'published',
+          onboardingStep: 7,
+          membershipStatus: 'active',
+          department: 'Support Operations',
+          permissions: DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent],
+        };
+      }
+    }
+
     const row = await this.db
       .prepare(
         `SELECT
@@ -2438,26 +2812,49 @@ export class D1WorkspaceRepository {
            o.industry,
            o.website,
            o.onboarding_status,
-           o.onboarding_step
+           o.onboarding_step,
+           om.membership_status,
+           om.department,
+           om.permissions_json,
+           om.agent_identity_id
          FROM organization_members om
          JOIN organizations o ON o.id = om.organization_id
-         WHERE om.user_id = ? AND om.organization_id = ? AND om.is_active = 1 AND o.is_active = 1`
+         WHERE om.user_id = ?
+           AND om.organization_id = ?
+           AND om.is_active = 1
+           AND COALESCE(om.membership_status, 'active') = 'active'
+           AND o.is_active = 1`
       )
       .bind(userId, organizationId)
       .first<MemberJoinOrgRow>();
 
     if (!row) return null;
 
+    const role = (row.role as UserRole) || UserRole.Admin;
+    let permissions: WorkspacePermissionKey[] = DEFAULT_PERMISSIONS_BY_ROLE[role] ?? DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Agent];
+    if (row.permissions_json) {
+      try {
+        const parsed = JSON.parse(row.permissions_json) as WorkspacePermissionKey[];
+        if (Array.isArray(parsed) && parsed.length > 0) permissions = parsed;
+      } catch {
+        // fallback to role defaults
+      }
+    }
+
     return {
       organizationId: row.organization_id,
       organizationSlug: row.slug,
       organizationName: row.name,
-      role: (row.role as UserRole) || UserRole.Admin,
+      role,
       country: row.country ?? 'United States',
       industry: row.industry ?? 'Technology',
       website: row.website ?? '',
       onboardingStatus: (row.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
       onboardingStep: row.onboarding_step ?? 1,
+      membershipStatus: ((row.membership_status as MembershipLifecycleStatus) || 'active'),
+      department: row.department ?? '',
+      permissions,
+      agentIdentityId: row.agent_identity_id ?? null,
     };
   }
 
@@ -2471,7 +2868,7 @@ export class D1WorkspaceRepository {
     }
   ): Promise<UserWorkspaceMembership> {
     const user = await this.db
-      .prepare(`SELECT id, email, full_name FROM users WHERE id = ?`)
+      .prepare(`SELECT id, email, full_name, account_type FROM users WHERE id = ?`)
       .bind(userId)
       .first<UserRow>();
 
@@ -2486,7 +2883,7 @@ export class D1WorkspaceRepository {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 36);
-    if (!baseSlug || ['admin', 'api', 'login', 'onboarding', 'portals', 'www'].includes(baseSlug)) {
+    if (!baseSlug || ['admin', 'api', 'login', 'onboarding', 'portals', 'www', 'platform-admin', 'invite', 'privacy', 'terms', 'compliance'].includes(baseSlug)) {
       baseSlug = `biz-${Math.random().toString(36).slice(2, 6)}`;
     }
 
@@ -2522,14 +2919,26 @@ export class D1WorkspaceRepository {
       )
       .run();
 
+    // If user registered originally as 'agent', upgrade account_type to 'both' and ensure personal account is enabled
+    const nextAccountType = user.account_type === 'agent' ? 'both' : (user.account_type || 'business');
+    await this.db
+      .prepare(
+        `UPDATE users
+         SET account_type = ?, is_personal_account = 1, updated_at = ?
+         WHERE id = ?`
+      )
+      .bind(nextAccountType, now, userId)
+      .run();
+
     const memberId = `mem_${Math.random().toString(36).slice(2, 10)}`;
+    const ownerPermissions = JSON.stringify(DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Owner]);
     await this.db
       .prepare(
         `INSERT INTO organization_members
-          (id, organization_id, user_id, role, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, 'owner', 1, ?, ?)`
+          (id, organization_id, user_id, role, department, permissions_json, membership_status, is_active, joined_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'owner', 'Executive & Leadership', ?, 'active', 1, ?, ?, ?)`
       )
-      .bind(memberId, organizationId, userId, now, now)
+      .bind(memberId, organizationId, userId, ownerPermissions, now, now, now)
       .run();
 
     const portalConfig = buildDefaultPortalConfigForNewBusiness({
@@ -2554,6 +2963,25 @@ export class D1WorkspaceRepository {
       .bind(organizationId, JSON.stringify(portalConfig), now)
       .run();
 
+    // Seed initial knowledge category & owner specialist record
+    await this.db
+      .prepare(
+        `INSERT INTO knowledge_categories
+          (id, organization_id, slug, name, description, display_order, created_at, updated_at)
+         VALUES (?, ?, 'general', 'General Support', 'Core guidance and general information.', 10, ?, ?)`
+      )
+      .bind(createId('cat'), organizationId, now, now)
+      .run();
+
+    await this.db
+      .prepare(
+        `INSERT INTO support_agents
+          (id, organization_id, user_id, display_name, email, role, department, specialty, availability, membership_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'admin', 'Executive & Leadership', 'Primary Administrator', 'available', 'active', ?, ?)`
+      )
+      .bind(createId('agt'), organizationId, userId, user.full_name, user.email.toLowerCase(), now, now)
+      .run();
+
     return {
       organizationId,
       organizationSlug: finalSlug,
@@ -2564,6 +2992,9 @@ export class D1WorkspaceRepository {
       website,
       onboardingStatus: 'incomplete',
       onboardingStep: 1,
+      membershipStatus: 'active',
+      department: 'Executive & Leadership',
+      permissions: DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Owner],
     };
   }
 
@@ -2576,6 +3007,491 @@ export class D1WorkspaceRepository {
       throw new Error('You do not have active membership in this workspace.');
     }
     return membership;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Central CustomCare Platform Super-Admin Command Center
+   * ------------------------------------------------------------------------- */
+
+  async isUserPlatformAdmin(userId: string, email?: string): Promise<boolean> {
+    if (email && (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email.trim().toLowerCase())) {
+      return true;
+    }
+    const row = await this.db
+      .prepare(`SELECT email, is_platform_admin FROM users WHERE id = ?`)
+      .bind(userId)
+      .first<{ email: string; is_platform_admin: number }>();
+    if (!row) return false;
+    return (
+      Number(row.is_platform_admin ?? 0) === 1 ||
+      (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(row.email.toLowerCase())
+    );
+  }
+
+  async getPlatformAdminOverview(params: {
+    centralTelegramBotUsername: string;
+    centralTelegramTokenConfigured: boolean;
+    centralTelegramSecretConfigured: boolean;
+  }): Promise<PlatformAdminOverviewDto> {
+    const [
+      { results: orgRows },
+      { results: userRows },
+      { results: identityRows },
+      { results: inviteRows },
+      { results: auditRows },
+      { results: securityRows },
+      { results: webhookRows },
+      { results: rateLimitRows },
+      convAgg,
+      activeSessionsCount,
+      tgChannelCount,
+    ] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT
+             o.id, o.slug, o.name, o.country, o.industry, o.website, o.onboarding_status, o.onboarding_step, o.is_active, o.created_at,
+             u.email AS owner_email, u.full_name AS owner_name,
+             (SELECT COUNT(*) FROM support_agents sa WHERE sa.organization_id = o.id) AS total_agents,
+             (SELECT COUNT(*) FROM support_conversations sc WHERE sc.organization_id = o.id) AS total_conversations,
+             (SELECT COUNT(*) FROM support_conversations sc WHERE sc.organization_id = o.id AND sc.status NOT IN ('resolved', 'closed')) AS open_conversations,
+             (SELECT COUNT(*) FROM knowledge_articles ka WHERE ka.organization_id = o.id AND ka.status = 'published') AS published_articles,
+             (SELECT COUNT(*) FROM knowledge_faqs kf WHERE kf.organization_id = o.id AND kf.status = 'published') AS published_faqs,
+             (SELECT ci.status FROM channel_integrations ci WHERE ci.organization_id = o.id AND ci.channel = 'telegram' LIMIT 1) AS telegram_status
+           FROM organizations o
+           LEFT JOIN users u ON u.id = o.created_by_user_id
+           WHERE o.id != 'org_customcare_agent_hub'
+           ORDER BY o.created_at DESC`
+        )
+        .all<{
+          id: string;
+          slug: string;
+          name: string;
+          country: string | null;
+          industry: string | null;
+          website: string | null;
+          onboarding_status: string | null;
+          onboarding_step: number | null;
+          is_active: number;
+          created_at: string;
+          owner_email: string | null;
+          owner_name: string | null;
+          total_agents: number;
+          total_conversations: number;
+          open_conversations: number;
+          published_articles: number;
+          published_faqs: number;
+          telegram_status: string | null;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT
+             u.id, u.email, u.full_name, u.account_type, u.is_personal_account, u.is_platform_admin, u.email_verified, u.mfa_enabled, u.created_at,
+             (SELECT COUNT(*) FROM organization_members om WHERE om.user_id = u.id AND om.is_active = 1 AND om.organization_id != 'org_customcare_agent_hub') AS workspace_count,
+             (SELECT COUNT(*) FROM auth_sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL) AS active_sessions
+           FROM users u
+           ORDER BY u.created_at DESC
+           LIMIT 200`
+        )
+        .all<{
+          id: string;
+          email: string;
+          full_name: string;
+          account_type: string | null;
+          is_personal_account: number | null;
+          is_platform_admin: number | null;
+          email_verified: number;
+          mfa_enabled: number | null;
+          created_at: string;
+          workspace_count: number;
+          active_sessions: number;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT
+             ai.id, ai.email, ai.display_name, ai.access_mode, ai.email_verified, ai.user_id, ai.status, ai.created_at,
+             (SELECT COUNT(*) FROM organization_members om JOIN users u ON u.id = om.user_id WHERE LOWER(u.email) = LOWER(ai.email) AND om.is_active = 1 AND om.organization_id != 'org_customcare_agent_hub') AS workspace_count
+           FROM agent_identities ai
+           ORDER BY ai.created_at DESC
+           LIMIT 200`
+        )
+        .all<{
+          id: string;
+          email: string;
+          display_name: string;
+          access_mode: string;
+          email_verified: number;
+          user_id: string | null;
+          status: string;
+          created_at: string;
+          workspace_count: number;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT i.*, o.name AS organization_name, o.slug AS organization_slug
+           FROM workspace_invitations i
+           JOIN organizations o ON o.id = i.organization_id
+           ORDER BY i.created_at DESC
+           LIMIT 100`
+        )
+        .all<{
+          id: string;
+          organization_id: string;
+          organization_name: string;
+          organization_slug: string;
+          email: string;
+          role: string;
+          department: string;
+          permissions_json: string;
+          invited_by_user_id: string | null;
+          invited_by_name: string;
+          status: string;
+          expires_at: string;
+          accepted_at: string | null;
+          revoked_at: string | null;
+          created_at: string;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT * FROM workspace_audit_logs
+           ORDER BY created_at DESC
+           LIMIT 100`
+        )
+        .all<{
+          id: string;
+          organization_id: string | null;
+          actor_user_id: string | null;
+          actor_email: string;
+          action: string;
+          target_type: string;
+          target_id: string;
+          metadata_json: string;
+          ip_address: string;
+          created_at: string;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT * FROM auth_security_events
+           ORDER BY created_at DESC
+           LIMIT 100`
+        )
+        .all<{
+          id: string;
+          user_id: string | null;
+          organization_id: string | null;
+          event_type: string;
+          ip_address: string;
+          user_agent: string;
+          metadata_json: string;
+          created_at: string;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT w.*, o.name AS organization_name
+           FROM webhook_event_logs w
+           LEFT JOIN organizations o ON o.id = w.organization_id
+           ORDER BY w.processed_at DESC
+           LIMIT 80`
+        )
+        .all<{
+          id: string;
+          provider: string;
+          idempotency_key: string;
+          organization_id: string | null;
+          organization_name: string | null;
+          event_type: string;
+          status: string;
+          error_message: string | null;
+          processed_at: string;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT key AS bucket_key, attempt_count, window_started_at, locked_until AS blocked_until, updated_at
+           FROM auth_rate_limits
+           ORDER BY updated_at DESC
+           LIMIT 50`
+        )
+        .all<{
+          bucket_key: string;
+          attempt_count: number;
+          window_started_at: string;
+          blocked_until: string | null;
+          updated_at: string;
+        }>(),
+      this.db
+        .prepare(
+          `SELECT
+             COUNT(*) AS total,
+             SUM(CASE WHEN status NOT IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS open_cnt
+           FROM support_conversations`
+        )
+        .first<{ total: number; open_cnt: number }>(),
+      this.db
+        .prepare(`SELECT COUNT(*) AS cnt FROM auth_sessions WHERE revoked_at IS NULL`)
+        .first<{ cnt: number }>(),
+      this.db
+        .prepare(`SELECT COUNT(*) AS cnt FROM channel_integrations WHERE channel = 'telegram' AND status IN ('connected', 'active')`)
+        .first<{ cnt: number }>(),
+    ]);
+
+    const businesses = orgRows.map((o) => ({
+      id: o.id,
+      slug: o.slug,
+      name: o.name,
+      country: o.country ?? 'United States',
+      industry: o.industry ?? 'Technology',
+      website: o.website ?? '',
+      onboardingStatus: (o.onboarding_status as BusinessOnboardingStatus) ?? 'incomplete',
+      onboardingStep: Number(o.onboarding_step ?? 1),
+      isActive: Boolean(o.is_active),
+      ownerEmail: o.owner_email ?? null,
+      ownerName: o.owner_name ?? null,
+      totalAgents: Number(o.total_agents ?? 0),
+      totalConversations: Number(o.total_conversations ?? 0),
+      openConversations: Number(o.open_conversations ?? 0),
+      publishedArticles: Number(o.published_articles ?? 0),
+      publishedFaqs: Number(o.published_faqs ?? 0),
+      telegramConnected: o.telegram_status === 'connected',
+      createdAt: o.created_at ?? new Date().toISOString(),
+    }));
+
+    const users = userRows.map((u) => ({
+      id: u.id,
+      email: u.email,
+      fullName: u.full_name,
+      accountType: ((u.account_type as AccountRegistrationMode) || 'business'),
+      isPersonalAccount: Number(u.is_personal_account ?? 1) === 1,
+      isPlatformAdmin:
+        Number(u.is_platform_admin ?? 0) === 1 ||
+        (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(u.email.toLowerCase()),
+      emailVerified: Boolean(u.email_verified),
+      mfaEnabled: Boolean(u.mfa_enabled),
+      workspaceCount: Number(u.workspace_count ?? 0),
+      activeSessions: Number(u.active_sessions ?? 0),
+      createdAt: u.created_at,
+    }));
+
+    const agentIdentities = identityRows.map((ai) => ({
+      id: ai.id,
+      email: ai.email,
+      displayName: ai.display_name,
+      accessMode: (ai.access_mode as AgentAccessMode) || 'business_managed',
+      emailVerified: Boolean(ai.email_verified),
+      userId: ai.user_id,
+      status: (ai.status as 'active' | 'suspended' | 'revoked') || 'active',
+      workspaceCount: Number(ai.workspace_count ?? 0),
+      createdAt: ai.created_at,
+    }));
+
+    const recentInvitations: WorkspaceInvitationRecord[] = inviteRows.map((r) => {
+      let permissions: WorkspacePermissionKey[] = [];
+      try {
+        permissions = JSON.parse(r.permissions_json) as WorkspacePermissionKey[];
+      } catch {
+        permissions = [];
+      }
+      return {
+        id: r.id,
+        organizationId: r.organization_id,
+        organizationName: r.organization_name,
+        organizationSlug: r.organization_slug,
+        email: r.email,
+        role: r.role as WorkspaceInvitationRecord['role'],
+        department: r.department ?? '',
+        permissions,
+        invitedByUserId: r.invited_by_user_id,
+        invitedByName: r.invited_by_name,
+        status: r.status as WorkspaceInvitationRecord['status'],
+        expiresAt: r.expires_at,
+        acceptedAt: r.accepted_at,
+        revokedAt: r.revoked_at,
+        createdAt: r.created_at,
+      };
+    });
+
+    const recentAuditLogs: WorkspaceAuditLogRecord[] = auditRows.map((r) => ({
+      id: r.id,
+      organizationId: r.organization_id,
+      actorUserId: r.actor_user_id,
+      actorEmail: r.actor_email,
+      action: r.action,
+      actionType: r.action,
+      targetType: r.target_type,
+      targetId: r.target_id,
+      metadataJson: r.metadata_json,
+      ipAddress: r.ip_address,
+      createdAt: r.created_at,
+    }));
+
+    const recentSecurityEvents = securityRows.map((e) => {
+      let metadata: Record<string, unknown> = {};
+      try {
+        metadata = JSON.parse(e.metadata_json || '{}') as Record<string, unknown>;
+      } catch {
+        metadata = {};
+      }
+      return {
+        id: e.id,
+        userId: e.user_id,
+        organizationId: e.organization_id,
+        eventType: e.event_type as PlatformAdminOverviewDto['recentSecurityEvents'][number]['eventType'],
+        ipAddress: e.ip_address,
+        userAgent: e.user_agent,
+        metadata,
+        createdAt: e.created_at,
+      };
+    });
+
+    const recentWebhookEvents = webhookRows.map((w) => ({
+      id: w.id,
+      organizationId: w.organization_id ?? 'central',
+      organizationName: w.organization_name ?? w.organization_id ?? 'Central',
+      channelType: w.provider,
+      externalEventId: w.idempotency_key,
+      eventSummary: w.event_type,
+      status: w.status,
+      errorDetail: w.error_message,
+      processedAt: w.processed_at,
+    }));
+
+    const rateLimitBuckets = rateLimitRows.map((rl) => ({
+      bucketKey: rl.bucket_key,
+      attemptCount: Number(rl.attempt_count ?? 0),
+      windowStartedAt: rl.window_started_at,
+      blockedUntil: rl.blocked_until,
+      updatedAt: rl.updated_at,
+    }));
+
+    return {
+      stats: {
+        totalBusinesses: businesses.length,
+        publishedBusinesses: businesses.filter((b) => b.onboardingStatus === 'published').length,
+        activeBusinesses: businesses.filter((b) => b.isActive).length,
+        totalUsers: users.length,
+        personalAccounts: users.filter((u) => u.isPersonalAccount).length,
+        businessManagedAgents: agentIdentities.filter((a) => a.accessMode === 'business_managed').length,
+        pendingInvitations: recentInvitations.filter((i) => i.status === 'pending').length,
+        totalConversations: Number(convAgg?.total ?? 0),
+        openConversations: Number(convAgg?.open_cnt ?? 0),
+        activeSessions: Number(activeSessionsCount?.cnt ?? 0),
+      },
+      centralTelegramBot: {
+        botUsername: params.centralTelegramBotUsername,
+        tokenConfigured: params.centralTelegramTokenConfigured,
+        secretConfigured: params.centralTelegramSecretConfigured,
+        businessOnboardingOnHold: true,
+        connectedWorkspaceChannels: Number(tgChannelCount?.cnt ?? 0),
+      },
+      businesses,
+      users,
+      agentIdentities,
+      recentInvitations,
+      recentAuditLogs,
+      recentSecurityEvents,
+      recentWebhookEvents,
+      rateLimitBuckets,
+    };
+  }
+
+  async executePlatformAdminAction(params: {
+    actorUserId: string;
+    actorName: string;
+    action:
+      | { type: 'toggle_business_active'; organizationId: string; isActive: boolean }
+      | { type: 'set_business_onboarding_status'; organizationId: string; status: BusinessOnboardingStatus }
+      | { type: 'verify_user_email'; targetUserId: string }
+      | { type: 'toggle_platform_admin'; targetUserId: string; isPlatformAdmin: boolean }
+      | { type: 'revoke_user_sessions'; targetUserId: string }
+      | { type: 'clear_rate_limits'; bucketKey?: string }
+      | { type: 'enter_business_workspace'; organizationId: string };
+  }): Promise<{ message: string; organizationId?: string }> {
+    const now = new Date().toISOString();
+    const { action } = params;
+
+    if (action.type === 'toggle_business_active') {
+      await this.db
+        .prepare(`UPDATE organizations SET is_active = ?, updated_at = ? WHERE id = ?`)
+        .bind(action.isActive ? 1 : 0, now, action.organizationId)
+        .run();
+      return {
+        message: action.isActive ? 'Business workspace activated.' : 'Business workspace suspended.',
+        organizationId: action.organizationId,
+      };
+    }
+
+    if (action.type === 'set_business_onboarding_status') {
+      await this.db
+        .prepare(`UPDATE organizations SET onboarding_status = ?, updated_at = ? WHERE id = ?`)
+        .bind(action.status, now, action.organizationId)
+        .run();
+      return {
+        message: `Business onboarding status updated to "${action.status}".`,
+        organizationId: action.organizationId,
+      };
+    }
+
+    if (action.type === 'verify_user_email') {
+      await this.db
+        .prepare(`UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?`)
+        .bind(now, action.targetUserId)
+        .run();
+      return { message: 'User email marked as verified.' };
+    }
+
+    if (action.type === 'toggle_platform_admin') {
+      await this.db
+        .prepare(`UPDATE users SET is_platform_admin = ?, updated_at = ? WHERE id = ?`)
+        .bind(action.isPlatformAdmin ? 1 : 0, now, action.targetUserId)
+        .run();
+      return {
+        message: action.isPlatformAdmin
+          ? 'Granted CustomCare Platform Admin privileges.'
+          : 'Removed CustomCare Platform Admin privileges.',
+      };
+    }
+
+    if (action.type === 'revoke_user_sessions') {
+      await this.db
+        .prepare(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`)
+        .bind(now, action.targetUserId)
+        .run();
+      return { message: 'All active sessions for user have been revoked.' };
+    }
+
+    if (action.type === 'clear_rate_limits') {
+      if (action.bucketKey) {
+        await this.db
+          .prepare(`DELETE FROM auth_rate_limits WHERE key = ?`)
+          .bind(action.bucketKey)
+          .run();
+        return { message: `Cleared rate limit bucket "${action.bucketKey}".` };
+      }
+      await this.db.prepare(`DELETE FROM auth_rate_limits`).run();
+      return { message: 'Cleared all authentication rate limit buckets.' };
+    }
+
+    if (action.type === 'enter_business_workspace') {
+      // Ensure platform super-admin has an active owner/admin membership in the target business so they can inspect/manage it directly
+      const ownerPerms = JSON.stringify(DEFAULT_PERMISSIONS_BY_ROLE[UserRole.Owner]);
+      await this.db
+        .prepare(
+          `INSERT INTO organization_members
+             (id, organization_id, user_id, role, department, permissions_json, membership_status, is_active, joined_at, created_at, updated_at)
+           VALUES (?, ?, ?, 'owner', 'Platform Administration', ?, 'active', 1, ?, ?, ?)
+           ON CONFLICT (organization_id, user_id) DO UPDATE SET
+             is_active = 1,
+             membership_status = 'active',
+             updated_at = excluded.updated_at`
+        )
+        .bind(createId('mem'), action.organizationId, params.actorUserId, ownerPerms, now, now, now)
+        .run();
+
+      return {
+        message: 'Entered business workspace as Platform Super-Admin.',
+        organizationId: action.organizationId,
+      };
+    }
+
+    throw new Error('Unsupported platform admin action.');
   }
 
   /* -------------------------------------------------------------------------

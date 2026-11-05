@@ -9,14 +9,12 @@ import {
   CheckCircle2,
   Building2,
   User,
-  Lock,
   Mail,
   Eye,
   EyeOff,
   Globe,
-  Briefcase,
-  ShieldCheck,
-  Sparkles,
+  Headphones,
+  KeyRound,
 } from 'lucide-react';
 import { CAREFLOW_NAME, type ApiResponse } from '@careflow/shared';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
@@ -54,7 +52,10 @@ const COUNTRIES = [
 export function BusinessOnboardingFlow() {
   const router = useRouter();
 
-  // Stage: 1 = Personal Account, 2 = First Business Setup
+  // Registration role: 'business' or 'agent'
+  const [registrationRole, setRegistrationRole] = useState<'business' | 'agent'>('business');
+
+  // Stage: 1 = Account Info & Role, 2 = First Business Setup (or Agent Profile & Invite)
   const [currentStage, setCurrentStage] = useState<1 | 2>(1);
 
   // Stage 1 Fields
@@ -66,12 +67,17 @@ export function BusinessOnboardingFlow() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
 
-  // Stage 2 Fields
+  // Stage 2 Business Fields
   const [businessName, setBusinessName] = useState('');
   const [industry, setIndustry] = useState('Technology');
   const [customIndustry, setCustomIndustry] = useState('');
   const [country, setCountry] = useState('United States');
   const [website, setWebsite] = useState('');
+
+  // Stage 2 Agent Fields
+  const [agentSpecialty, setAgentSpecialty] = useState('Customer Support');
+  const [invitationToken, setInvitationToken] = useState('');
+
   const [turnstileToken, setTurnstileToken] = useState('');
 
   // Submission State
@@ -81,6 +87,8 @@ export function BusinessOnboardingFlow() {
     orgId: string;
     slug: string;
     businessName: string;
+    roleLabel: string;
+    isAgentAccount: boolean;
   } | null>(null);
 
   // Validation helpers
@@ -88,7 +96,7 @@ export function BusinessOnboardingFlow() {
   const passwordHasSymbolOrNumber = /[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
 
-  function handleContinueToBusiness(e: React.FormEvent) {
+  function handleContinueToStepTwo(e: React.FormEvent) {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -111,7 +119,7 @@ export function BusinessOnboardingFlow() {
       return;
     }
     if (!agreeToTerms) {
-      setErrorMessage('Please accept the Terms of Service and Privacy Policy to continue.');
+      setErrorMessage('Please accept the Terms of Use, Privacy Policy, and Compliance Terms to continue.');
       return;
     }
 
@@ -123,36 +131,44 @@ export function BusinessOnboardingFlow() {
     setSubmitting(true);
     setErrorMessage(null);
 
-    if (!businessName.trim()) {
+    if (registrationRole === 'business' && !businessName.trim()) {
       setErrorMessage('Please enter your business name.');
       setSubmitting(false);
       return;
     }
 
-    const selectedIndustry = industry === 'Other' && customIndustry.trim()
-      ? customIndustry.trim()
-      : industry;
+    const selectedIndustry =
+      industry === 'Other' && customIndustry.trim() ? customIndustry.trim() : industry;
+
+    // Normalize invitation token if user pasted a full /invite/<token> URL
+    const cleanedInviteToken = invitationToken.trim()
+      ? invitationToken.trim().split('/invite/').pop()?.split('?')[0]?.trim() ||
+        invitationToken.trim()
+      : undefined;
 
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          registrationRole,
           fullName: fullName.trim(),
           email: email.trim().toLowerCase(),
           password,
           confirmPassword,
           agreeToTerms,
-          businessName: businessName.trim(),
-          industry: selectedIndustry,
-          country,
-          website: website.trim(),
+          businessName: registrationRole === 'business' ? businessName.trim() : undefined,
+          industry: registrationRole === 'business' ? selectedIndustry : undefined,
+          country: registrationRole === 'business' ? country : undefined,
+          website: registrationRole === 'business' ? website.trim() : undefined,
+          specialty: registrationRole === 'agent' ? agentSpecialty.trim() || 'Customer Support' : undefined,
+          invitationToken: registrationRole === 'agent' ? cleanedInviteToken : undefined,
           turnstileToken: turnstileToken || undefined,
         }),
       });
 
       const body = (await res.json()) as ApiResponse<{
-        user: { id: string; email: string; fullName: string };
+        user: { id: string; email: string; fullName: string; accountType?: string };
         organization: { id: string; slug: string; name: string };
         redirectUrl: string;
       }>;
@@ -166,14 +182,15 @@ export function BusinessOnboardingFlow() {
         orgId: body.data.organization.id,
         slug: body.data.organization.slug,
         businessName: body.data.organization.name,
+        roleLabel: registrationRole === 'agent' ? 'Support Agent' : 'Business Owner',
+        isAgentAccount: registrationRole === 'agent',
       });
 
-      // Brief pause to show confirmation then enter workspace dashboard
       setTimeout(() => {
         router.push(body.data.redirectUrl || '/admin');
       }, 1200);
     } catch {
-      setErrorMessage('Network error while creating workspace. Please try again.');
+      setErrorMessage('Network error while creating your CustomCare account. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -195,31 +212,46 @@ export function BusinessOnboardingFlow() {
         </div>
         <div className="space-y-2">
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-            Workspace Provisioned Successfully!
+            {successInfo.isAgentAccount
+              ? 'Personal Agent Account Ready!'
+              : 'Workspace Provisioned Successfully!'}
           </h2>
           <p className="text-sm text-slate-600 max-w-md mx-auto">
-            Welcome to {CAREFLOW_NAME}, <span className="font-semibold text-slate-900">{fullName}</span>.
-            We’ve created your business workspace for <span className="font-semibold text-teal-800">{successInfo.businessName}</span>.
+            Welcome to {CAREFLOW_NAME},{' '}
+            <span className="font-semibold text-slate-900">{fullName}</span>.{' '}
+            {successInfo.isAgentAccount ? (
+              <>
+                Your personal Support Agent account is active and connected to{' '}
+                <span className="font-semibold text-teal-800">{successInfo.businessName}</span>.
+              </>
+            ) : (
+              <>
+                We’ve created your business workspace for{' '}
+                <span className="font-semibold text-teal-800">{successInfo.businessName}</span>.
+              </>
+            )}
           </p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs font-mono text-slate-700 text-left space-y-1.5">
           <div className="flex justify-between">
-            <span className="text-slate-500 font-sans">Organization ID:</span>
+            <span className="text-slate-500 font-sans">Workspace ID:</span>
             <span className="font-bold">{successInfo.orgId}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-500 font-sans">Assigned Role:</span>
-            <span className="font-bold text-teal-700">Owner</span>
+            <span className="text-slate-500 font-sans">Account Type:</span>
+            <span className="font-bold text-teal-700">{successInfo.roleLabel}</span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-slate-500 font-sans">Portal URL:</span>
-            <span className="font-bold">{successInfo.slug}.getcustomcare.xyz</span>
-          </div>
+          {!successInfo.isAgentAccount && (
+            <div className="flex justify-between">
+              <span className="text-slate-500 font-sans">Portal URL:</span>
+              <span className="font-bold">{successInfo.slug}.getcustomcare.xyz</span>
+            </div>
+          )}
         </div>
 
         <p className="text-xs text-slate-500 animate-pulse">
-          Opening your business dashboard and guided onboarding...
+          Opening your dashboard...
         </p>
       </div>
     );
@@ -232,7 +264,7 @@ export function BusinessOnboardingFlow() {
         <button
           type="button"
           onClick={() => currentStage === 2 && setCurrentStage(1)}
-          className={`flex items-center gap-2.5 p-3 rounded-2xl border transition-all text-left ${
+          className={`flex items-center gap-2.5 p-3 rounded-2xl border transition-all text-left cursor-pointer ${
             currentStage === 1
               ? 'border-teal-600 bg-teal-50/70 text-teal-900 shadow-sm'
               : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
@@ -247,7 +279,7 @@ export function BusinessOnboardingFlow() {
           </div>
           <div>
             <div className="text-[11px] text-slate-500 uppercase tracking-wider">Step 1</div>
-            <div>Account Info</div>
+            <div>Role &amp; Account Info</div>
           </div>
         </button>
 
@@ -267,7 +299,9 @@ export function BusinessOnboardingFlow() {
           </div>
           <div>
             <div className="text-[11px] text-slate-400 uppercase tracking-wider">Step 2</div>
-            <div>First Business</div>
+            <div>
+              {registrationRole === 'business' ? 'First Business Workspace' : 'Agent Profile & Invites'}
+            </div>
           </div>
         </div>
       </div>
@@ -279,21 +313,88 @@ export function BusinessOnboardingFlow() {
         </div>
       )}
 
-      {/* Stage 1: Personal Account Information */}
+      {/* Stage 1: Role Selection & Personal Account Information */}
       {currentStage === 1 && (
         <form
-          onSubmit={handleContinueToBusiness}
+          onSubmit={handleContinueToStepTwo}
           className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-sm space-y-6"
         >
           <div>
             <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
               <User className="w-6 h-6 text-teal-600" aria-hidden="true" />
-              <span>Create your CustomCare account</span>
+              <span>How will you use CustomCare?</span>
             </h2>
             <p className="mt-1.5 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              One account allows you to create and manage multiple businesses with isolated portals,
-              knowledge workspaces, and specialist teams.
+              Select your primary role below. Need both later? You can launch a business workspace
+              or accept agent invitations from other businesses anytime inside your web dashboard.
             </p>
+          </div>
+
+          {/* Role Selector Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <button
+              type="button"
+              onClick={() => setRegistrationRole('business')}
+              className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                registrationRole === 'business'
+                  ? 'border-teal-600 bg-teal-50/60 ring-2 ring-teal-100'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <span
+                  className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${
+                    registrationRole === 'business'
+                      ? 'bg-teal-700 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  Business Owner
+                </span>
+              </div>
+              <h3 className="mt-3 text-sm font-bold text-slate-900">
+                I am registering a Business
+              </h3>
+              <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                Create an isolated business workspace, knowledge base, Telegram &amp; web support
+                channels, and invite your support team.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRegistrationRole('agent')}
+              className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                registrationRole === 'agent'
+                  ? 'border-teal-600 bg-teal-50/60 ring-2 ring-teal-100'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center">
+                  <Headphones className="w-5 h-5" />
+                </div>
+                <span
+                  className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${
+                    registrationRole === 'agent'
+                      ? 'bg-teal-700 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  Support Agent
+                </span>
+              </div>
+              <h3 className="mt-3 text-sm font-bold text-slate-900">
+                I am a Support Agent
+              </h3>
+              <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                Create a personal CustomCare agent account to accept workspace invitations, manage
+                multi-business memberships, and handle tickets.
+              </p>
+            </button>
           </div>
 
           <div className="space-y-4">
@@ -335,7 +436,9 @@ export function BusinessOnboardingFlow() {
                 <Mail className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5 pointer-events-none" />
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
-                This will be your personal login email. You can configure separate public support emails later.
+                {registrationRole === 'agent'
+                  ? 'Use the email address where businesses send your workspace invitations.'
+                  : 'This will be your login email. You can configure public support emails inside your workspace.'}
               </p>
             </div>
 
@@ -435,8 +538,31 @@ export function BusinessOnboardingFlow() {
                   className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
                 />
                 <span className="text-xs text-slate-600 leading-relaxed">
-                  I agree to the <span className="font-semibold text-slate-900">CustomCare Terms of Service</span> and{' '}
-                  <span className="font-semibold text-slate-900">Privacy Policy</span>.
+                  I agree to the{' '}
+                  <Link
+                    href="/terms"
+                    target="_blank"
+                    className="font-semibold text-slate-900 underline underline-offset-2 hover:text-teal-700"
+                  >
+                    CustomCare Terms of Use
+                  </Link>
+                  ,{' '}
+                  <Link
+                    href="/privacy"
+                    target="_blank"
+                    className="font-semibold text-slate-900 underline underline-offset-2 hover:text-teal-700"
+                  >
+                    Privacy Policy
+                  </Link>
+                  , and{' '}
+                  <Link
+                    href="/compliance"
+                    target="_blank"
+                    className="font-semibold text-slate-900 underline underline-offset-2 hover:text-teal-700"
+                  >
+                    Workspace Isolation &amp; Compliance Notes
+                  </Link>
+                  .
                 </span>
               </label>
             </div>
@@ -451,17 +577,21 @@ export function BusinessOnboardingFlow() {
             </Link>
             <button
               type="submit"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold tracking-wide transition-all shadow-sm"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold tracking-wide transition-all shadow-sm cursor-pointer"
             >
-              <span>Continue to Business Info</span>
+              <span>
+                {registrationRole === 'business'
+                  ? 'Continue to Business Info'
+                  : 'Continue to Agent Setup'}
+              </span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </form>
       )}
 
-      {/* Stage 2: Initial Business Setup */}
-      {currentStage === 2 && (
+      {/* Stage 2A: Business Setup */}
+      {currentStage === 2 && registrationRole === 'business' && (
         <form
           onSubmit={handleFinalSubmit}
           className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-sm space-y-6"
@@ -595,7 +725,7 @@ export function BusinessOnboardingFlow() {
             <button
               type="button"
               onClick={() => setCurrentStage(1)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors py-2.5 px-3"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors py-2.5 px-3 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back to Account</span>
@@ -603,13 +733,109 @@ export function BusinessOnboardingFlow() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold tracking-wide transition-all shadow-sm"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold tracking-wide transition-all shadow-sm cursor-pointer"
             >
               {submitting ? (
                 <span>Provisioning Workspace...</span>
               ) : (
                 <>
-                  <span>Create Workspace & Enter Dashboard</span>
+                  <span>Create Workspace &amp; Enter Dashboard</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Stage 2B: Personal Support Agent Setup */}
+      {currentStage === 2 && registrationRole === 'agent' && (
+        <form
+          onSubmit={handleFinalSubmit}
+          className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-sm space-y-6"
+        >
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
+              <Headphones className="w-6 h-6 text-teal-600" aria-hidden="true" />
+              <span>Complete your Support Agent profile</span>
+            </h2>
+            <p className="mt-1.5 text-xs sm:text-sm text-slate-600 leading-relaxed">
+              Your personal CustomCare agent account lets you accept invitations from multiple
+              businesses and switch between workspaces in one click. You can also launch your own
+              business workspace later from your dashboard.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label
+                htmlFor="agentSpecialty"
+                className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
+              >
+                Primary Support Specialty / Department
+              </label>
+              <input
+                id="agentSpecialty"
+                type="text"
+                required
+                value={agentSpecialty}
+                onChange={(e) => setAgentSpecialty(e.target.value)}
+                placeholder="e.g. Technical Support, Billing & Accounts, Customer Success"
+                className="w-full px-4 py-3 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="invitationToken"
+                className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
+              >
+                Workspace Invitation Token or Link{' '}
+                <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="invitationToken"
+                  type="text"
+                  value={invitationToken}
+                  onChange={(e) => setInvitationToken(e.target.value)}
+                  placeholder="Paste invite token or https://getcustomcare.xyz/invite/..."
+                  className="w-full px-4 py-3 text-sm font-mono rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all pr-10"
+                />
+                <KeyRound className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5 pointer-events-none" />
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                If a business administrator sent you an invitation link or token, paste it here to
+                join their workspace immediately—or leave blank and accept invitations later in your
+                dashboard.
+              </p>
+            </div>
+
+            <TurnstileWidget
+              onVerify={(t) => setTurnstileToken(t)}
+              onExpire={() => setTurnstileToken('')}
+            />
+          </div>
+
+          <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setCurrentStage(1)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors py-2.5 px-3 cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Account</span>
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold tracking-wide transition-all shadow-sm cursor-pointer"
+            >
+              {submitting ? (
+                <span>Creating Agent Account...</span>
+              ) : (
+                <>
+                  <span>Create Agent Account &amp; Enter Dashboard</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}

@@ -70,12 +70,165 @@ export type BusinessOnboardingStatus =
   | 'published'
   | 'suspended';
 
+export type AccountRegistrationMode = 'business' | 'agent' | 'both';
+
+export type AgentAccessMode = 'business_managed' | 'personal_account';
+
+export type MembershipLifecycleStatus = 'active' | 'suspended' | 'revoked' | 'departed';
+
+export type WorkspaceInvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export type WorkspacePermissionKey =
+  | 'conversations:view'
+  | 'conversations:reply'
+  | 'conversations:assign'
+  | 'customers:view'
+  | 'knowledge:view'
+  | 'knowledge:edit'
+  | 'channels:manage'
+  | 'team:invite'
+  | 'team:manage'
+  | 'settings:manage'
+  | 'analytics:view';
+
+export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, WorkspacePermissionKey[]> = {
+  [UserRole.Owner]: [
+    'conversations:view',
+    'conversations:reply',
+    'conversations:assign',
+    'customers:view',
+    'knowledge:view',
+    'knowledge:edit',
+    'channels:manage',
+    'team:invite',
+    'team:manage',
+    'settings:manage',
+    'analytics:view',
+  ],
+  [UserRole.Admin]: [
+    'conversations:view',
+    'conversations:reply',
+    'conversations:assign',
+    'customers:view',
+    'knowledge:view',
+    'knowledge:edit',
+    'channels:manage',
+    'team:invite',
+    'team:manage',
+    'settings:manage',
+    'analytics:view',
+  ],
+  [UserRole.Supervisor]: [
+    'conversations:view',
+    'conversations:reply',
+    'conversations:assign',
+    'customers:view',
+    'knowledge:view',
+    'knowledge:edit',
+    'analytics:view',
+  ],
+  [UserRole.Agent]: [
+    'conversations:view',
+    'conversations:reply',
+    'customers:view',
+    'knowledge:view',
+  ],
+  [UserRole.Viewer]: [
+    'conversations:view',
+    'customers:view',
+    'knowledge:view',
+  ],
+  [UserRole.Customer]: [],
+};
+
 export interface CareFlowUserRecord {
   id: string;
   email: string;
   fullName: string;
   emailVerified: boolean;
   mfaEnabled?: boolean;
+  accountType?: AccountRegistrationMode;
+  isPersonalAccount?: boolean;
+  isPlatformAdmin?: boolean;
+  createdAt: string;
+}
+
+export interface AgentIdentityRecord {
+  id: string;
+  email: string;
+  displayName: string;
+  userId?: string | null;
+  emailVerified: boolean;
+  department: string;
+  specialty: string;
+  accessMode: AgentAccessMode;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceInvitationRecord {
+  id: string;
+  organizationId: string;
+  organizationName?: string;
+  organizationSlug?: string;
+  email: string;
+  displayName?: string;
+  role: UserRole.Admin | UserRole.Supervisor | UserRole.Agent | UserRole.Viewer;
+  department: string;
+  specialty?: string;
+  permissions: WorkspacePermissionKey[];
+  invitedByUserId?: string | null;
+  invitedByName?: string;
+  status: WorkspaceInvitationStatus;
+  expiresAt: string;
+  acceptedAt?: string | null;
+  revokedAt?: string | null;
+  createdAt: string;
+  inviteUrl?: string;
+  rawToken?: string;
+}
+
+export interface InvitationInspectionDto {
+  invitation: WorkspaceInvitationRecord;
+  organization: {
+    id: string;
+    name: string;
+    slug: string;
+    industry: string;
+    country: string;
+  };
+  existingAgentIdentity?: {
+    id: string;
+    displayName: string;
+    emailVerified: boolean;
+    hasPersonalAccountLinked: boolean;
+    activeWorkspaceCount: number;
+  } | null;
+  existingPersonalUser?: {
+    id: string;
+    fullName: string;
+    emailVerified: boolean;
+  } | null;
+  canLinkToPersonalAccount: boolean;
+  linkPromptMessage?: string;
+}
+
+export interface WorkspaceAuditLogRecord {
+  id: string;
+  organizationId?: string | null;
+  organizationName?: string | null;
+  actorUserId?: string | null;
+  actorEmail?: string;
+  actorName?: string;
+  action?: string;
+  actionType?: string;
+  targetType?: string;
+  targetId?: string | null;
+  targetEmail?: string | null;
+  targetUserId?: string | null;
+  details?: string;
+  metadataJson?: string;
+  ipAddress?: string;
   createdAt: string;
 }
 
@@ -83,6 +236,8 @@ export interface AuthSessionRecord {
   id: string;
   userId: string;
   organizationId: string;
+  agentIdentityId?: string | null;
+  accessMode?: AgentAccessMode;
   userAgent: string;
   ipAddress: string;
   mfaVerified: boolean;
@@ -110,7 +265,15 @@ export interface AuthSecurityEventRecord {
     | 'session_revoked'
     | 'all_sessions_revoked'
     | 'mfa_enrolled'
-    | 'mfa_disabled';
+    | 'mfa_disabled'
+    | 'invitation_created'
+    | 'invitation_accepted'
+    | 'invitation_revoked'
+    | 'member_suspended'
+    | 'member_reactivated'
+    | 'member_revoked'
+    | 'member_departed'
+    | 'identity_linked';
   ipAddress: string;
   userAgent: string;
   metadataJson?: string;
@@ -157,10 +320,17 @@ export interface AccountSecurityOverviewDto {
 }
 
 export interface UserWorkspaceMembership {
+  membershipId?: string;
   organizationId: string;
   organizationSlug: string;
   organizationName: string;
   role: UserRole;
+  status?: MembershipLifecycleStatus;
+  membershipStatus?: MembershipLifecycleStatus;
+  department?: string;
+  permissions?: WorkspacePermissionKey[];
+  accessMode?: AgentAccessMode;
+  agentIdentityId?: string | null;
   country: string;
   industry: string;
   website?: string;

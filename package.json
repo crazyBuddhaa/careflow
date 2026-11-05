@@ -16,7 +16,7 @@
     "start": "NODE_OPTIONS='--disable-warning=ExperimentalWarning' next start apps/web -p 3000 -H 0.0.0.0",
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --disable-warning=ExperimentalWarning --import ./scripts/ts-test-loader.mjs --experimental-transform-types --test tests/knowledge-stage1.test.ts tests/onboarding-multi-business.test.ts tests/auth-security-system.test.ts tests/multichannel-support-os.test.ts",
+    "test": "node --disable-warning=ExperimentalWarning --import ./scripts/ts-test-loader.mjs --experimental-transform-types --test tests/knowledge-stage1.test.ts tests/onboarding-multi-business.test.ts tests/auth-security-system.test.ts tests/multichannel-support-os.test.ts tests/security/agent-invitations-and-roles.test.ts",
     "push": "node scripts/git-push.mjs",
     "clean": "rm -rf apps/web/.next apps/web/.open-next dist"
   },

@@ -21,6 +21,10 @@ import {
   UserCheck,
   Bot,
   Globe,
+  Building2,
+  LogOut,
+  KeyRound,
+  Mail,
 } from 'lucide-react';
 import {
   ConversationStatus,
@@ -32,9 +36,11 @@ import {
   type OnboardingProgressReport,
   type TelegramAgentLinkCodeResponse,
   type TelegramAgentLinkRecord,
+  type UserWorkspaceMembership,
   type WorkspaceAgentRecord,
   type WorkspaceAnalyticsSummary,
   type WorkspaceConversationItem,
+  type WorkspaceInvitationRecord,
   type AdminModuleSectionKey,
 } from '@careflow/shared';
 
@@ -46,7 +52,12 @@ interface WorkspaceRoleOverviewProps {
   currentUserName: string;
   currentUserEmail: string;
   currentUserRole: UserRole;
+  isPersonalAccount?: boolean;
+  pendingInvitations?: WorkspaceInvitationRecord[];
+  workspaces?: UserWorkspaceMembership[];
   onNavigateSection: (section: AdminModuleSectionKey) => void;
+  onOpenCreateBusinessModal?: () => void;
+  onSessionMutated?: () => void;
 }
 
 export function WorkspaceRoleOverview({
@@ -57,7 +68,12 @@ export function WorkspaceRoleOverview({
   currentUserName,
   currentUserEmail,
   currentUserRole,
+  isPersonalAccount = true,
+  pendingInvitations = [],
+  workspaces = [],
   onNavigateSection,
+  onOpenCreateBusinessModal,
+  onSessionMutated,
 }: WorkspaceRoleOverviewProps) {
   const isBusinessManager =
     currentUserRole === UserRole.Owner || currentUserRole === UserRole.Admin;
@@ -78,6 +94,12 @@ export function WorkspaceRoleOverview({
   const [generatedLinkCode, setGeneratedLinkCode] =
     useState<TelegramAgentLinkCodeResponse | null>(null);
   const [generatingCode, setGeneratingCode] = useState(false);
+
+  // Cross-role & lifecycle state (Invite token paste, Personal Account consent link, Leave Workspace)
+  const [inviteTokenInput, setInviteTokenInput] = useState('');
+  const [consentPersonalLink, setConsentPersonalLink] = useState(false);
+  const [linkingPersonalAccount, setLinkingPersonalAccount] = useState(false);
+  const [leavingWorkspace, setLeavingWorkspace] = useState(false);
 
   const showFeedback = useCallback((msg: string) => {
     setFeedback(msg);
@@ -210,6 +232,86 @@ export function WorkspaceRoleOverview({
       setErrorBanner('Unable to unlink Telegram account.');
     }
   }
+
+  async function handleConnectPersonalAccount(e: React.FormEvent) {
+    e.preventDefault();
+    if (!consentPersonalLink) {
+      setErrorBanner('Please check the explicit consent box to link your workspace identity.');
+      return;
+    }
+    setLinkingPersonalAccount(true);
+    setErrorBanner(null);
+    try {
+      const res = await fetch('/api/auth/identity-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consentConfirmed: true,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<{
+        userId: string;
+        linkedOrganizationsCount: number;
+      }>;
+      if (!body.ok) {
+        setErrorBanner(body.error.message);
+        return;
+      }
+      showFeedback(
+        `Connected your workspace identity to a personal CustomCare account (${body.data.linkedOrganizationsCount} workspace(s) linked).`
+      );
+      onSessionMutated?.();
+    } catch {
+      setErrorBanner('Unable to link personal CustomCare account.');
+    } finally {
+      setLinkingPersonalAccount(false);
+    }
+  }
+
+  async function handleLeaveWorkspace() {
+    if (leavingWorkspace) return;
+    setLeavingWorkspace(true);
+    setErrorBanner(null);
+    try {
+      const res = await fetch('/api/auth/workspaces/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId,
+          confirmLeave: true,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<{
+        departed: boolean;
+        unassignedConversationsCount: number;
+        redirectUrl: string;
+      }>;
+      if (!body.ok) {
+        setErrorBanner(body.error.message);
+        return;
+      }
+      showFeedback(
+        `You have left ${organizationName}. ${body.data.unassignedConversationsCount} open conversation(s) were returned to the unassigned queue.`
+      );
+      onSessionMutated?.();
+    } catch {
+      setErrorBanner('Unable to leave workspace.');
+    } finally {
+      setLeavingWorkspace(false);
+    }
+  }
+
+  function handleOpenInviteToken(e: React.FormEvent) {
+    e.preventDefault();
+    const raw = inviteTokenInput.trim();
+    if (!raw) return;
+    const token = raw.split('/invite/').pop()?.split('?')[0]?.trim() || raw;
+    window.location.href = `/invite/${encodeURIComponent(token)}`;
+  }
+
+  const isStandaloneAgentHub = organizationId === 'org_customcare_agent_hub';
+  const canLeaveCurrentWorkspace =
+    currentUserRole !== UserRole.Owner && !isStandaloneAgentHub;
 
   const tgIntegration = integrations.find((i) => i.channel === 'telegram');
   const portalIntegration = integrations.find((i) => i.channel === 'portal');
@@ -557,6 +659,198 @@ export function WorkspaceRoleOverview({
                   </div>
                 )}
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* Explicit-Consent Identity Linking Banner for Business-Managed Agents */}
+        {!isPersonalAccount && (
+          <form
+            onSubmit={handleConnectPersonalAccount}
+            className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-5 sm:p-6 space-y-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-900 text-[10px] font-bold uppercase">
+                  Optional Personal Account Upgrade · Identity Linking
+                </span>
+                <h2 className="mt-1 text-base font-bold text-slate-900">
+                  You already have an agent identity associated with {currentUserEmail}. Would you
+                  like to connect this workspace to a personal CustomCare account?
+                </h2>
+                <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                  Right now, your access is <strong>Business-Managed</strong> by {organizationName}.
+                  Connecting a personal CustomCare account lets you accept invitations from multiple
+                  businesses and switch workspaces in one click—while keeping each business&apos;s
+                  data strictly isolated.
+                </p>
+              </div>
+              <ShieldCheck className="w-6 h-6 text-indigo-600 shrink-0" />
+            </div>
+
+            <label className="flex items-start gap-2.5 text-xs text-slate-800 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={consentPersonalLink}
+                onChange={(e) => setConsentPersonalLink(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
+              />
+              <span>
+                I explicitly consent to linking my verified email (
+                <span className="font-mono font-semibold">{currentUserEmail}</span>) and existing
+                workspace memberships to a personal CustomCare account.
+              </span>
+            </label>
+
+            <div className="pt-1">
+              <button
+                type="submit"
+                disabled={linkingPersonalAccount || !consentPersonalLink}
+                className="py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+              >
+                {linkingPersonalAccount
+                  ? 'Connecting Personal Account...'
+                  : 'Connect to Personal CustomCare Account'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Cross-Role Expansion, Multi-Workspace Table & Voluntary Departure */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left: My Workspaces & Pending Invitations */}
+          <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">
+                  My Workspaces &amp; Invitations
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Accept invitations from businesses or manage your active memberships
+                </p>
+              </div>
+              {canLeaveCurrentWorkspace && (
+                <button
+                  type="button"
+                  disabled={leavingWorkspace}
+                  onClick={() => void handleLeaveWorkspace()}
+                  className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold cursor-pointer"
+                  title="Voluntarily leave this workspace and unassign your open conversations"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>{leavingWorkspace ? 'Leaving...' : `Leave ${organizationName}`}</span>
+                </button>
+              )}
+            </div>
+
+            {pendingInvitations.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-2.5">
+                <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                  <Mail className="w-4 h-4 text-amber-700" />
+                  <span>Pending Workspace Invitations ({pendingInvitations.length})</span>
+                </div>
+                <div className="space-y-2">
+                  {pendingInvitations.map((inv) => (
+                    <div
+                      key={inv.id}
+                      className="flex items-center justify-between gap-3 bg-white rounded-lg p-3 border border-amber-200/80 text-xs"
+                    >
+                      <div>
+                        <p className="font-bold text-slate-900">{inv.organizationName}</p>
+                        <p className="text-slate-500">
+                          Role: <span className="font-semibold uppercase">{inv.role}</span>
+                          {inv.department ? ` · ${inv.department}` : ''}
+                        </p>
+                      </div>
+                      <span className="text-[11px] font-semibold text-teal-700">
+                        Use invite link from email or paste token below
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Paste Invitation Link or Token */}
+            <form onSubmit={handleOpenInviteToken} className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={inviteTokenInput}
+                  onChange={(e) => setInviteTokenInput(e.target.value)}
+                  placeholder="Paste workspace invite token or /invite/... link"
+                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-xs font-mono text-slate-900 focus:border-teal-600 focus:outline-none pr-8"
+                />
+                <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+              </div>
+              <button
+                type="submit"
+                disabled={!inviteTokenInput.trim()}
+                className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap cursor-pointer"
+              >
+                Open Invitation &rarr;
+              </button>
+            </form>
+
+            {workspaces.length > 0 && (
+              <div className="border-t border-slate-100 pt-3">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-semibold">
+                      <th className="py-2 pr-3">Workspace</th>
+                      <th className="py-2 px-3">Role</th>
+                      <th className="py-2 pl-3 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {workspaces.map((ws) => (
+                      <tr key={ws.organizationId}>
+                        <td className="py-2.5 pr-3 font-semibold text-slate-900">
+                          {ws.organizationName}
+                        </td>
+                        <td className="py-2.5 px-3 uppercase font-semibold text-slate-600">
+                          {ws.role}
+                        </td>
+                        <td className="py-2.5 pl-3 text-right">
+                          <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold uppercase text-[10px]">
+                            {ws.status || 'active'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Cross-Role Expansion — Launch a Business Workspace */}
+          <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 text-[10px] font-bold uppercase">
+                  Cross-Role Expansion
+                </span>
+                <h2 className="mt-1 text-base font-bold text-slate-900">
+                  Want to launch your own Business Workspace?
+                </h2>
+              </div>
+              <Building2 className="w-5 h-5 text-blue-600 shrink-0" />
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Your CustomCare account can act as both a Support Agent for other companies and an
+              Owner of your own isolated business workspaces. Set up a dedicated business portal,
+              knowledge base, and AI assistant anytime.
+            </p>
+            {onOpenCreateBusinessModal && (
+              <button
+                type="button"
+                onClick={onOpenCreateBusinessModal}
+                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Register a Business Workspace</span>
+              </button>
             )}
           </div>
         </div>
@@ -976,6 +1270,51 @@ export function WorkspaceRoleOverview({
             </div>
           )}
         </div>
+      </div>
+
+      {/* Business Owner / Admin Cross-Role Expansion: Accept Agent Invitations for Other Businesses */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 text-[10px] font-bold uppercase">
+              Multi-Workspace &amp; Agent Role
+            </span>
+            {canLeaveCurrentWorkspace && (
+              <button
+                type="button"
+                disabled={leavingWorkspace}
+                onClick={() => void handleLeaveWorkspace()}
+                className="text-xs font-bold text-rose-700 hover:underline cursor-pointer"
+              >
+                {leavingWorkspace ? 'Leaving...' : `Leave ${organizationName}`}
+              </button>
+            )}
+          </div>
+          <h2 className="text-sm sm:text-base font-bold text-slate-900">
+            Invited to support another business as an Agent?
+          </h2>
+          <p className="text-xs text-slate-600">
+            Paste any single-use workspace invitation token or link below to accept an Agent or
+            Supervisor role in another business under your existing CustomCare account.
+          </p>
+        </div>
+
+        <form onSubmit={handleOpenInviteToken} className="flex flex-col sm:flex-row gap-2 shrink-0">
+          <input
+            type="text"
+            value={inviteTokenInput}
+            onChange={(e) => setInviteTokenInput(e.target.value)}
+            placeholder="Paste invite token or /invite/... link"
+            className="w-full sm:w-64 rounded-xl border border-slate-200 px-3.5 py-2 text-xs font-mono text-slate-900 focus:border-teal-600 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={!inviteTokenInput.trim()}
+            className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap cursor-pointer"
+          >
+            Accept Invite &rarr;
+          </button>
+        </form>
       </div>
     </div>
   );

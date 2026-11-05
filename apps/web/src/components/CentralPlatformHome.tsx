@@ -17,7 +17,11 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { CAREFLOW_NAME } from '@careflow/shared';
+import {
+  CAREFLOW_NAME,
+  CUSTOMCARE_BRAND_WORDMARK,
+  CUSTOMCARE_LOGO_ICON_URL,
+} from '@careflow/shared';
 
 type DemoIndustryId = 'fintech' | 'ecommerce' | 'software';
 
@@ -973,34 +977,58 @@ export function CentralPlatformHome() {
 
       {/* Clean Platform Footer */}
       <footer className="border-t border-slate-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 text-sm text-slate-500">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-bold text-slate-900">{CAREFLOW_NAME}</span>
-            <span aria-hidden="true">·</span>
-            <span>Smarter Support. Better Experiences.</span>
+        <div className="max-w-7xl mx-auto px-6 py-10 flex flex-col gap-6 text-sm text-slate-500">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+            <div className="flex flex-wrap items-center gap-3">
+              <img
+                src={CUSTOMCARE_LOGO_ICON_URL}
+                alt={CAREFLOW_NAME}
+                className="w-7 h-7 rounded-md object-contain bg-white border border-slate-200 p-0.5"
+              />
+              <span className="font-bold tracking-wider text-slate-900">{CUSTOMCARE_BRAND_WORDMARK}</span>
+              <span aria-hidden="true">·</span>
+              <span>Smarter Support. Better Experiences.</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-6">
+              <a href="#what-we-do" className="hover:text-slate-900 transition-colors">
+                What We Do
+              </a>
+              <a href="#interactive-demo" className="hover:text-slate-900 transition-colors">
+                Live Demo
+              </a>
+              <a href="#features" className="hover:text-slate-900 transition-colors">
+                Features
+              </a>
+              <a href="#faq" className="hover:text-slate-900 transition-colors">
+                FAQ
+              </a>
+              <Link href="/login" className="hover:text-slate-900 transition-colors">
+                Sign In
+              </Link>
+              <Link href="/onboarding" className="hover:text-slate-900 transition-colors">
+                Register Account
+              </Link>
+              <Link href="/platform-admin" className="hover:text-slate-900 transition-colors">
+                Platform Admin
+              </Link>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-6">
-            <a href="#what-we-do" className="hover:text-slate-900 transition-colors">
-              What We Do
-            </a>
-            <a href="#interactive-demo" className="hover:text-slate-900 transition-colors">
-              Live Demo
-            </a>
-            <a href="#features" className="hover:text-slate-900 transition-colors">
-              Features
-            </a>
-            <a href="#faq" className="hover:text-slate-900 transition-colors">
-              FAQ
-            </a>
-            <Link href="/login" className="hover:text-slate-900 transition-colors">
-              Sign In
-            </Link>
-            <Link href="/onboarding" className="hover:text-slate-900 transition-colors">
-              Get Started
-            </Link>
-            <span className="text-slate-400">
-              &copy; {new Date().getFullYear()} {CAREFLOW_NAME}
+          <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-5">
+              <Link href="/privacy" className="hover:text-slate-700 transition-colors font-medium">
+                Privacy Policy
+              </Link>
+              <Link href="/terms" className="hover:text-slate-700 transition-colors font-medium">
+                Terms of Use
+              </Link>
+              <Link href="/compliance" className="hover:text-slate-700 transition-colors font-medium">
+                Security &amp; Compliance Notes
+              </Link>
+            </div>
+            <span>
+              &copy; {new Date().getFullYear()} {CAREFLOW_NAME} (EST. 2026) · Tenant-Isolated Customer Support Platform
             </span>
           </div>
         </div>

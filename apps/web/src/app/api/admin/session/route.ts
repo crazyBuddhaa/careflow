@@ -1,5 +1,10 @@
 import { cookies } from 'next/headers';
-import { UserRole, type UserWorkspaceMembership } from '@careflow/shared';
+import {
+  UserRole,
+  type AccountRegistrationMode,
+  type UserWorkspaceMembership,
+  type WorkspaceInvitationRecord,
+} from '@careflow/shared';
 import {
   ADMIN_SESSION_COOKIE_NAME,
   extractRequestClientMeta,
@@ -33,8 +38,14 @@ export interface AdminSessionStatusDto {
     sessionId?: string;
     emailVerified?: boolean;
     mfaEnabled?: boolean;
+    accountType?: AccountRegistrationMode;
+    isPersonalAccount?: boolean;
+    isPlatformAdmin?: boolean;
+    department?: string;
+    permissions?: string[];
   } | null;
   workspaces?: UserWorkspaceMembership[];
+  pendingInvitations?: WorkspaceInvitationRecord[];
 }
 
 export async function GET() {
@@ -42,10 +53,19 @@ export async function GET() {
     const resolved = await resolveServerAdminSession();
 
     let userWorkspaces: UserWorkspaceMembership[] = [];
+    let pendingInvitations: WorkspaceInvitationRecord[] = [];
     if (resolved.identity?.userId) {
       try {
-        const repo = await getWorkspaceRepository();
+        const [repo, authService] = await Promise.all([
+          getWorkspaceRepository(),
+          getAuthIdentityService(),
+        ]);
         userWorkspaces = await repo.getUserWorkspaces(resolved.identity.userId);
+        if (resolved.identity.email) {
+          pendingInvitations = await authService.listPendingInvitationsForEmail(
+            resolved.identity.email
+          );
+        }
       } catch {
         // Fallback if workspace lookup fails
       }
@@ -71,9 +91,15 @@ export async function GET() {
             sessionId: resolved.sessionId,
             emailVerified: resolved.emailVerified,
             mfaEnabled: resolved.mfaEnabled,
+            accountType: resolved.accountType,
+            isPersonalAccount: resolved.isPersonalAccount,
+            isPlatformAdmin: resolved.isPlatformAdmin,
+            department: resolved.department,
+            permissions: resolved.permissions,
           }
         : null,
       workspaces: userWorkspaces,
+      pendingInvitations,
     };
 
     return jsonApiSuccess(response);

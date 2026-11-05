@@ -1,6 +1,6 @@
 {
-  "summary": "Updated implementation plan adding Natural-Language Greeting & Conversational Entry handling (e.g., \"Hi\", \"Hello\", \"Good morning\", \"Hey\") for both Dedicated Business Sub-Bots (like CD) and Central Bot Deep-Link sessions, dynamically personalizing with the customer's Telegram name (e.g., \"Hi [Customer Name]! 👋\") and the custom welcome greeting configured in the business's dashboard alongside the interactive support category buttons.",
-  "updatedAt": "2026-11-04T13:39:52.669965018Z",
+  "summary": "Revised implementation plan incorporating Role-Based Registration (Agent vs. Business) with Cross-Role Dashboard Activation, pausing Telegram Business Onboarding, updating the official .CUSTOMCARE Logo & Favicon assets, adding Privacy Policy / Terms of Use / Compliance pages, and building a Web-Based Central CustomCare Platform Admin Dashboard.",
+  "updatedAt": "2026-11-04T17:29:06.749448419Z",
   "requestFeedback": true,
   "userFacing": true
 }

@@ -221,6 +221,12 @@ export async function resolveServerAdminSession(): Promise<{
   sessionToken?: string;
   emailVerified?: boolean;
   mfaEnabled?: boolean;
+  accountType?: 'business' | 'agent' | 'both';
+  isPersonalAccount?: boolean;
+  isPlatformAdmin?: boolean;
+  department?: string;
+  permissions?: string[];
+  agentIdentityId?: string | null;
 }> {
   const cookieStore = await cookies();
   const rawCookie = cookieStore.get(ADMIN_SESSION_COOKIE_NAME)?.value;
@@ -251,6 +257,12 @@ export async function resolveServerAdminSession(): Promise<{
       sessionToken: verified.sessionToken,
       emailVerified: dbValidated.user.emailVerified,
       mfaEnabled: Boolean(dbValidated.user.mfaEnabled),
+      accountType: dbValidated.user.accountType || 'business',
+      isPersonalAccount: dbValidated.user.isPersonalAccount !== false,
+      isPlatformAdmin: Boolean(dbValidated.user.isPlatformAdmin),
+      department: dbValidated.activeMembership.department ?? '',
+      permissions: dbValidated.activeMembership.permissions ?? [],
+      agentIdentityId: dbValidated.activeMembership.agentIdentityId ?? null,
     };
   } catch {
     return { identity: null };

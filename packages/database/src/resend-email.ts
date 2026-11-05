@@ -430,3 +430,76 @@ export async function sendNewLoginSecurityAlert(
   );
 }
 
+export async function sendWorkspaceInvitationEmail(
+  params: {
+    to: string;
+    organizationName: string;
+    invitedByName: string;
+    role: string;
+    department?: string;
+    rawToken: string;
+    expiresAt: string;
+  },
+  configOverrides?: Partial<ResendRuntimeConfig>,
+  envSource?: Record<string, unknown>
+): Promise<EmailDeliveryResult> {
+  const cfg = resolveResendConfig(configOverrides, envSource);
+  const inviteUrl = `${cfg.appBaseUrl}/invite/${encodeURIComponent(params.rawToken)}`;
+  const safeOrg = escapeHtml(params.organizationName);
+  const safeInviter = escapeHtml(params.invitedByName);
+  const safeRole = escapeHtml(params.role);
+  const safeDept = params.department ? escapeHtml(params.department) : '';
+  const safeToken = escapeHtml(params.rawToken);
+
+  const subject = `You've been invited to join ${params.organizationName} on CustomCare`;
+  const text = [
+    `Hello,`,
+    '',
+    `${params.invitedByName} has invited you to join the ${params.organizationName} support workspace on CustomCare as a ${params.role}${params.department ? ` (${params.department})` : ''}.`,
+    '',
+    `Accept your invitation here: ${inviteUrl}`,
+    `Single-use invitation token: ${params.rawToken}`,
+    '',
+    'You can accept this invitation as a Business-Managed Agent (no personal CustomCare account required) or connect it to a personal CustomCare account to manage multiple workspaces.',
+    `This invitation link is single-use and expires on ${new Date(params.expiresAt).toUTCString()}.`,
+  ].join('\n');
+
+  const html = `
+    <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
+      <h2 style="margin: 0 0 12px; font-size: 20px;">Join ${safeOrg} on CustomCare</h2>
+      <p style="font-size: 14px; line-height: 1.6; color: #334155;">
+        <strong>${safeInviter}</strong> has invited you to join the <strong>${safeOrg}</strong> support workspace on CustomCare.
+      </p>
+      <ul style="font-size: 13px; color: #475569; line-height: 1.6;">
+        <li><strong>Assigned Role:</strong> ${safeRole}</li>
+        ${safeDept ? `<li><strong>Department / Team:</strong> ${safeDept}</li>` : ''}
+      </ul>
+      <p style="margin: 24px 0;">
+        <a href="${inviteUrl}" style="background: #0d9488; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: 600; font-size: 14px; display: inline-block;">
+          Accept Workspace Invitation
+        </a>
+      </p>
+      <p style="font-size: 12px; color: #64748b;">
+        Or enter this single-use invitation token: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${safeToken}</code>
+      </p>
+      <p style="font-size: 12px; color: #94a3b8; margin-top: 24px;">
+        This invitation link is time-limited, single-use, and revocable by the workspace administrator.
+      </p>
+    </div>
+  `;
+
+  return sendTransactionalEmail(
+    {
+      to: params.to,
+      subject,
+      html,
+      text,
+      devPreviewUrl: inviteUrl,
+      devToken: params.rawToken,
+    },
+    configOverrides,
+    envSource
+  );
+}
+
+
