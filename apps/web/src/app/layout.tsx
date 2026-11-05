@@ -55,6 +55,45 @@ export const metadata: Metadata = {
   },
 };
 
+const STREAM_GUARD_SCRIPT = `(function(){
+  if (typeof WritableStreamDefaultWriter !== 'undefined') {
+    var origWrite = WritableStreamDefaultWriter.prototype.write;
+    var origClose = WritableStreamDefaultWriter.prototype.close;
+    WritableStreamDefaultWriter.prototype.write = function(chunk) {
+      try {
+        if (this.desiredSize === null) return Promise.resolve();
+        return origWrite.call(this, chunk).catch(function(err) {
+          if (err && String(err.message || err).indexOf('CLOSED writable stream') !== -1) {
+            return;
+          }
+          throw err;
+        });
+      } catch (err) {
+        if (err && String(err.message || err).indexOf('CLOSED writable stream') !== -1) {
+          return Promise.resolve();
+        }
+        return Promise.reject(err);
+      }
+    };
+    WritableStreamDefaultWriter.prototype.close = function() {
+      try {
+        if (this.desiredSize === null) return Promise.resolve();
+        return origClose.call(this).catch(function(err) {
+          if (err && String(err.message || err).indexOf('CLOSED writable stream') !== -1) {
+            return;
+          }
+          throw err;
+        });
+      } catch (err) {
+        if (err && String(err.message || err).indexOf('CLOSED writable stream') !== -1) {
+          return Promise.resolve();
+        }
+        return Promise.reject(err);
+      }
+    };
+  }
+})();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -65,6 +104,9 @@ export default function RootLayout({
       lang="en"
       className={`${plusJakartaSans.variable} ${publicSans.variable} ${jetbrainsMono.variable}`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: STREAM_GUARD_SCRIPT }} />
+      </head>
       <body className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-600 selection:text-white">
         {children}
       </body>
