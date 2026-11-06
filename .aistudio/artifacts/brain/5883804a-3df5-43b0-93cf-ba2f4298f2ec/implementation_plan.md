@@ -1,112 +1,67 @@
-# Conversational Bot Upgrade & Guideline-Aware Response Engine
+# Implementation Plan: Telegram Mini App Agent Inbox & In-Conversation AI/KB Copilot
 
-This update transforms the Telegram and Web support bots from static menu-and-keyword responders into natural, multi-turn conversational assistants. Opening a bot for the first time sends a clean, friendly greeting without button clutter, raw uploaded guideline documents are automatically separated into internal guardrails versus customer-facing answers, and broad or complex issues trigger natural clarifying questions and detail gathering before escalating to a human agent.
+## 1. Architectural Overview
 
-### User Review & Critical Decisions
+We will extend **CustomCare** with two interconnected capabilities from the Telegram Serverless & Agent Dashboard architecture:
 
-> [!IMPORTANT]
-> The following product behaviors have been confirmed from your preferences and will govern this implementation:
+1. **Telegram Mini App (`WebApp`) Agent Inbox with Cryptographic `initData` Auto-Login**:
+   - Linked support agents and workspace admins can launch a dedicated, mobile- and desktop-optimized **Telegram Mini App** (`/tg-app`) directly from a **`web_app` button** inside the Telegram bot (`@getcustomcarebot` or their business's `@BotFather` sub-bot) or from escalation notifications.
+   - When opened inside Telegram, `window.Telegram.WebApp.initData` is sent to the backend (`/api/telegram/miniapp/session`), which cryptographically validates the Telegram signature using `HMAC-SHA256("WebAppData", botToken)` (supporting both the central bot token and any active dedicated business sub-bot token) and resolves the linked agent's approved `telegram_agent_links` + `organization_members` record.
+   - Upon verification, the Mini App automatically logs the agent into their unified inbox (and sets an authenticated session cookie) so they can filter queues (`Open`, `Unassigned`, `My Assigned`, `Escalated`, `Resolved`), switch across multiple linked businesses, claim/assign conversations, add private internal notes, use KB/AI draft assistance, and send bot-mediated replies without typing passwords on mobile.
 
-- **Confirmed Decision 1 — Natural First-Time Greeting (`/start`)**: When a customer opens the Telegram bot for the first time and taps **Start Bot** (`/start` or `/start <token>`), the bot treats it as an automated `"Hi"` and replies with a clean, friendly greeting (`"Hi there! How can {Business} help you today?"`) with **no category list and no inline menu buttons**. The `/menu` slash command remains available on demand.
-- **Confirmed Decision 2 — Guideline Filtering & Clarifying Questions**: Regardless of how raw an uploaded knowledge base file is, internal instructions (such as *"Ask the customer to..."*, *"They should not send..."*, *"Escalate for..."*, or *"What the AI Must Not Claim"*) are never echoed verbatim to customers. Broad statements like *"I have an issue with my account"* or *"My product details is not correct"* trigger natural clarifying questions rather than mismatched keyword dumps.
-- **Confirmed Decision 3 — Gather Details Before Escalation**: When an issue requires human verification or cannot be resolved from the knowledge base, the bot first asks the customer in chat for the relevant details (such as their account email, what specific detail or feature is affected, or transaction reference) and then escalates the enriched conversation to the human support queue.
-
----
-
-### 1. Overview & Core Concept
-
-- **What It Does**:
-  1. **Clean First-Time Bot Entry**: Replaces the wall of support topics and 9 inline keyboard buttons on `/start` with a natural conversational greeting identical to the web chat experience.
-  2. **Guideline-Aware Importer & Response Sanitizer**: Distinguishes between *internal bot instructions/guardrails* and *customer-facing answers* both when importing a file and when generating live responses. Third-person agent instructions (`"Ask the customer to contact..."`, `"They should not send..."`, `"Escalate for..."`) are automatically converted into polite, second-person customer speech (`"Please contact..."`, `"For your security, please do not share..."`).
-  3. **Multi-Turn Conversational State & Intent Disambiguation**: Tracks recent conversation messages across turns, responds naturally to pleasantries (`"How are you doing"`, `"Thanks"`), asks targeted clarifying questions when a customer makes a broad statement (`"I have an issue with my account"`), and collects required context before escalating to a human specialist.
-- **Target Audience / Persona**: Customers reaching out on Telegram or the Website Chat Widget who expect a natural, helpful human-like chat experience, and business admins who upload raw internal support handbooks without wanting internal agent phrasing leaked to users.
-- **Key Value**: Eliminates robotic menu walls, prevents embarrassing leaks of internal agent instructions, and resolves or triages customer issues through genuine back-and-forth dialogue.
+2. **In-Conversation Knowledge Base Search & 1-Click AI Draft Reply Copilot**:
+   - Inside both the main Web **Conversation Workspace** (`WorkspaceOperationsManager.tsx`) and the **Telegram Mini App** (`/tg-app`), agents get an integrated **AI & Knowledge Copilot** panel alongside the conversation composer.
+   - **1-Click AI Draft Reply**: Analyzes the selected customer conversation transcript against the organization's published Knowledge Base, FAQs, and troubleshooting procedures to generate a grounded, ready-to-review draft reply. Clicking **"Insert into Composer"** populates the reply box so the agent can review, edit, and send it (never auto-sending without agent confirmation).
+   - **Live In-Conversation KB Search**: Agents can search published articles and FAQs by keyword without leaving the conversation and insert any verified answer or snippet into the composer with one click.
 
 ---
 
-### 2. User Experience & Visual Design
+## 2. Planned Changes by Module
 
-- **Key User Flows**:
-  1. **First-Time Bot Start (`/start`)**:
-     - Customer opens the Telegram bot and taps **Start Bot**.
-     - Bot immediately replies: `"Hi there! How can PunterStats help you today?"` (with no topic list and no inline keyboard buttons attached).
-  2. **Casual Pleasantries & Small Talk**:
-     - Customer: `"How are you doing"`
-     - Bot: `"I'm doing well, thank you! How can I help you with PunterStats today?"` (instead of repeating the `"Hi there!"` greeting).
-  3. **Broad / Ambiguous Customer Statements**:
-     - Customer: `"I have an issue with my account"`
-     - Bot recognizes `"account"` is a broad topic covering login, password reset, email verification, and subscription/billing, and asks: `"I'd be happy to help with your account! Are you having trouble signing in, resetting your password, verifying your email, or managing your subscription?"`
-  4. **Guideline-Grounded Answers (No Raw Instruction Leaks)**:
-     - If the customer says `"I made a payment but my plan didn't update"`, instead of outputting raw handbook text (`"Ask the customer to contact... Escalate for verification"`), the bot responds directly to the customer: `"I can help get your payment verified by our team. Could you please share your account email, approximate payment date/time, amount, payment provider, and transaction reference? (For your security, please never share your full card number, CVV, PIN, or OTP.)"`
-  5. **Detail Gathering & Escalation**:
-     - Customer replies with the requested details (or explains `"My product details is not correct"` -> bot asks which page/module or account detail is inaccurate -> customer provides details).
-     - Once the customer provides the details (or asks for a human agent), the bot confirms and escalates the conversation to the human support queue with the full context attached.
-- **Visual Identity & Theme**:
-  - *Aesthetic Direction*: Clean, modern conversational workspace (neutral slate `#0F172A`, crisp white `#FFFFFF` surfaces, semantic teal `#0D9488` and blue `#2563EB` accents).
-  - *Typography & Hierarchy*: `Plus Jakarta Sans` for headings and chat interface controls; `JetBrains Mono` (`tabular-nums`) for timestamps and metrics; clean unboxed metadata separators (`·`) with zero decorative pill clutter in the admin preview modal.
-  - *Knowledge Upload Modal Preview*: Displays whether sections from an uploaded file were categorized as **Customer Help Articles**, **Approved FAQs**, or **Bot Guardrails & Instructions** so admins have transparent visibility into how raw documents are processed.
+### A. Cryptographic Telegram Mini App Authentication & Bot `web_app` Launcher (`/packages/database/src/d1-channel-service.ts`)
+- **Telegram `WebApp` Button Support**:
+  - Extend `TelegramInlineKeyboardButton` to support `web_app?: { url: string }`.
+  - Include a **📱 Open Agent Dashboard (Mini App)** `web_app` button (`https://.../tg-app`) in:
+    - The Agent Hub welcome/menu screen (`/start`, `/help`, `/queue` on `@getcustomcarebot`).
+    - Real-time escalation notifications (`notifyLinkedAgentsOfEscalation`) so agents can tap once on an alert to open that conversation directly in the Mini App (`/tg-app?conversationId=<id>`).
+- **Server-Side `initData` HMAC-SHA256 Verification (`verifyTelegramMiniAppInitData`)**:
+  - Parse the raw `initData` query string (`hash`, `auth_date`, `user`), sort all key-value pairs alphabetically (excluding `hash`), join with `\n`, and compute:
+    - `secretKey = HMAC_SHA256(key: "WebAppData", data: botToken)`
+    - `expectedHash = HMAC_SHA256(key: secretKey, data: dataCheckString)`
+  - Validate against the central `TELEGRAM_BOT_TOKEN` as well as any active encrypted `@BotFather` sub-bot tokens in `channel_integrations`.
+  - Enforce freshness (`auth_date` within 24 hours) and timing-safe hex comparison.
+  - Resolve the verified `telegramUserId` against `telegram_agent_links` (`status = 'linked'`) and active `organization_members`, returning the authenticated `CareFlowUserRecord`, active workspace membership, and linked agent profile.
+
+### B. Backend API Endpoints for Mini App Auth & Agent AI/KB Copilot (`/apps/web/src/app/api/...`)
+- **`POST /api/telegram/miniapp/session`** (`/apps/web/src/app/api/telegram/miniapp/session/route.ts`):
+  - Accepts `{ initData: string, organizationId?: string }`.
+  - Calls `channelService.authenticateTelegramMiniAppAgent({ initData, centralBotToken, preferredOrganizationId })`.
+  - Issues a signed CustomCare session cookie (`setSessionCookie`) and returns the agent's user profile, linked workspaces, active organization, and agent availability status.
+- **`POST /api/workspace/conversations/[id]/copilot`** (`/apps/web/src/app/api/workspace/conversations/[id]/copilot/route.ts`):
+  - Authenticated agent/admin endpoint for the active workspace.
+  - Supports two actions:
+    1. `action: 'suggest_reply'`: Uses the conversation's recent customer messages + `workspaceRepo.answerPortalQuestion` / `KnowledgeManagementService.retrievePublishedKnowledge` to generate a grounded draft reply, returning `{ suggestedReply, matchedSourceTitle, resolutionLayer, relevantSnippets }`.
+    2. `action: 'search_kb'`: Searches the organization's published FAQs and Knowledge Base articles for `query` (or defaults to the conversation's subject/category) and returns ranked articles and FAQs ready for 1-click insertion into the reply composer.
+
+### C. In-Conversation KB Search & AI Reply Copilot in Web Workspace (`/apps/web/src/components/admin/WorkspaceOperationsManager.tsx`)
+- Enhance the **Conversation Workspace** (right-hand context & tools column next to the message composer) with an interactive **AI & Knowledge Base Copilot** section:
+  - **"✨ Generate AI Draft Reply" button**: Fetches a grounded draft based on the customer's latest message in the thread, displays the suggested response with its source citation badge, and provides **"Insert into Reply"** and **"Regenerate"** actions.
+  - **Inline Knowledge Base Search**: Search input to query deposit troubleshooting, product instructions, or FAQs in real time without leaving the conversation, with a **"Use Answer"** button on each result that inserts the text directly into the agent's composer.
+
+### D. Standalone & Embedded Telegram Mini App Interface (`/apps/web/src/app/tg-app/page.tsx`)
+- Create `/tg-app`, a responsive, touch-friendly **Telegram Mini App Agent Dashboard** that:
+  - Loads the official `https://telegram.org/js/telegram-web-app.js` bridge (calling `Telegram.WebApp.ready()` and `Telegram.WebApp.expand()`).
+  - Auto-authenticates via `POST /api/telegram/miniapp/session` when launched inside Telegram, or falls back to the active CustomCare web session when opened in a desktop/mobile browser.
+  - Displays:
+    - **Agent Top Bar**: Agent name, `@username`, active business selector (for multi-business agents), and 1-tap availability toggle (`Available`, `Busy`, `Offline`).
+    - **KPI Summary Strip**: Open, Unassigned, My Active, Escalated, and Resolved counts.
+    - **Unified Inbox & Conversation Workspace**: Filterable queue list + full conversation thread, 1-click **Claim / Assign**, **Resolve / Reopen**, **Public Reply vs. Private Internal Note** toggle, and the **AI Draft Reply & KB Search Copilot** drawer.
 
 ---
 
-### 3. Key Product Decisions & Trade-Offs
-
-- **Decision 1: Dual-Layer Guideline Sanitization (Import-Time + Runtime)**
-  - *Chosen Approach*: Transform raw agent instructions into customer-facing phrasing during `parseKnowledgeDocument` **and** apply a runtime conversational voice filter in `answerPortalQuestion` + AI synthesis.
-  - *Why*: If an admin already uploaded a raw markdown file earlier, runtime sanitization ensures existing database records immediately stop leaking *"Ask the customer to..."* phrasing even without re-uploading the file, while re-uploading also stores clean customer-ready answers and extracts bot guardrails into workspace chatbot instructions.
-  - *Alternatives Considered*: Only sanitizing during file import (rejected because existing imported records in the database would still contain raw agent instructions).
-- **Decision 2: Specificity Scoring & Conversational Clarification Before Answering**
-  - *Chosen Approach*: Score query specificity and intent clarity before returning an FAQ or article. Single-noun or broad complaints (`"I have an issue with my account"`, `"My product details is not correct"`, `"It is not working"`) without a specific sub-intent trigger a conversational clarification prompt or AI-assisted multi-turn response rather than returning a low-precision keyword hit.
-  - *Why*: In the current engine, stop-words like `"have"`, `"issue"`, `"with"`, `"not"`, `"correct"` or broad words like `"account"` score +3 on whichever FAQ happens to contain those words first, causing irrelevant answers (like telling a user to check their spam folder when they said *"My product details is not correct"*).
-- **Decision 3: Two-Step Conversational Intake Before Human Escalation**
-  - *Chosen Approach*: Maintain a lightweight conversational state (`awaiting_clarification` / `gathering_escalation_details`) in the session/conversation history. When a customer's issue cannot be answered from the knowledge base or requires account/payment lookup, the bot asks once for the key details needed by an agent, and upon the customer's next reply, escalates the conversation to `PendingHuman` with those details included.
-  - *Why*: Prevents premature escalations on the first vague message while ensuring human agents receive actionable context.
-
----
-
-### 4. Technical Architecture & Data Strategy *(Technical Reference)*
-
-- **Architecture & Conversational Pipeline Diagram**:
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                   Telegram Bot / Web Widget / Support Portal               │
-└──────────────────────────────────────┬─────────────────────────────────────┘
-                                       │
-         ┌─────────────────────────────┴─────────────────────────────┐
-         ▼                                                           ▼
-┌─────────────────────────────────┐                       ┌──────────────────┐
-│ First-Time Start (/start)       │                       │ Customer Message │
-│ Treated as automated "Hi"       │                       │ + Chat History   │
-│ -> Sends clean natural greeting │                       └─────────┬────────┘
-│ -> No menu wall or buttons      │                                 │
-└─────────────────────────────────┘                                 ▼
-                                       ┌─────────────────────────────────────┐
-                                       │ Conversational Intent & Guardrails  │
-                                       │ 1. Pleasantries & Small Talk        │
-                                       │    ("Hi", "How are you doing", etc) │
-                                       │ 2. Broad Statement Detector         │
-                                       │    ("issue with account" -> clarify)│
-                                       │ 3. Stop-word filtered Semantic/FAQ  │
-                                       │    Retrieval + Guideline Sanitizer  │
-                                       │ 4. Gemini / AI Multi-Turn Synthesis │
-                                       │    (Enforces "What NOT to say")     │
-                                       │ 5. Pre-Escalation Detail Intake     │
-                                       │    -> Escalate to Human Queue       │
-                                       └─────────────────────────────────────┘
-```
-
-- **Data Model & State**:
-  - **Session State (`TelegramCustomerSessionState` & Widget Conversation History)**:
-    - Extend `TelegramCustomerSessionState` with optional `conversationStage?: 'active_chat' | 'awaiting_clarification' | 'awaiting_escalation_details'` and `pendingIssueTopic?: string`.
-    - Pass recent messages from `activeConv.messages` (last 6 turns) into `answerPortalQuestion` so both deterministic and AI-assisted layers have full multi-turn context.
-  - **Guideline & Instruction Separation (`importer.ts` & `d1-workspace-repository.ts`)**:
-    - Detect meta-guideline sections in uploaded documents (`Instructions for CustomCare AI`, `Limitations / What the AI Must Not Claim`, `Sample Support Conversations`, `Source Pages`) so internal meta-rules populate the bot's guardrail instructions rather than polluting public customer articles.
-    - Rewrite third-person agent directives (`"Ask the customer to..."`, `"Tell the user..."`, `"They should not send..."`, `"Escalate for..."`, `"Do not invent..."`) into natural customer-facing second-person prose.
-- **Interactive Component & State Mapping**:
-  - **Telegram `/start` & Greeting Handler (`d1-channel-service.ts`)**:
-    - Update `handleTelegramCustomerStart` and `/start` handling in `handleTelegramCustomerMessage` so first-time bot start sends the clean conversational greeting (`"Hi there! How can {Business} help you today?"`) with no inline keyboard and sets `step: 'other_enquiry'`.
-    - Separate `"How are you doing"` / `"How's it going"` from `"Hi"` in `classifyCustomerGreetingIntent` so each pleasantry receives a natural, distinct reply.
-  - **Conversational Engine (`d1-workspace-repository.ts` & `knowledge-runtime.ts`)**:
-    - Strip conversational filler/stop-words (`issue`, `problem`, `correct`, `working`, `details`, `with`, `have`, `want`, `know`, `more`, `about`) from keyword scoring so broad messages never match unrelated FAQs.
-    - Add broad-intent detectors (e.g., general `"what is {business} / know more about {business}"` -> answers with Platform Overview; broad `"issue with my account"` -> asks clarifying question about login, verification, or subscription; broad `"details not correct / something wrong"` -> asks which specific feature or account detail is affected).
-    - Upgrade the Gemini AI completion handler to use `@google/genai` with `gemini-3.8-flash`, multi-turn conversation history, and full workspace knowledge + guardrail rules so the bot holds natural multi-turn conversations and strictly obeys "what not to say" rules.
+## 3. Verification & Testing Plan
+- Add automated tests in `/tests/multichannel-support-os.test.ts` covering:
+  1. Cryptographic `initData` HMAC-SHA256 generation and verification (`authenticateTelegramMiniAppAgent`), including rejection of tampered hashes and unlinked Telegram users.
+  2. Agent Hub `/start` and escalation notifications including the `web_app` Mini App launcher button.
+  3. In-conversation KB search & AI reply suggestion generation grounded in the organization's knowledge base.
+- Run `npm test`, `compile_applet`, and `lint_applet` to ensure zero build or type errors.

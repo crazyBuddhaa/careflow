@@ -17,6 +17,7 @@ import {
   D1KnowledgeRepository,
   D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
+  createSignedTelegramMiniAppInitData,
   decryptIntegrationCredentials,
   encryptIntegrationCredentials,
   type TelegramOutboundMessagePayload,
@@ -1389,6 +1390,55 @@ describe('CustomCare Unified Multi-Channel Support OS (Phases 2–11)', () => {
         convAfterTurn2?.status,
         ConversationStatus.Escalated,
         'Conversation must transition to Escalated after customer shares issue details'
+      );
+
+      // 6i. Verify Telegram Mini App WebApp button and HMAC-SHA256 initData auto-login
+      const hubButtons = ctx.outboundTelegramLog.flatMap((m) => {
+        const kb = m.replyMarkup?.inline_keyboard as
+          | Array<Array<{ text: string; web_app?: { url: string } }>>
+          | undefined;
+        return (kb ?? []).flat();
+      });
+      assert.ok(
+        hubButtons.some((btn) => btn.web_app?.url.includes('/tg-app')),
+        'Agent Hub and escalation notifications must include a Telegram Mini App WebApp button'
+      );
+
+      const validInitData = createSignedTelegramMiniAppInitData({
+        botToken: rawSubBotToken,
+        user: {
+          id: 901001,
+          first_name: 'Chidi',
+          username: 'chidi_owner',
+        },
+      });
+      const miniAppAuth = await ctx.channelService.authenticateTelegramMiniAppAgent({
+        initData: validInitData,
+      });
+      assert.equal(miniAppAuth.user.id, userId);
+      assert.equal(miniAppAuth.activeWorkspace.organizationId, orgId);
+      assert.equal(miniAppAuth.telegramUser.id, 901001);
+      assert.equal(miniAppAuth.linkedWorkspaces.length, 1);
+
+      // Tampered initData signature must be rejected
+      const tamperedInitData = validInitData.replace(/hash=[0-9a-f]+/, 'hash=0000000000000000000000000000000000000000000000000000000000000000');
+      await assert.rejects(
+        () => ctx.channelService.authenticateTelegramMiniAppAgent({ initData: tamperedInitData }),
+        (err: Error) => err.message.includes('MINIAPP_AUTH_INVALID')
+      );
+
+      // Unlinked Telegram user with valid HMAC signature must be rejected
+      const unlinkedInitData = createSignedTelegramMiniAppInitData({
+        botToken: rawSubBotToken,
+        user: {
+          id: 999888,
+          first_name: 'Stranger',
+          username: 'stranger_tg',
+        },
+      });
+      await assert.rejects(
+        () => ctx.channelService.authenticateTelegramMiniAppAgent({ initData: unlinkedInitData }),
+        (err: Error) => err.message.includes('MINIAPP_AGENT_NOT_LINKED')
       );
     } finally {
       ctx.cleanup();

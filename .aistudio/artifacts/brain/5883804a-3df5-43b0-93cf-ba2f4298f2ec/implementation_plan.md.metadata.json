@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for natural Telegram first-time greeting (/start as automated 'Hi' without menu buttons), intelligent sanitization of raw uploaded guideline files (distinguishing internal agent instructions from customer-facing responses), multi-turn conversational context with clarifying questions for broad statements, and conversational detail gathering prior to human escalation.",
-  "updatedAt": "2026-11-06T08:58:00.998796621Z",
+  "summary": "Implementation plan for the Telegram Mini App Agent Inbox (with cryptographic HMAC-SHA256 initData verification and WebApp launcher buttons) and the In-Conversation Knowledge Base Search & 1-Click AI Draft Reply Copilot inside the Agent Workspace.",
+  "updatedAt": "2026-11-06T10:32:52.803624078Z",
   "requestFeedback": true,
   "userFacing": true
 }

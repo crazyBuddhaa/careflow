@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   ConversationStatus,
   EscalationPriority,
@@ -135,6 +135,149 @@ export function decryptIntegrationCredentials(
     return decrypted.toString('utf8');
   } catch {
     return null;
+  }
+}
+
+export interface TelegramMiniAppUserPayload {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  language_code?: string;
+  photo_url?: string;
+}
+
+/**
+ * Generates a cryptographically signed Telegram Mini App `initData` query string
+ * matching Telegram's official WebApp HMAC-SHA256 signature algorithm.
+ */
+export function createSignedTelegramMiniAppInitData(params: {
+  user: TelegramMiniAppUserPayload;
+  botToken: string;
+  authDate?: number;
+  queryId?: string;
+}): string {
+  const authDate = params.authDate ?? Math.floor(Date.now() / 1000);
+  const entries: Record<string, string> = {
+    auth_date: String(authDate),
+    query_id: params.queryId ?? `AAH_${randomBytes(6).toString('hex')}`,
+    user: JSON.stringify(params.user),
+  };
+
+  const dataCheckString = Object.keys(entries)
+    .sort()
+    .map((k) => `${k}=${entries[k]}`)
+    .join('\n');
+
+  const secretKey = createHmac('sha256', 'WebAppData')
+    .update(params.botToken.trim())
+    .digest();
+  const hash = createHmac('sha256', secretKey)
+    .update(dataCheckString)
+    .digest('hex');
+
+  const searchParams = new URLSearchParams({
+    ...entries,
+    hash,
+  });
+  return searchParams.toString();
+}
+
+/**
+ * Verifies a Telegram Mini App `initData` query string against one or more candidate bot tokens
+ * using Telegram's official HMAC-SHA256("WebAppData", botToken) specification.
+ */
+export function verifyTelegramMiniAppInitData(
+  initData: string,
+  candidateBotTokens: string[],
+  maxAgeSeconds = 86400,
+  nowMs?: number
+): {
+  valid: boolean;
+  user?: TelegramMiniAppUserPayload;
+  authDate?: number;
+  reason?: string;
+} {
+  if (!initData || typeof initData !== 'string' || !initData.trim()) {
+    return { valid: false, reason: 'Missing Telegram Mini App initData.' };
+  }
+
+  const validTokens = candidateBotTokens
+    .map((t) => (t || '').trim())
+    .filter((t) => t.length >= 10);
+  if (validTokens.length === 0) {
+    return { valid: false, reason: 'No active Telegram bot token configured for verification.' };
+  }
+
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(initData);
+  } catch {
+    return { valid: false, reason: 'Malformed initData query string.' };
+  }
+
+  const providedHash = params.get('hash')?.trim().toLowerCase() ?? '';
+  const authDateStr = params.get('auth_date')?.trim() ?? '';
+  const userJson = params.get('user')?.trim() ?? '';
+
+  if (!providedHash || !/^[0-9a-f]{64}$/.test(providedHash)) {
+    return { valid: false, reason: 'Missing or invalid initData signature hash.' };
+  }
+
+  const authDate = Number(authDateStr);
+  if (!Number.isFinite(authDate) || authDate <= 0) {
+    return { valid: false, reason: 'Invalid auth_date in initData.' };
+  }
+
+  const currentEpochSec = Math.floor((nowMs ?? Date.now()) / 1000);
+  if (currentEpochSec - authDate > maxAgeSeconds || authDate > currentEpochSec + 300) {
+    return { valid: false, reason: 'Telegram Mini App session has expired.' };
+  }
+
+  const pairs: string[] = [];
+  params.forEach((value, key) => {
+    if (key !== 'hash') {
+      pairs.push(`${key}=${value}`);
+    }
+  });
+  pairs.sort();
+  const dataCheckString = pairs.join('\n');
+
+  const providedBuf = Buffer.from(providedHash, 'hex');
+  let signatureMatched = false;
+
+  for (const token of validTokens) {
+    const secretKey = createHmac('sha256', 'WebAppData').update(token).digest();
+    const expectedHex = createHmac('sha256', secretKey)
+      .update(dataCheckString)
+      .digest('hex');
+    const expectedBuf = Buffer.from(expectedHex, 'hex');
+
+    if (
+      providedBuf.length === expectedBuf.length &&
+      timingSafeEqual(providedBuf, expectedBuf)
+    ) {
+      signatureMatched = true;
+      break;
+    }
+  }
+
+  if (!signatureMatched) {
+    return { valid: false, reason: 'Telegram Mini App HMAC signature verification failed.' };
+  }
+
+  try {
+    const parsedUser = JSON.parse(userJson) as TelegramMiniAppUserPayload;
+    if (!parsedUser || typeof parsedUser.id !== 'number') {
+      return { valid: false, reason: 'Missing Telegram user ID in initData.' };
+    }
+    return {
+      valid: true,
+      user: parsedUser,
+      authDate,
+    };
+  } catch {
+    return { valid: false, reason: 'Invalid user JSON in initData.' };
   }
 }
 
@@ -1764,11 +1907,137 @@ export class D1ChannelIntegrationService {
     return { notified: false };
   }
 
+  /**
+   * Authenticates a Telegram Mini App (`WebApp`) launch request by cryptographically verifying
+   * `initData` via HMAC-SHA256 against the platform's central bot token or any active dedicated
+   * business sub-bot token, and resolving the user's linked CustomCare agent membership.
+   */
+  async authenticateTelegramMiniAppAgent(params: {
+    initData: string;
+    centralBotToken?: string;
+    preferredOrganizationId?: string;
+    nowMs?: number;
+  }): Promise<{
+    telegramUser: TelegramMiniAppUserPayload;
+    user: {
+      id: string;
+      email: string;
+      fullName: string;
+    };
+    activeWorkspace: {
+      organizationId: string;
+      organizationName: string;
+      organizationSlug: string;
+      role: UserRole;
+      availability: AgentAvailability;
+    };
+    linkedWorkspaces: Array<{
+      organizationId: string;
+      organizationName: string;
+      organizationSlug: string;
+      role: UserRole;
+    }>;
+  }> {
+    const candidateTokens: string[] = [];
+    if (params.centralBotToken && params.centralBotToken.trim().length >= 10) {
+      candidateTokens.push(params.centralBotToken.trim());
+    }
+
+    const { results: activeTgRows } = await this.db
+      .prepare(
+        `SELECT encrypted_credentials FROM channel_integrations
+         WHERE channel = 'telegram' AND status = 'active' AND encrypted_credentials IS NOT NULL`
+      )
+      .all<{ encrypted_credentials: string | null }>();
+
+    for (const row of activeTgRows) {
+      const creds = this.parseEncryptedSubBotCredentials(row.encrypted_credentials);
+      if (creds?.botToken && !candidateTokens.includes(creds.botToken)) {
+        candidateTokens.push(creds.botToken);
+      }
+    }
+
+    // In local dev/test when no live TELEGRAM_BOT_TOKEN is set in env, include deterministic test fallback token
+    if (candidateTokens.length === 0) {
+      candidateTokens.push('careflow_default_test_central_bot_token_2026');
+    }
+
+    const verification = verifyTelegramMiniAppInitData(
+      params.initData,
+      candidateTokens,
+      86400,
+      params.nowMs
+    );
+
+    if (!verification.valid || !verification.user) {
+      throw new Error(
+        `MINIAPP_AUTH_INVALID: ${verification.reason || 'Invalid Telegram Mini App signature.'}`
+      );
+    }
+
+    const telegramUserId = String(verification.user.id);
+    const verifiedLinks = await this.resolveVerifiedAgentLinksForTelegramUser(telegramUserId);
+
+    if (verifiedLinks.length === 0) {
+      throw new Error(
+        'MINIAPP_AGENT_NOT_LINKED: Your Telegram account is not linked to an active CustomCare agent workspace. Open the CustomCare web dashboard -> Channels & Integrations -> Telegram Agent Companion to link your account first.'
+      );
+    }
+
+    const selectedLink =
+      (params.preferredOrganizationId
+        ? verifiedLinks.find((l) => l.organization_id === params.preferredOrganizationId)
+        : undefined) ??
+      verifiedLinks.find((l) => l.organization_id === l.active_organization_id) ??
+      verifiedLinks[0]!;
+
+    const nowIso = new Date(params.nowMs ?? Date.now()).toISOString();
+    await this.db
+      .prepare(
+        `UPDATE telegram_agent_links
+         SET active_organization_id = ?, updated_at = ?
+         WHERE telegram_user_id = ? AND status = 'linked'`
+      )
+      .bind(selectedLink.organization_id, nowIso, telegramUserId)
+      .run();
+
+    const agentRow = await this.db
+      .prepare(
+        `SELECT availability FROM support_agents
+         WHERE organization_id = ? AND LOWER(email) = ?`
+      )
+      .bind(selectedLink.organization_id, selectedLink.user_email.toLowerCase())
+      .first<{ availability: AgentAvailability }>();
+
+    return {
+      telegramUser: verification.user,
+      user: {
+        id: selectedLink.user_id,
+        email: selectedLink.user_email,
+        fullName: selectedLink.user_full_name,
+      },
+      activeWorkspace: {
+        organizationId: selectedLink.organization_id,
+        organizationName: selectedLink.org_name,
+        organizationSlug: selectedLink.org_slug,
+        role: selectedLink.member_role,
+        availability: agentRow?.availability ?? 'available',
+      },
+      linkedWorkspaces: verifiedLinks.map((l) => ({
+        organizationId: l.organization_id,
+        organizationName: l.org_name,
+        organizationSlug: l.org_slug,
+        role: l.member_role,
+      })),
+    };
+  }
+
   private async notifyLinkedAgentsOfEscalation(params: {
     organizationId: string;
     organizationName: string;
     conversation: WorkspaceConversationItem;
     botToken?: string;
+    appBaseUrl?: string;
   }): Promise<void> {
     const { results: linkedAgents } = await this.db
       .prepare(
@@ -1786,6 +2055,11 @@ export class D1ChannelIntegrationService {
       .bind(params.organizationId)
       .all<{ telegram_chat_id: string; full_name: string }>();
 
+    const baseUrl = (params.appBaseUrl || 'https://getcustomcare.xyz').replace(/\/+$/, '');
+    const miniAppUrl = `${baseUrl}/tg-app?conversationId=${encodeURIComponent(
+      params.conversation.id
+    )}&orgId=${encodeURIComponent(params.organizationId)}`;
+
     for (const agent of linkedAgents) {
       if (!agent.telegram_chat_id) continue;
       await this.sendTelegram(
@@ -1796,7 +2070,27 @@ export class D1ChannelIntegrationService {
             `Customer: ${params.conversation.customerName}\n` +
             `Category: ${params.conversation.category} · Priority: ${params.conversation.priority.toUpperCase()}\n` +
             `Subject: ${params.conversation.subject}\n\n` +
-            `Reply with:\n/open ${params.conversation.id}\n/accept ${params.conversation.id}\n/reply ${params.conversation.id} <your message>`,
+            `Open the Agent Mini App below or reply with:\n/open ${params.conversation.id}\n/accept ${params.conversation.id}\n/reply ${params.conversation.id} <your message>`,
+          replyMarkup: {
+            inline_keyboard: [
+              [
+                {
+                  text: '📱 Open in Agent Mini App',
+                  web_app: { url: miniAppUrl },
+                },
+              ],
+              [
+                {
+                  text: '✅ Accept Conversation',
+                  callback_data: `ag:accept:${params.conversation.id}`,
+                },
+                {
+                  text: '📂 Inspect Thread',
+                  callback_data: `ag:open:${params.conversation.id}`,
+                },
+              ],
+            ],
+          },
         },
         params.botToken
       );
@@ -4104,7 +4398,16 @@ export class D1ChannelIntegrationService {
       return text;
     };
 
-    const lower = rawText.toLowerCase();
+    const normalizedText = rawText.startsWith('ag:open:')
+      ? `/open ${rawText.slice('ag:open:'.length)}`
+      : rawText.startsWith('ag:accept:')
+        ? `/accept ${rawText.slice('ag:accept:'.length)}`
+        : rawText === 'ag:priority'
+          ? '/priority'
+          : rawText;
+    const lower = normalizedText.toLowerCase();
+    const miniAppBaseUrl = (params.appBaseUrl || 'https://getcustomcare.xyz').replace(/\/+$/, '');
+    const miniAppUrl = `${miniAppBaseUrl}/tg-app?orgId=${encodeURIComponent(organizationId)}`;
 
     // /mybot or ag:mybot — Show Business's Customer Links (both Central Bot link AND connected Sub-Bot)
     if (lower === '/mybot' || lower === 'ag:mybot') {
@@ -4133,6 +4436,12 @@ export class D1ChannelIntegrationService {
           `💡 Customers can message either link with "/start" or simply "Hi" / "Hello" to receive personalized support!`,
         {
           inline_keyboard: [
+            [
+              {
+                text: '📱 Open Agent Dashboard (Mini App)',
+                web_app: { url: miniAppUrl },
+              },
+            ],
             [
               { text: '🤖 Connect / Update Sub-Bot', callback_data: 'ag:connectbot_prompt' },
               ...(subBotUsername
@@ -4375,7 +4684,7 @@ export class D1ChannelIntegrationService {
 
     // /open <conv_id>
     if (lower.startsWith('/open ')) {
-      const convId = rawText.slice('/open '.length).trim();
+      const convId = normalizedText.slice('/open '.length).trim();
       const conv = await this.workspaceRepo.getConversationById(organizationId, convId, {
         includeInternalNotes: true,
       });
@@ -4406,7 +4715,21 @@ export class D1ChannelIntegrationService {
           `Assigned: ${conv.assignedAgentName ?? 'Unassigned'}\n\n` +
           `Recent History:\n${recentMsgs}\n\n` +
           `Reply with: /reply ${conv.id} <message>\n` +
-          `Add private note: /note ${conv.id} <note>`
+          `Add private note: /note ${conv.id} <note>`,
+        {
+          inline_keyboard: [
+            [
+              {
+                text: '📱 Open Thread in Mini App',
+                web_app: {
+                  url: `${miniAppBaseUrl}/tg-app?conversationId=${encodeURIComponent(
+                    conv.id
+                  )}&orgId=${encodeURIComponent(organizationId)}`,
+                },
+              },
+            ],
+          ],
+        }
       );
       return {
         handled: true,
@@ -4427,7 +4750,7 @@ export class D1ChannelIntegrationService {
         return { handled: true, deduplicated: false, mode: 'agent', organizationId, replyText };
       }
 
-      const convId = rawText.slice('/accept '.length).trim();
+      const convId = normalizedText.slice('/accept '.length).trim();
       const updated = await this.workspaceRepo.updateConversationStatus({
         organizationId,
         conversationId: convId,
@@ -4654,6 +4977,12 @@ export class D1ChannelIntegrationService {
         `• /workspace — Switch active business`,
       {
         inline_keyboard: [
+          [
+            {
+              text: '📱 Open Agent Dashboard (Mini App)',
+              web_app: { url: miniAppUrl },
+            },
+          ],
           [
             { text: '🔗 My Business Bot Links', callback_data: 'ag:mybot' },
             { text: '🤖 Connect Sub-Bot Token', callback_data: 'ag:connectbot_prompt' },
