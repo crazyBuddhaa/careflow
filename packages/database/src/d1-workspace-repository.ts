@@ -106,11 +106,18 @@ interface OrgWithSettingsRow extends OrgRow {
   published_faq_count?: number;
 }
 
+export interface ConversationHistoryTurn {
+  role: 'customer' | 'bot' | 'agent';
+  text: string;
+}
+
 export interface PortalResolutionAccessOptions {
   requirePublished?: boolean;
   viewerUserId?: string;
   viewerOrganizationId?: string;
   aiCompletionHandler?: ExternalAiCompletionHandler;
+  conversationHistory?: ConversationHistoryTurn[];
+  interactiveConversation?: boolean;
 }
 
 const DUMMY_TIMING_PASSWORD_HASH = hashPassword('careflow-constant-time-dummy-secret-2026');
@@ -203,6 +210,7 @@ export type ExternalAiCompletionHandler = (params: {
   supportedTopics: string[];
   restrictedTopics: string[];
   knowledgeContext: string;
+  conversationHistory?: ConversationHistoryTurn[];
 }) => Promise<string | null>;
 
 interface AgentRow {
@@ -228,12 +236,206 @@ function createId(prefix: string): string {
   return `${prefix}_${rand}`;
 }
 
-function tokenizeWords(input: string): string[] {
+const CONVERSATIONAL_STOP_WORDS = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'that',
+  'this',
+  'from',
+  'your',
+  'you',
+  'are',
+  'was',
+  'were',
+  'have',
+  'has',
+  'had',
+  'not',
+  'but',
+  'what',
+  'when',
+  'where',
+  'which',
+  'who',
+  'whom',
+  'whose',
+  'why',
+  'how',
+  'can',
+  'could',
+  'would',
+  'should',
+  'will',
+  'shall',
+  'may',
+  'might',
+  'must',
+  'need',
+  'want',
+  'like',
+  'know',
+  'more',
+  'about',
+  'into',
+  'onto',
+  'upon',
+  'over',
+  'under',
+  'some',
+  'any',
+  'all',
+  'just',
+  'very',
+  'too',
+  'also',
+  'only',
+  'even',
+  'still',
+  'already',
+  'there',
+  'here',
+  'they',
+  'them',
+  'their',
+  'ours',
+  'mine',
+  'his',
+  'her',
+  'its',
+  'does',
+  'did',
+  'done',
+  'doing',
+  'been',
+  'being',
+  'get',
+  'got',
+  'getting',
+  'make',
+  'made',
+  'making',
+  'issue',
+  'issues',
+  'problem',
+  'problems',
+  'help',
+  'please',
+  'thanks',
+  'thank',
+  'hello',
+  'hey',
+  'correct',
+  'wrong',
+  'working',
+  'work',
+  'something',
+  'anything',
+  'everything',
+  'nothing',
+  'details',
+  'detail',
+  'info',
+  'information',
+  'tell',
+  'ask',
+  'asked',
+  'question',
+  'questions',
+]);
+
+function tokenizeWords(input: string, includeStopWords = false): string[] {
   return input
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length >= 3);
+    .filter((w) => w.length >= 3 && (includeStopWords || !CONVERSATIONAL_STOP_WORDS.has(w)));
+}
+
+export function sanitizeCustomerFacingText(rawText: string): string {
+  if (!rawText) return '';
+  let text = rawText;
+
+  // Convert third-person agent instructions into polite second-person customer responses
+  text = text.replace(
+    /\bAsk the customer to contact\s+([^\s.,;]+)\s+with\s+/gi,
+    'Please contact $1 and include '
+  );
+  text = text.replace(/\bAsk the customer to contact\s+/gi, 'Please contact ');
+  text = text.replace(
+    /\bAsk the customer to provide\s+/gi,
+    'Could you please share '
+  );
+  text = text.replace(/\bAsk the customer to\s+/gi, 'Please ');
+  text = text.replace(/\bAsk the customer for\s+/gi, 'Could you please share ');
+  text = text.replace(/\bAsk the user to\s+/gi, 'Please ');
+  text = text.replace(/\bAsk the user for\s+/gi, 'Could you please share ');
+  text = text.replace(
+    /\bApologise and explain that\s+/gi,
+    "We're sorry for the inconvenience — "
+  );
+  text = text.replace(
+    /\bApologize and explain that\s+/gi,
+    "We're sorry for the inconvenience — "
+  );
+  text = text.replace(/\bDirect the customer to\s+/gi, 'Please check ');
+  text = text.replace(/\bAdvise the customer to\s+/gi, 'Please ');
+  text = text.replace(/\bRemind the customer that\s+/gi, 'Please note that ');
+  text = text.replace(/\bInform the customer that\s+/gi, '');
+  text = text.replace(/\bTell the customer that\s+/gi, '');
+  text = text.replace(/\bExplain to the customer that\s+/gi, '');
+  text = text.replace(
+    /\b(?:They|The customer)\s+should not send\s+/gi,
+    'For your security, please do not send '
+  );
+  text = text.replace(
+    /\b(?:They|The customer)\s+should never send\s+/gi,
+    'For your security, please never send '
+  );
+  text = text.replace(/\b(?:They|The customer)\s+should\s+/gi, 'Please ');
+  text = text.replace(/\bthe customer's\b/gi, 'your');
+  text = text.replace(/\bThe customer's\b/g, 'Your');
+  text = text.replace(/\bthe customer\b/gi, 'you');
+
+  // Remove or rewrite internal escalation / prohibition directives meant only for the bot/agent
+  text = text.replace(
+    /\bEscalate for payment-provider and subscription-status verification\.?/gi,
+    'Our support team can verify your payment provider and subscription status once you share those details.'
+  );
+  text = text.replace(
+    /\bEscalate(?:\s+the\s+issue|\s+to\s+human\s+support|\s+for\s+[^.!\n]+)[.!]?/gi,
+    'Our support team can review this for you once you share those details.'
+  );
+  text = text.replace(
+    /\bDo not promise[^.!\n]*[.!]?/gi,
+    ''
+  );
+  text = text.replace(
+    /\bDo not invent[^.!\n]*[.!]?/gi,
+    ''
+  );
+  text = text.replace(
+    /\bDo not claim[^.!\n]*[.!]?/gi,
+    ''
+  );
+
+  return text
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .trim();
+}
+
+function isInternalMetaGuidelineTitle(title: string): boolean {
+  const lower = title.toLowerCase();
+  return (
+    /instructions?\s+for\s+the\s+.*ai/i.test(lower) ||
+    /bot\s+instructions|system\s+prompt|agent\s+guidelines/i.test(lower) ||
+    /known\s+limitations.*must\s+not\s+invent/i.test(lower) ||
+    /facts\s+the\s+ai\s+must\s+not/i.test(lower) ||
+    /official\s+source\s+pages/i.test(lower) ||
+    /escalation\s+and\s+safe\s+handling\s+rules/i.test(lower)
+  );
 }
 
 function getFallbackPresetForOrg(org: OrgRow): BusinessPortalConfig {
@@ -258,9 +460,14 @@ function getFallbackPresetForOrg(org: OrgRow): BusinessPortalConfig {
 
 export class D1WorkspaceRepository {
   private readonly db: D1DatabaseLike;
+  private readonly defaultAiCompletionHandler?: ExternalAiCompletionHandler;
 
-  constructor(db: D1DatabaseLike) {
+  constructor(
+    db: D1DatabaseLike,
+    options?: { aiCompletionHandler?: ExternalAiCompletionHandler }
+  ) {
     this.db = db;
+    this.defaultAiCompletionHandler = options?.aiCompletionHandler;
   }
 
   private async getActiveOrgBySlug(slug: string): Promise<OrgRow | null> {
@@ -377,36 +584,40 @@ export class D1WorkspaceRepository {
         .all<PublishedFaqJoinRow>(),
     ]);
 
-    const liveArticles: PortalKnowledgePreviewItem[] = articleRows.results.map((r) => {
-      let tags: string[] = [];
-      try {
-        const parsed = JSON.parse(r.tags_json);
-        if (Array.isArray(parsed)) {
-          tags = parsed.filter((t): t is string => typeof t === 'string');
+    const liveArticles: PortalKnowledgePreviewItem[] = articleRows.results
+      .filter((r) => !isInternalMetaGuidelineTitle(r.title))
+      .map((r) => {
+        let tags: string[] = [];
+        try {
+          const parsed = JSON.parse(r.tags_json);
+          if (Array.isArray(parsed)) {
+            tags = parsed.filter((t): t is string => typeof t === 'string');
+          }
+        } catch {
+          tags = [];
         }
-      } catch {
-        tags = [];
-      }
 
-      return {
-        id: r.id,
-        slug: r.slug,
-        title: r.title,
-        category: r.category_name ?? 'General',
-        summary: r.short_description,
-        content: r.content,
-        tags,
-        updatedAt: r.updated_at,
-      };
-    });
+        return {
+          id: r.id,
+          slug: r.slug,
+          title: r.title,
+          category: r.category_name ?? 'General',
+          summary: sanitizeCustomerFacingText(r.short_description),
+          content: sanitizeCustomerFacingText(r.content),
+          tags,
+          updatedAt: r.updated_at,
+        };
+      });
 
-    const liveFaqs: PortalFaqItem[] = faqRows.results.map((f) => ({
-      id: f.id,
-      question: f.question,
-      answer: f.answer,
-      categoryId: f.category_id ?? 'general',
-      categoryName: f.category_name ?? 'General',
-    }));
+    const liveFaqs: PortalFaqItem[] = faqRows.results
+      .filter((f) => !isInternalMetaGuidelineTitle(f.question))
+      .map((f) => ({
+        id: f.id,
+        question: f.question,
+        answer: sanitizeCustomerFacingText(f.answer),
+        categoryId: f.category_id ?? 'general',
+        categoryName: f.category_name ?? 'General',
+      }));
 
     return {
       ...baseConfig,
@@ -909,14 +1120,172 @@ export class D1WorkspaceRepository {
       };
     }
 
+    // 1c. Business Overview / "What is {Business}" / "I want to know more about {Business}"
+    const bizNameLower = portal.branding.displayName.toLowerCase();
+    const bizBaseLower = bizNameLower.replace(/s$/, '');
+    const slugPlain = portal.slug.replace(/-/g, ' ').toLowerCase();
+    const isAboutBusinessQuery =
+      /\b(?:what\s+is|tell\s+me\s+(?:more\s+)?about|know\s+more\s+about|learn\s+(?:more\s+)?about|how\s+does\s+.*\s+work|what\s+does\s+.*\s+do|explain\s+what)\b/i.test(
+        questionLower
+      ) &&
+      (questionLower.includes(bizBaseLower) ||
+        questionLower.includes(slugPlain) ||
+        /\b(?:this\s+(?:platform|service|site|app|company|business)|your\s+(?:platform|service|company|product))\b/i.test(
+          questionLower
+        ));
+
+    if (isAboutBusinessQuery) {
+      const overviewFaq = portal.faqs.find((f) =>
+        /\b(?:what\s+is|how\s+does\s+.*\s+work|what\s+does\s+.*\s+do)\b/i.test(f.question)
+      );
+      if (overviewFaq) {
+        return {
+          reply: sanitizeCustomerFacingText(overviewFaq.answer),
+          resolutionLayer: 'business-rules',
+          matchedSourceTitle: overviewFaq.question,
+          suggestEscalation: false,
+          suggestedTopic: overviewFaq.categoryName ?? 'General',
+        };
+      }
+
+      const overviewArticle = portal.publishedKnowledge.find(
+        (a) =>
+          /\b(?:overview|what\s+is|getting\s+started|about)\b/i.test(a.title) ||
+          /\b(?:overview|general)\b/i.test(a.category)
+      );
+      if (overviewArticle) {
+        const snippet = overviewArticle.content
+          ? overviewArticle.content.split('\n\n')[0] ?? overviewArticle.summary
+          : overviewArticle.summary;
+        return {
+          reply: sanitizeCustomerFacingText(snippet),
+          resolutionLayer: 'knowledge-base',
+          matchedSourceTitle: overviewArticle.title,
+          matchedArticleSlug: overviewArticle.slug,
+          suggestEscalation: false,
+          suggestedTopic: overviewArticle.category,
+        };
+      }
+
+      return {
+        reply: `${portal.branding.displayName} — ${portal.welcomeDescription} We can help you with ${portal.chatbot.supportedTopics.join(', ')}. What would you like to explore?`,
+        resolutionLayer: 'business-rules',
+        suggestEscalation: false,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    // 1d. Broad / Underspecified Issue Clarifier
+    // When a customer makes a broad trouble statement (e.g. "I have an issue with my account",
+    // "My product details is not correct", "I have a payment issue", "I need help") without
+    // specifying the concrete sub-problem, ask a natural clarifying question instead of guessing a random FAQ.
+    const specificSubtopicRegex =
+      /\b(?:password|reset|forgot|verification|verify|otp|code|create|register|signup|sign\s+up|delete|close|cancel|refund|twice|duplicate|double|price|pricing|cost|how\s+much|free|pro\s+plan|subscription\s+plan|guarantee|guaranteed|sure\s+win|fixed\s+match|accuracy|football|soccer|basketball|tennis|halftime|over|under|btts|privacy|terms|cookie|hours|warranty|inverter|customs|clearance|delivery|lagos|limit|virtual\s+card|sso|saml)\b/i;
+
+    const history = options?.conversationHistory ?? [];
+    const lastBotTurn = [...history]
+      .reverse()
+      .find((t) => t.role === 'bot');
+    const botAlreadyAskedForDetails = Boolean(
+      lastBotTurn &&
+        /\b(?:could\s+you\s+(?:share|tell|let\s+me\s+know|provide)|please\s+(?:share|let\s+me\s+know|tell\s+me)|which\s+specific|what\s+is\s+happening|are\s+you\s+having\s+trouble|so\s+i\s+can\s+pass|before\s+i\s+escalate|once\s+you\s+share\s+those\s+details)\b/i.test(
+          lastBotTurn.text
+        )
+    );
+
+    if (!specificSubtopicRegex.test(questionLower) && !botAlreadyAskedForDetails) {
+      const isBroadAccountIssue =
+        /\b(?:account|login|sign\s*in|profile)\b/i.test(questionLower) &&
+        /\b(?:issue|issues|problem|problems|trouble|wrong|incorrect|not\s+correct|error|help|not\s+working|fix|broken)\b/i.test(
+          questionLower
+        ) &&
+        queryWords.length <= 3;
+
+      if (isBroadAccountIssue) {
+        return {
+          reply: `I'd be happy to help with your account! Could you share a bit more about what's happening — for example, are you having trouble signing in, resetting your password, receiving a verification email, or checking your subscription status?`,
+          resolutionLayer: 'guided-troubleshooting',
+          suggestEscalation: false,
+          suggestedTopic: 'Account & Login',
+        };
+      }
+
+      const isBroadProductOrDataIssue =
+        /\b(?:product|detail|details|stat|stats|statistic|statistics|data|prediction|predictions|match|score|info|information|page|feature)\b/i.test(
+          questionLower
+        ) &&
+        /\b(?:not\s+correct|incorrect|wrong|inaccurate|error|issue|issues|problem|problems|missing|outdated|broken|bad|weird)\b/i.test(
+          questionLower
+        ) &&
+        queryWords.length <= 4;
+
+      if (isBroadProductOrDataIssue) {
+        return {
+          reply: `I'm sorry to hear something looks inaccurate. Could you tell me which specific feature, page, or item detail looks incorrect, along with what you expected to see? Once you share those details, I can check this for you or pass it straight to our support team.`,
+          resolutionLayer: 'guided-troubleshooting',
+          suggestEscalation: false,
+          suggestedTopic: 'Product Support',
+        };
+      }
+
+      const isBroadPaymentIssue =
+        /\b(?:payment|billing|subscription|charge|charged|card|deposit|upgrade)\b/i.test(
+          questionLower
+        ) &&
+        /\b(?:issue|issues|problem|problems|trouble|wrong|incorrect|not\s+correct|error|help|not\s+working|failed|pending)\b/i.test(
+          questionLower
+        ) &&
+        queryWords.length <= 3;
+
+      if (isBroadPaymentIssue) {
+        return {
+          reply: `I can help with billing and subscription questions. Could you let me know what happened — for example, did you complete a payment that hasn't reflected on your account yet, or did you encounter a checkout error? (For your security, please never share full card numbers, CVV, PINs, or OTPs.)`,
+          resolutionLayer: 'guided-troubleshooting',
+          suggestEscalation: false,
+          suggestedTopic: 'Billing & Subscriptions',
+        };
+      }
+
+      const isGenericHelpRequest =
+        /^(?:i\s+need\s+help|help\s+me|can\s+you\s+help(?:\s+me)?|i\s+have\s+an?\s+(?:issue|problem|question)|something\s+is\s+(?:wrong|not\s+working|broken)|is\s+anyone\s+there|anyone\s+online)[!.?,\s]*$/i.test(
+          questionLower
+        );
+
+      if (isGenericHelpRequest) {
+        return {
+          reply: `I'm here to help! Could you tell me a little more about what you're experiencing or what question you have regarding ${portal.branding.displayName}?`,
+          resolutionLayer: 'guided-troubleshooting',
+          suggestEscalation: false,
+          suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+        };
+      }
+    }
+
     // 2. Approved FAQ & Published Knowledge Base Retrieval
+    // Remove the business name itself from generic scoring unless no other words exist
+    const nonBizQueryWords = queryWords.filter(
+      (w) => w !== bizNameLower && w !== bizBaseLower && w !== slugPlain
+    );
+    const effectiveQueryWords =
+      nonBizQueryWords.length > 0 ? nonBizQueryWords : queryWords;
+
     let bestFaq: { item: PortalFaqItem; score: number } | null = null;
     for (const faq of portal.faqs) {
-      const hay = `${faq.question} ${faq.answer}`.toLowerCase();
+      const qLower = faq.question.toLowerCase();
+      const hay = `${qLower} ${faq.answer.toLowerCase()}`;
       let score = 0;
-      for (const w of queryWords) {
-        if (faq.question.toLowerCase().includes(w)) score += 3;
-        else if (hay.includes(w)) score += 1;
+      let matchedQuestionWords = 0;
+      for (const w of effectiveQueryWords) {
+        if (qLower.includes(w)) {
+          score += 3;
+          matchedQuestionWords += 1;
+        } else if (hay.includes(w)) {
+          score += 1;
+        }
+      }
+      // Require either at least one keyword in the FAQ question itself, or 3+ answer keyword hits
+      if (matchedQuestionWords === 0 && score < 3) {
+        score = 0;
       }
       if (score > (bestFaq?.score ?? 0)) {
         bestFaq = { item: faq, score };
@@ -925,12 +1294,24 @@ export class D1WorkspaceRepository {
 
     let bestArticle: { item: PortalKnowledgePreviewItem; score: number } | null = null;
     for (const art of portal.publishedKnowledge) {
-      const hay = `${art.title} ${art.summary} ${art.content ?? ''} ${(art.tags ?? []).join(' ')}`.toLowerCase();
+      const titleLower = art.title.toLowerCase();
+      const summaryLower = art.summary.toLowerCase();
+      const hay = `${titleLower} ${summaryLower} ${(art.content ?? '').toLowerCase()} ${(art.tags ?? []).join(' ').toLowerCase()}`;
       let score = 0;
-      for (const w of queryWords) {
-        if (art.title.toLowerCase().includes(w)) score += 3;
-        else if (art.summary.toLowerCase().includes(w)) score += 2;
-        else if (hay.includes(w)) score += 1;
+      let matchedHeaderWords = 0;
+      for (const w of effectiveQueryWords) {
+        if (titleLower.includes(w)) {
+          score += 3;
+          matchedHeaderWords += 1;
+        } else if (summaryLower.includes(w)) {
+          score += 2;
+          matchedHeaderWords += 1;
+        } else if (hay.includes(w)) {
+          score += 1;
+        }
+      }
+      if (matchedHeaderWords === 0 && score < 3) {
+        score = 0;
       }
       if (score > (bestArticle?.score ?? 0)) {
         bestArticle = { item: art, score };
@@ -948,7 +1329,7 @@ export class D1WorkspaceRepository {
         }
       }
       const procHay = `${proc.title} ${proc.category}`.toLowerCase();
-      for (const w of queryWords) {
+      for (const w of effectiveQueryWords) {
         if (procHay.includes(w)) score += 2;
       }
       if (score > (bestProc?.score ?? 0)) {
@@ -961,7 +1342,9 @@ export class D1WorkspaceRepository {
         .map((s) => `${s.stepNumber}. ${s.instruction}`)
         .join(' ');
       return {
-        reply: `${bestProc.item.title}: ${formattedSteps} If this does not resolve the issue, you can escalate directly to human support below.`,
+        reply: sanitizeCustomerFacingText(
+          `${bestProc.item.title}: ${formattedSteps} If this does not resolve the issue, please share your account details here and I can connect you with our support team.`
+        ),
         resolutionLayer: 'guided-troubleshooting',
         matchedSourceTitle: bestProc.item.title,
         suggestEscalation: true,
@@ -971,7 +1354,7 @@ export class D1WorkspaceRepository {
 
     if (bestFaq && bestFaq.score >= 3 && bestFaq.score >= (bestArticle?.score ?? 0)) {
       return {
-        reply: bestFaq.item.answer,
+        reply: sanitizeCustomerFacingText(bestFaq.item.answer),
         resolutionLayer: 'business-rules',
         matchedSourceTitle: bestFaq.item.question,
         suggestEscalation: false,
@@ -983,8 +1366,14 @@ export class D1WorkspaceRepository {
       const snippet = bestArticle.item.content
         ? bestArticle.item.content.split('\n\n')[0] ?? bestArticle.item.summary
         : bestArticle.item.summary;
+      const cleanSummary = sanitizeCustomerFacingText(bestArticle.item.summary);
+      const cleanSnippet = sanitizeCustomerFacingText(snippet);
+      const combinedReply =
+        cleanSnippet.toLowerCase().startsWith(cleanSummary.toLowerCase().slice(0, 30))
+          ? cleanSnippet
+          : `${cleanSummary} — ${cleanSnippet}`;
       return {
-        reply: `${bestArticle.item.summary} — ${snippet}`,
+        reply: combinedReply,
         resolutionLayer: 'knowledge-base',
         matchedSourceTitle: bestArticle.item.title,
         matchedArticleSlug: bestArticle.item.slug,
@@ -993,15 +1382,16 @@ export class D1WorkspaceRepository {
       };
     }
 
-    // 4. Configurable External AI Fallback (Strictly grounded in business KB & boundaries)
+    // 4. Conversational AI Synthesis & Grounded Fallback
+    const aiHandler = options?.aiCompletionHandler ?? this.defaultAiCompletionHandler;
     if (
-      portal.chatbot.aiFallback?.enabled &&
-      options?.aiCompletionHandler
+      (portal.chatbot.aiFallback?.enabled ?? true) &&
+      aiHandler
     ) {
       const kbSnippets = [
-        ...portal.faqs.slice(0, 8).map((f) => `FAQ: Q: ${f.question} | A: ${f.answer}`),
+        ...portal.faqs.slice(0, 12).map((f) => `FAQ: Q: ${f.question} | A: ${f.answer}`),
         ...portal.publishedKnowledge
-          .slice(0, 6)
+          .slice(0, 8)
           .map((a) => `Article (${a.title}): ${a.summary} ${a.content ?? ''}`),
         ...(portal.procedures ?? [])
           .filter((p) => p.isPublished)
@@ -1013,30 +1403,68 @@ export class D1WorkspaceRepository {
       ].join('\n');
 
       try {
-        const aiReply = await options.aiCompletionHandler({
-          provider: portal.chatbot.aiFallback.provider,
+        const aiReply = await aiHandler({
+          provider: portal.chatbot.aiFallback?.provider ?? 'gemini',
           businessName: portal.branding.displayName,
           question: rawQuestion,
-          systemInstructions: portal.chatbot.aiFallback.systemInstructions,
+          systemInstructions: portal.chatbot.aiFallback?.systemInstructions ?? '',
           supportedTopics: portal.chatbot.supportedTopics,
           restrictedTopics: portal.chatbot.restrictedTopics,
           knowledgeContext: kbSnippets,
+          conversationHistory: history,
         });
         if (aiReply && aiReply.trim().length > 0) {
+          const sanitizedAiReply = sanitizeCustomerFacingText(aiReply.trim());
+          const aiSuggestsEscalation =
+            botAlreadyAskedForDetails ||
+            /\b(?:escalat(?:ed|ing)|human\s+support\s+team|specialist\s+will\s+reply)\b/i.test(
+              sanitizedAiReply
+            );
           return {
-            reply: aiReply.trim(),
-            resolutionLayer: 'ai-fallback',
-            matchedSourceTitle: `${portal.branding.displayName} AI Assistant`,
-            suggestEscalation: true,
+            reply: sanitizedAiReply,
+            resolutionLayer: aiSuggestsEscalation ? 'human-escalation' : 'ai-fallback',
+            matchedSourceTitle: `${portal.branding.displayName} Assistant`,
+            suggestEscalation: aiSuggestsEscalation,
             suggestedTopic: portal.categories[0]?.title ?? 'General Support',
           };
         }
       } catch {
-        // Fall through safely to human-escalation if external AI provider fails
+        // Fall through safely to pre-escalation detail gathering or human-escalation
       }
     }
 
-    // 5. Safe Fallback -> Offer Supported Topics or Human Escalation (Never hallucinate!)
+    // 5. Interactive Pre-Escalation Detail Gathering vs. Final Human Escalation
+    // If we are in an interactive chat session (Telegram or Web Widget) and the bot has not yet
+    // asked the customer for key issue details (and the customer hasn't already provided an email or transaction ref),
+    // gather key details first before escalating to a human agent.
+    const customerProvidedConcreteDetails =
+      /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(rawQuestion) ||
+      /\b(?:ref|txn|transaction|order|invoice|receipt)[:\s#-]*[a-z0-9-]{4,}\b/i.test(
+        rawQuestion
+      );
+
+    if (
+      options?.interactiveConversation &&
+      !botAlreadyAskedForDetails &&
+      !customerProvidedConcreteDetails
+    ) {
+      return {
+        reply: `I want to make sure our team helps you accurately with this. Could you share a few key details — such as your account email (if applicable) and the exact page, feature, or issue you're experiencing — so I can pass everything directly to a ${portal.branding.displayName} specialist?`,
+        resolutionLayer: 'guided-troubleshooting',
+        suggestEscalation: false,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
+    if (botAlreadyAskedForDetails || customerProvidedConcreteDetails) {
+      return {
+        reply: `Thank you for sharing those details. I have recorded your information and escalated your conversation to ${portal.branding.displayName}'s human support team. A specialist will review your details and reply here shortly.`,
+        resolutionLayer: 'human-escalation',
+        suggestEscalation: true,
+        suggestedTopic: portal.categories[0]?.title ?? 'General Support',
+      };
+    }
+
     return {
       reply: `I don't see a verified article matching that exact question in ${portal.branding.displayName}'s knowledge base. I can help with ${portal.chatbot.supportedTopics.join(', ')}, or pass your question directly to a human support representative.`,
       resolutionLayer: 'human-escalation',

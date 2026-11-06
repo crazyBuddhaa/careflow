@@ -567,10 +567,56 @@ export class D1ChannelIntegrationService {
   }
 
   /**
+   * Formats a clean, natural greeting for first-time `/start` or casual `"Hi"` messages
+   * without dumping the support categories list or inline keyboard menu.
+   */
+  public formatCasualCustomerGreeting(params: {
+    customerDisplayName: string;
+    businessName: string;
+    welcomeMessageTemplate: string;
+    includeWelcomeHeader?: boolean;
+  }): string {
+    const firstName =
+      params.customerDisplayName
+        .trim()
+        .split(/\s+/)[0]
+        ?.replace(/[^a-zA-Z0-9\u00C0-\u024F'-]/g, '') || 'there';
+
+    const template = (params.welcomeMessageTemplate || '').trim();
+    const isDefaultBoilerplate =
+      !template ||
+      template.includes('Available Support Topics') ||
+      template.includes('Choose an option') ||
+      template.includes('Ask a question below or choose');
+
+    if (!isDefaultBoilerplate) {
+      const hasPlaceholders =
+        /\{(name|first_name|customer_name|business|business_name|company)\}/i.test(
+          template
+        );
+      const interpolated = template
+        .replace(/\{(name|first_name|customer_name)\}/gi, firstName)
+        .replace(/\{(business|business_name|company)\}/gi, params.businessName);
+
+      if (hasPlaceholders) {
+        return interpolated;
+      }
+
+      if (params.includeWelcomeHeader) {
+        return `Hi ${firstName}! 👋 Welcome to ${params.businessName}!\n\n${interpolated} How can we help you today?`;
+      }
+
+      return interpolated;
+    }
+
+    return `Hi there! How can ${params.businessName} help you today?`;
+  }
+
+  /**
    * Classifies whether a customer message is:
    * - 'pure_greeting': e.g. "Hi", "Hello", "Good morning", "Hey there"
    * - 'greeting_with_question': e.g. "Hi, why is my deposit pending?"
-   * - 'none': direct question or command
+   * - 'none': direct question, pleasantry ("How are you doing"), or command
    */
   public classifyCustomerGreetingIntent(rawText: string): {
     type: 'pure_greeting' | 'greeting_with_question' | 'none';
@@ -582,7 +628,7 @@ export class D1ChannelIntegrationService {
     }
 
     const pureGreetingRegex =
-      /^(?:hi+|hello+|hey+|howdy|hola|greetings|yo|sup|good\s*(?:morning|afternoon|evening|day)|hi\s+there|hello\s+there|hey\s+there|is\s+anyone\s+there|anyone\s+online|i\s+need\s+help|help\s+me|can\s+you\s+help(?:\s+me)?|how\s+are\s+you(?:\s+doing)?)[!.?,\s]*$/i;
+      /^(?:hi+|hello+|hey+|howdy|hola|greetings|yo|sup|good\s*(?:morning|afternoon|evening|day)|hi\s+there|hello\s+there|hey\s+there)[!.?,\s]*$/i;
 
     if (pureGreetingRegex.test(trimmed)) {
       return { type: 'pure_greeting', cleanedQuestion: '' };
@@ -2546,7 +2592,7 @@ export class D1ChannelIntegrationService {
     }
 
     const initialState: TelegramCustomerSessionState = {
-      step: 'main_menu',
+      step: 'other_enquiry',
       updatedAt: now,
     };
     const stateJson = JSON.stringify(initialState);
@@ -2657,39 +2703,17 @@ export class D1ChannelIntegrationService {
       .bind(now, now, integrationRow.id)
       .run();
 
-    // Count active conversations for this customer in this business
-    const allConvs = await this.workspaceRepo.listConversations(
-      integrationRow.organization_id,
-      { includeInternalNotes: false }
-    );
-    const activeCustomerConvs = allConvs.filter(
-      (c) =>
-        c.channel === SupportChannel.Telegram &&
-        (c.customerExternalRef === `tg:${params.telegramUserId}` ||
-          c.sourceChannelRef === params.telegramChatId) &&
-        c.status !== ConversationStatus.Resolved &&
-        c.status !== ConversationStatus.Closed
-    );
-
-    const replyText = this.formatPersonalizedCustomerWelcome({
+    const replyText = this.formatCasualCustomerGreeting({
       customerDisplayName: params.displayName,
       businessName: integrationRow.org_name,
       welcomeMessageTemplate: tgConfig.welcomeMessage,
-      supportCategories: tgConfig.supportCategories,
-      isConversationalGreeting: params.isConversationalGreeting,
-    });
-
-    const replyMarkup = this.buildMainMenuInlineKeyboard({
-      portalSettings,
-      tgConfig,
-      activeConversationsCount: activeCustomerConvs.length,
+      includeWelcomeHeader: true,
     });
 
     await this.sendTelegram(
       {
         chatId: params.telegramChatId,
         text: replyText,
-        replyMarkup,
         callbackQueryId: params.callbackQueryId,
       },
       params.botToken
@@ -3227,13 +3251,12 @@ export class D1ChannelIntegrationService {
       ? this.classifyCustomerGreetingIntent(params.text)
       : { type: 'none' as const, cleanedQuestion: params.text };
 
-    // 1. Explicit Support Menu requests: /menu, /categories, /start, cc:menu:main, cc:cancel
+    // 1. Explicit Support Menu requests: /menu, /categories, cc:menu:main, cc:cancel
     if (
       cb === 'cc:menu:main' ||
       cb === 'cc:cancel' ||
       lowerText === '/menu' ||
-      lowerText === '/categories' ||
-      lowerText === '/start'
+      lowerText === '/categories'
     ) {
       await this.saveCustomerSessionState({
         identityId: identity.id,
@@ -3244,15 +3267,7 @@ export class D1ChannelIntegrationService {
       const menuHeader =
         cb === 'cc:cancel'
           ? `✖️ Current action cancelled.\n\nWelcome back to ${contextRow.org_name} Support! How can we help you today?`
-          : lowerText === '/start'
-            ? this.formatPersonalizedCustomerWelcome({
-                customerDisplayName: params.displayName,
-                businessName: contextRow.org_name,
-                welcomeMessageTemplate: tgConfig.welcomeMessage,
-                supportCategories: tgConfig.supportCategories,
-                isConversationalGreeting: false,
-              })
-            : `🏠 ${contextRow.org_name} Support Menu\n\nChoose a support category below or type your question in your own words:`;
+          : `🏠 ${contextRow.org_name} Support Menu\n\nChoose a support category below or type your question in your own words:`;
 
       const replyMarkup = this.buildMainMenuInlineKeyboard({
         portalSettings,
@@ -3271,30 +3286,15 @@ export class D1ChannelIntegrationService {
       };
     }
 
-    // 2. Natural Casual Greetings ("Hi", "Hello", "Hey", "Good morning", "How are you?")
+    // 2. Natural Casual Greetings ("Hi", "Hello", "Hey", "Good morning") or initial `/start`
     // Acts the same as the web bot: sends a friendly, casual greeting WITHOUT dumping the command menu or inline keyboards!
-    if (greetingIntent.type === 'pure_greeting') {
-      const firstName =
-        params.displayName
-          .trim()
-          .split(/\s+/)[0]
-          ?.replace(/[^a-zA-Z0-9\u00C0-\u024F'-]/g, '') || 'there';
-
-      const template = (tgConfig.welcomeMessage || '').trim();
-      let casualGreeting: string;
-
-      if (
-        template &&
-        !template.includes('Available Support Topics') &&
-        !template.includes('Choose an option') &&
-        !template.includes('Ask a question below or choose')
-      ) {
-        casualGreeting = template
-          .replace(/\{(name|first_name|customer_name)\}/gi, firstName)
-          .replace(/\{(business|business_name|company)\}/gi, contextRow.org_name);
-      } else {
-        casualGreeting = `Hi there! How can ${contextRow.org_name} help you today?`;
-      }
+    if (greetingIntent.type === 'pure_greeting' || lowerText === '/start') {
+      const casualGreeting = this.formatCasualCustomerGreeting({
+        customerDisplayName: params.displayName,
+        businessName: contextRow.org_name,
+        welcomeMessageTemplate: tgConfig.welcomeMessage,
+        includeWelcomeHeader: lowerText === '/start',
+      });
 
       await this.saveCustomerSessionState({
         identityId: identity.id,
@@ -3857,6 +3857,16 @@ export class D1ChannelIntegrationService {
           }${sessionState.selectedSubIssue ? ` (${sessionState.selectedSubIssue})` : ''}.`
         : params.text;
 
+    const recentHistory = (activeConv?.messages ?? []).slice(-6).map((m) => ({
+      role:
+        m.senderType === MessageSenderType.Customer
+          ? ('customer' as const)
+          : m.senderType === MessageSenderType.Agent
+            ? ('agent' as const)
+            : ('bot' as const),
+      text: m.body,
+    }));
+
     // Run priority-ordered natural language resolution (Rules -> KB -> Procedures -> Optional AI Fallback -> Escalation)
     const botAnswer =
       cb === 'cc:human'
@@ -3868,6 +3878,8 @@ export class D1ChannelIntegrationService {
               requirePublished: false,
               viewerOrganizationId: organizationId,
               aiCompletionHandler: this.aiCompletionHandler,
+              conversationHistory: recentHistory,
+              interactiveConversation: true,
             }
           );
 
@@ -3976,9 +3988,20 @@ export class D1ChannelIntegrationService {
               portalSettings.supportHours ? `Operating hours: ${portalSettings.supportHours}` : 'currently offline'
             }). A specialist will reply as soon as they are available.`;
 
-      replyText =
-        `${securityWarningPrefix}${greetingPrefix}` +
-        `Your conversation has been escalated to ${contextRow.org_name}'s human support team. ${honestAgentStatus}`;
+      if (
+        !explicitHumanRequest &&
+        botAnswer?.reply &&
+        botAnswer.reply.includes('Thank you for sharing those details')
+      ) {
+        replyText =
+          availableCount > 0
+            ? `${securityWarningPrefix}${greetingPrefix}${botAnswer.reply}`
+            : `${securityWarningPrefix}${greetingPrefix}${botAnswer.reply}\n\n${honestAgentStatus}`;
+      } else {
+        replyText =
+          `${securityWarningPrefix}${greetingPrefix}` +
+          `Your conversation has been escalated to ${contextRow.org_name}'s human support team. ${honestAgentStatus}`;
+      }
     } else {
       const contextPrefix =
         isProductIssueSubmission && sessionState.selectedProduct
@@ -4789,12 +4812,25 @@ export class D1ChannelIntegrationService {
           c.status !== ConversationStatus.Closed
       ) ?? null;
 
+    const widgetHistory = (conv?.messages ?? []).slice(-6).map((m) => ({
+      role:
+        m.senderType === MessageSenderType.Customer
+          ? ('customer' as const)
+          : m.senderType === MessageSenderType.Agent
+            ? ('agent' as const)
+            : ('bot' as const),
+      text: m.body,
+    }));
+
     const botAnswer = await this.workspaceRepo.answerPortalQuestion(
       resolved.organizationSlug,
       params.message,
       {
         requirePublished: false,
         viewerOrganizationId: resolved.organizationId,
+        aiCompletionHandler: this.aiCompletionHandler,
+        conversationHistory: widgetHistory,
+        interactiveConversation: true,
       }
     );
 
@@ -4832,7 +4868,9 @@ export class D1ChannelIntegrationService {
     }
 
     const botReply = shouldEscalate
-      ? `Your conversation has been escalated to ${resolved.organizationName}'s human support team. A specialist will reply here shortly.`
+      ? botAnswer?.reply && botAnswer.reply.includes('Thank you for sharing those details')
+        ? botAnswer.reply
+        : `Your conversation has been escalated to ${resolved.organizationName}'s human support team. A specialist will reply here shortly.`
       : (botAnswer?.reply ?? `Thank you for reaching out to ${resolved.organizationName}.`);
 
     await this.workspaceRepo.replyToConversation({

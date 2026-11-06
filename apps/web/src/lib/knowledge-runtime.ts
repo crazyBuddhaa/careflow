@@ -7,6 +7,7 @@ import {
   D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
   type D1DatabaseLike,
+  type ExternalAiCompletionHandler,
 } from '@careflow/database/d1';
 import {
   NodeSqliteD1Adapter,
@@ -127,9 +128,152 @@ export async function getKnowledgeManagementService(): Promise<KnowledgeManageme
   return new KnowledgeManagementService(repository);
 }
 
+function createDefaultAiCompletionHandler(
+  env: Record<string, unknown> | null
+): ExternalAiCompletionHandler {
+  return async ({
+    provider,
+    businessName,
+    question,
+    systemInstructions,
+    supportedTopics,
+    restrictedTopics,
+    knowledgeContext,
+    conversationHistory,
+  }) => {
+    if (!knowledgeContext || knowledgeContext.trim().length === 0) {
+      return null;
+    }
+
+    const recentTranscript =
+      conversationHistory && conversationHistory.length > 0
+        ? `\nRecent Conversation History:\n` +
+          conversationHistory
+            .slice(-6)
+            .map((t) => `${t.role === 'customer' ? 'Customer' : 'Assistant'}: ${t.text}`)
+            .join('\n') +
+          `\n`
+        : '';
+
+    const systemPrompt =
+      `You are the official customer support assistant for ${businessName}.\n` +
+      `${systemInstructions || ''}\n` +
+      `Supported Topics: ${supportedTopics.join(', ')}\n` +
+      `Restricted Topics (refuse politely): ${restrictedTopics.join(', ')}\n` +
+      `CRITICAL RULES:\n` +
+      `1. Only answer using facts explicitly present in the Business Knowledge Context below.\n` +
+      `2. Always speak directly to the customer in a warm, natural second-person voice ("you", "your").\n` +
+      `3. NEVER output third-person internal agent instructions (such as "Ask the customer to...", "They should not send...", "Direct the customer to...", or "Escalate for..."). Always translate any guideline into a natural reply addressed to the customer.\n` +
+      `4. If the customer's message is broad or underspecified, ask a concise clarifying question to understand their exact issue.\n` +
+      `5. If the issue requires human specialist verification, ask the customer to share key details (such as their account email or specific issue details) before escalating, or confirm escalation if they have already provided those details in the conversation.\n` +
+      `6. Never invent policies, prices, product specifications, or payment verification statuses, and never ask for passwords, PINs, OTPs, or full card numbers.\n` +
+      `${recentTranscript}\n` +
+      `Business Knowledge Context:\n${knowledgeContext}`;
+
+    if (provider === 'gemini') {
+      const geminiKey =
+        (typeof env?.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim()) ||
+        process.env.GEMINI_API_KEY?.trim() ||
+        '';
+      if (!geminiKey) return null;
+
+      const modelsToTry = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
+      for (const modelName of modelsToTry) {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(
+            geminiKey
+          )}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              contents: [{ role: 'user', parts: [{ text: question }] }],
+              generationConfig: { temperature: 0.15, maxOutputTokens: 320 },
+            }),
+          }
+        ).catch(() => null);
+        if (res && res.ok) {
+          const json = (await res.json()) as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+          };
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (text) return text;
+        }
+      }
+      return null;
+    }
+
+    if (provider === 'groq') {
+      const groqKey =
+        (typeof env?.GROQ_API_KEY === 'string' && env.GROQ_API_KEY.trim()) ||
+        process.env.GROQ_API_KEY?.trim() ||
+        '';
+      if (!groqKey) return null;
+
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${groqKey}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          temperature: 0.15,
+          max_tokens: 320,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: question },
+          ],
+        }),
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      return json.choices?.[0]?.message?.content?.trim() || null;
+    }
+
+    if (provider === 'openrouter') {
+      const openRouterKey =
+        (typeof env?.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY.trim()) ||
+        process.env.OPENROUTER_API_KEY?.trim() ||
+        '';
+      if (!openRouterKey) return null;
+
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${openRouterKey}`,
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          temperature: 0.15,
+          max_tokens: 320,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: question },
+          ],
+        }),
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      return json.choices?.[0]?.message?.content?.trim() || null;
+    }
+
+    return null;
+  };
+}
+
 export async function getWorkspaceRepository(): Promise<D1WorkspaceRepository> {
   const db = await getKnowledgeDatabase();
-  return new D1WorkspaceRepository(db);
+  const env = getActiveCloudflareEnv();
+  return new D1WorkspaceRepository(db, {
+    aiCompletionHandler: createDefaultAiCompletionHandler(env),
+  });
 }
 
 export async function getAuthIdentityService(): Promise<D1AuthIdentityService> {
@@ -318,121 +462,7 @@ export async function getChannelIntegrationService(): Promise<D1ChannelIntegrati
   return new D1ChannelIntegrationService(db, {
     centralBotUsername,
     encryptionKey,
-    aiCompletionHandler: async ({
-      provider,
-      businessName,
-      question,
-      systemInstructions,
-      supportedTopics,
-      restrictedTopics,
-      knowledgeContext,
-    }) => {
-      const systemPrompt =
-        `You are the official customer support assistant for ${businessName}.\n` +
-        `${systemInstructions || ''}\n` +
-        `Supported Topics: ${supportedTopics.join(', ')}\n` +
-        `Restricted Topics (refuse politely): ${restrictedTopics.join(', ')}\n` +
-        `CRITICAL RULES:\n` +
-        `1. Only answer using facts explicitly present in the Business Knowledge Context below.\n` +
-        `2. Never invent policies, prices, product specifications, or payment verification statuses.\n` +
-        `3. Never ask for passwords, PINs, OTPs, or full card numbers.\n` +
-        `4. If the answer is not in the knowledge context, return an empty response or state that a human support specialist can assist.\n\n` +
-        `Business Knowledge Context:\n${knowledgeContext || '(No knowledge articles matched)'}`;
-
-      if (!knowledgeContext || knowledgeContext.trim().length === 0) {
-        return null;
-      }
-
-      if (provider === 'gemini') {
-        const geminiKey =
-          (typeof env?.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim()) ||
-          process.env.GEMINI_API_KEY?.trim() ||
-          '';
-        if (!geminiKey) return null;
-
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(
-            geminiKey
-          )}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: systemPrompt }] },
-              contents: [{ role: 'user', parts: [{ text: question }] }],
-              generationConfig: { temperature: 0.1, maxOutputTokens: 280 },
-            }),
-          }
-        );
-        if (!res.ok) return null;
-        const json = (await res.json()) as {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        };
-        return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-      }
-
-      if (provider === 'groq') {
-        const groqKey =
-          (typeof env?.GROQ_API_KEY === 'string' && env.GROQ_API_KEY.trim()) ||
-          process.env.GROQ_API_KEY?.trim() ||
-          '';
-        if (!groqKey) return null;
-
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${groqKey}`,
-          },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            temperature: 0.1,
-            max_tokens: 280,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: question },
-            ],
-          }),
-        });
-        if (!res.ok) return null;
-        const json = (await res.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-        return json.choices?.[0]?.message?.content?.trim() || null;
-      }
-
-      if (provider === 'openrouter') {
-        const openRouterKey =
-          (typeof env?.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY.trim()) ||
-          process.env.OPENROUTER_API_KEY?.trim() ||
-          '';
-        if (!openRouterKey) return null;
-
-        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${openRouterKey}`,
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
-            temperature: 0.1,
-            max_tokens: 280,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: question },
-            ],
-          }),
-        });
-        if (!res.ok) return null;
-        const json = (await res.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-        return json.choices?.[0]?.message?.content?.trim() || null;
-      }
-
-      return null;
-    },
+    aiCompletionHandler: createDefaultAiCompletionHandler(env),
   });
 }
 

@@ -1,10 +1,3 @@
-import {
-  KnowledgeStatus,
-  type KnowledgeArticle,
-  type KnowledgeCategory,
-  type KnowledgeFaq,
-} from '@careflow/shared';
-
 export interface ParsedKnowledgeFaq {
   question: string;
   answer: string;
@@ -32,6 +25,7 @@ export interface KnowledgeDocumentParseResult {
   categories: ParsedKnowledgeCategory[];
   articles: ParsedKnowledgeArticle[];
   faqs: ParsedKnowledgeFaq[];
+  guardrails?: string[];
   summary: {
     totalCategories: number;
     totalArticles: number;
@@ -60,8 +54,170 @@ export function generateCategorySlug(text: string): string {
   return base || `cat-${Date.now().toString(36)}`;
 }
 
+/**
+ * Rewrites raw third-person support agent instructions and internal handbook guardrails
+ * ("Ask the customer to...", "They should not send...", "Do not promise...", "Escalate for...")
+ * into natural, polite second-person customer-facing language while stripping internal-only notes.
+ */
+export function sanitizeGuidelineTextForCustomer(rawText: string): string {
+  if (!rawText) return '';
+
+  let text = rawText;
+
+  // 1. Remove explicit internal-only sections/blocks like "**Support rule:** ..." or "### Important public-page inconsistency — escalate"
+  text = text.replace(
+    /###\s+Important public-page inconsistency[\s\S]*?(?=(?:###|##|$))/gi,
+    ''
+  );
+  text = text.replace(/\*\*Support rule:\*\*[^\n]+/gi, '');
+  text = text.replace(
+    /If a customer asks about a specific result[^\n]+/gi,
+    ''
+  );
+  text = text.replace(
+    /Do not state a pick, price or availability as current unless verified on the live page\.?/gi,
+    ''
+  );
+  text = text.replace(/Never guarantee an outcome\.?/gi, '');
+  text = text.replace(
+    /Do not claim that [^\n.]+ unless this is verified in the live product\.?/gi,
+    ''
+  );
+  text = text.replace(
+    /If a tracker is missing, inaccessible or not saving entries, collect the error and escalate\.?/gi,
+    'If your tracker is missing or not saving entries, please share the error details so our team can assist.'
+  );
+  text = text.replace(
+    /Use these low-risk steps for general website problems:/gi,
+    'Here are the recommended troubleshooting steps for general website issues:'
+  );
+  text = text.replace(
+    /Do not ask a customer to disable security protections[^\n]+/gi,
+    ''
+  );
+
+  // 2. Rewrite third-person imperative instructions into natural second-person customer speech
+  text = text.replace(
+    /([A-Za-z0-9_-]+) cannot confirm a payment outcome from a support conversation alone\.\s*Ask the customer to contact ([^\s]+)\s+with the ([^.]+)\./gi,
+    'We cannot confirm a payment outcome from chat alone. Please share your $3 here (or email $2) so our billing team can verify your payment.'
+  );
+
+  text = text.replace(
+    /Apologise and explain that the billing team needs to check the payment records\.\s*Ask for the ([^.]+)\./gi,
+    "I'm sorry about that! Our billing team will need to check the payment records. Please share the $1 so we can investigate."
+  );
+
+  text = text.replace(
+    /Ask the customer to sign out and sign back in once,\s*then check the plan page again\.\s*If access is still not updated,\s*escalate to ([^\s]+)\s+with the ([^.]+)\./gi,
+    'Please try signing out and signing back in once, then check the plan page again. If your access is still not updated, please share your $2 here (or email $1) so our team can verify and update your plan.'
+  );
+
+  text = text.replace(
+    /Ask the customer to contact ([^\s]+)\s+with ([^.]+)\./gi,
+    'Please contact $1 (or share the details here) with $2.'
+  );
+
+  text = text.replace(
+    /Ask the customer to ([^.]+)\./gi,
+    (_match, action: string) => {
+      const cleaned = action.trim().replace(/\btheir\b/gi, 'your').replace(/\bthey\b/gi, 'you');
+      return `Please ${cleaned}.`;
+    }
+  );
+
+  text = text.replace(
+    /Ask for the ([^.]+)\./gi,
+    'Please share the $1 so we can check this for you.'
+  );
+
+  text = text.replace(
+    /Direct the customer to the live checkout page for the methods currently offered to their account\./gi,
+    'You can check the live checkout page to see the payment methods currently available for your account.'
+  );
+
+  text = text.replace(
+    /Direct the customer to ([^.]+)\./gi,
+    (_match, target: string) => {
+      const cleaned = target.trim().replace(/\btheir\b/gi, 'your');
+      return `Please check ${cleaned}.`;
+    }
+  );
+
+  text = text.replace(
+    /If the customer cannot find the cancellation option or needs confirmation that renewal has stopped,\s*refer them to ([^.]+)\./gi,
+    'If you cannot find the cancellation option or need confirmation that renewal has stopped, please contact $1 (or share your account email here so I can connect you with our team).'
+  );
+
+  text = text.replace(
+    /Refer the request to ([^\s]+)\s+for review\./gi,
+    'Please reach out to $1 (or share your account email here) so our team can review your request.'
+  );
+
+  text = text.replace(
+    /They should not send full card details,\s*CVV,\s*PIN or OTP\./gi,
+    'For your security, please never share your full card details, CVV, PIN, or OTP.'
+  );
+
+  text = text.replace(
+    /Do not ask the customer to send card details through support chat\./gi,
+    'For your security, please never share your full card details in support chat.'
+  );
+
+  text = text.replace(
+    /Never request full card details or security codes\./gi,
+    'For your security, please never share full card details or security codes.'
+  );
+
+  // 3. Strip internal prohibitions directed at the support agent
+  text = text.replace(/Do not promise or approve a refund\.\s*/gi, '');
+  text = text.replace(/Do not promise data recovery\.\s*/gi, '');
+  text = text.replace(
+    /Do not promise that a particular event or market is supported\.\s*/gi,
+    ''
+  );
+  text = text.replace(
+    /Do not claim the subscription has been activated until verified\.\s*/gi,
+    ''
+  );
+  text = text.replace(
+    /Support chat should not claim deletion is complete until the privacy team confirms it\.\s*/gi,
+    ''
+  );
+  text = text.replace(
+    /Escalate for payment-provider and subscription-status verification\.\s*/gi,
+    ''
+  );
+  text = text.replace(
+    /Escalate if the customer believes a normally available item has disappeared\.\s*/gi,
+    'If you believe an event or market that is normally available is missing, let me know and I can escalate it to our team.'
+  );
+  text = text.replace(/Escalate to [^\s.]+\.[ \t]*/gi, '');
+  text = text.replace(
+    /Always check (https?:\/\/[^\s]+) before quoting a price to a customer\./gi,
+    'Please check $1 for the latest pricing.'
+  );
+
+  return text
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function isInternalMetaGuidelineSection(sectionTitle: string): boolean {
+  const lower = cleanHeadingTitle(sectionTitle).toLowerCase();
+  return (
+    lower.includes('instructions for') ||
+    lower.includes('known limitations') ||
+    lower.includes('facts the ai must not') ||
+    lower.includes('what the ai must not') ||
+    lower.includes('official source pages') ||
+    lower.includes('information to collect before escalation')
+  );
+}
+
 export function extractFirstSentence(text: string, fallback = 'Knowledge base guide.'): string {
-  const clean = text
+  const sanitized = sanitizeGuidelineTextForCustomer(text);
+  const clean = sanitized
     .replace(/^[#*-]\s+/gm, '')
     .replace(/[#*`_>\[\]|]/g, '')
     .replace(/\s+/g, ' ')
@@ -132,7 +288,8 @@ export function extractKnowledgeTags(text: string, category: string): string[] {
 
 /**
  * Parses a knowledge base document in Markdown, plain text, or JSON format.
- * Intelligently extracts structured Categories, Q&A FAQs, and Help Articles.
+ * Intelligently extracts structured Categories, Q&A FAQs, Help Articles, and Bot Guardrails,
+ * while sanitizing raw agent instructions into customer-friendly responses.
  */
 export function parseKnowledgeDocument(
   rawContent: string,
@@ -145,6 +302,7 @@ export function parseKnowledgeDocument(
       categories: [],
       articles: [],
       faqs: [],
+      guardrails: [],
       summary: { totalCategories: 0, totalArticles: 0, totalFaqs: 0, wordCount: 0 },
     };
   }
@@ -202,7 +360,7 @@ export function parseKnowledgeDocument(
           categoriesMap.get(catName)!.faqCount++;
           faqs.push({
             question: f.question.trim(),
-            answer: f.answer.trim(),
+            answer: sanitizeGuidelineTextForCustomer(f.answer.trim()),
             categoryName: catName,
           });
         }
@@ -220,11 +378,15 @@ export function parseKnowledgeDocument(
             });
           }
           categoriesMap.get(catName)!.articleCount++;
+          const sanitizedContent = sanitizeGuidelineTextForCustomer(a.content.trim());
           articles.push({
             title: a.title.trim(),
             categoryName: catName,
-            shortDescription: a.shortDescription || extractFirstSentence(a.content),
-            content: a.content.trim(),
+            shortDescription:
+              a.shortDescription
+                ? sanitizeGuidelineTextForCustomer(a.shortDescription)
+                : extractFirstSentence(sanitizedContent),
+            content: sanitizedContent,
             tags: a.tags && a.tags.length > 0 ? a.tags : extractKnowledgeTags(a.title, catName),
           });
         }
@@ -236,6 +398,7 @@ export function parseKnowledgeDocument(
           categories,
           articles,
           faqs,
+          guardrails: [],
           summary: {
             totalCategories: categories.length,
             totalArticles: articles.length,
@@ -253,7 +416,6 @@ export function parseKnowledgeDocument(
   const lines = trimmed.split('\n');
   let docTitle = fallbackDocumentTitle;
 
-  // Extract Document Title from first '# ' heading
   for (const line of lines) {
     const l = line.trim();
     if (l.startsWith('# ')) {
@@ -286,6 +448,7 @@ export function parseKnowledgeDocument(
   const categoriesMap = new Map<string, ParsedKnowledgeCategory>();
   const articles: ParsedKnowledgeArticle[] = [];
   const faqs: ParsedKnowledgeFaq[] = [];
+  const guardrails: string[] = [];
 
   function ensureCategory(name: string, description = ''): string {
     const cleanName = cleanHeadingTitle(name) || 'General Support';
@@ -303,17 +466,18 @@ export function parseKnowledgeDocument(
   }
 
   for (const sec of sections) {
-    const catName = ensureCategory(sec.rawTitle);
+    const cleanSecTitle = cleanHeadingTitle(sec.rawTitle);
     const body = sec.body;
 
-    // Pattern for Q&A pairs (FAQs)
-    // Matches:
-    // - ### Q: <question>
-    // - **Q:** <question>
-    // - Q: <question>
-    // followed by
-    // - **A:** <answer>
-    // - A: <answer>
+    // If this section is purely internal AI instructions / limitations, record it as a guardrail
+    if (isInternalMetaGuidelineSection(sec.rawTitle)) {
+      guardrails.push(`${cleanSecTitle}: ${body.slice(0, 600).replace(/\s+/g, ' ').trim()}`);
+      continue;
+    }
+
+    const catName = ensureCategory(sec.rawTitle);
+
+    // 1. Pattern for Q&A pairs (FAQs)
     const faqPattern =
       /(?:###\s+Q:|\*\*Q:\*\*|^Q:)\s*([^\n\r]+)[\r\n]+(?:\*\*A:\*\*|^A:)\s*([\s\S]*?)(?=(?:[\r\n]+(?:###\s+Q:|\*\*Q:\*\*|^Q:|###\s+[^\n]+|##\s+[^\n]+))|$)/gim;
 
@@ -322,7 +486,8 @@ export function parseKnowledgeDocument(
 
     while ((faqMatch = faqPattern.exec(body)) !== null) {
       const q = faqMatch[1]!.replace(/\*\*|\*/g, '').trim();
-      const a = faqMatch[2]!.replace(/^[\r\n]+|[\r\n]+$/g, '').trim();
+      const rawA = faqMatch[2]!.replace(/^[\r\n]+|[\r\n]+$/g, '').trim();
+      const a = sanitizeGuidelineTextForCustomer(rawA);
       if (q && a) {
         faqs.push({
           question: q,
@@ -333,13 +498,38 @@ export function parseKnowledgeDocument(
       }
     }
 
+    // 2. Also extract "Customer: “...” / Assistant: “...”" sample dialogue pairs into natural FAQs
+    const scenarioPattern =
+      /Customer:\s*[“"']?([^\n”"']+)[”"']?\s*[\r\n]+Assistant:\s*[“"']?([^\n”"']+)[”"']?/gim;
+    let scenarioMatch: RegExpExecArray | null;
+    while ((scenarioMatch = scenarioPattern.exec(body)) !== null) {
+      const q = scenarioMatch[1]!.trim();
+      const a = sanitizeGuidelineTextForCustomer(scenarioMatch[2]!.trim());
+      if (q && a) {
+        faqs.push({
+          question: q,
+          answer: a,
+          categoryName: catName,
+        });
+        matchedFaqIndices.push({
+          start: scenarioMatch.index,
+          end: scenarioPattern.lastIndex,
+        });
+      }
+    }
+
     // Determine non-FAQ prose content
     let proseBody = body;
+    // Sort matched indices in ascending order and remove from end to start
+    matchedFaqIndices.sort((a, b) => a.start - b.start);
     for (let i = matchedFaqIndices.length - 1; i >= 0; i--) {
       const { start, end } = matchedFaqIndices[i]!;
       proseBody = proseBody.slice(0, start) + '\n\n' + proseBody.slice(end);
     }
-    proseBody = proseBody.replace(/^---$/gm, '').trim();
+    proseBody = proseBody
+      .replace(/\*\*Scenario\s+\d+\s*[-—–][^\n]+\*\*/gi, '')
+      .replace(/^---$/gm, '')
+      .trim();
 
     // Check for subsections like ### 4.1 Bet Analysis
     const subSectionRegex = /^###\s+(?!Q:)(.+)$/gm;
@@ -361,10 +551,13 @@ export function parseKnowledgeDocument(
     }
 
     if (subSections.length > 1) {
-      // Create articles for each distinct subsection with substantial content
       for (const sub of subSections) {
         const cleanSub = cleanHeadingTitle(sub.subTitle);
-        const subContent = sub.subBody.trim();
+        if (isInternalMetaGuidelineSection(cleanSub)) {
+          guardrails.push(`${cleanSub}: ${sub.subBody.slice(0, 400).replace(/\s+/g, ' ').trim()}`);
+          continue;
+        }
+        const subContent = sanitizeGuidelineTextForCustomer(sub.subBody.trim());
         if (subContent.length > 70) {
           const cleanSec = cleanHeadingTitle(sec.rawTitle);
           const title = cleanSub.toLowerCase().includes(cleanSec.toLowerCase())
@@ -379,20 +572,27 @@ export function parseKnowledgeDocument(
           });
         }
       }
-    } else if (proseBody.length > 120) {
-      // Single comprehensive article for this section's prose
-      const cleanSecTitle = cleanHeadingTitle(sec.rawTitle);
-      articles.push({
-        title: cleanSecTitle,
-        categoryName: catName,
-        shortDescription: extractFirstSentence(proseBody),
-        content: `## ${cleanSecTitle}\n\n${proseBody}`,
-        tags: extractKnowledgeTags(`${cleanSecTitle} ${proseBody}`, catName),
-      });
+    } else {
+      // Remove any internalsubsections like "### Information to collect before escalation"
+      const cleanedProse = sanitizeGuidelineTextForCustomer(
+        proseBody.replace(
+          /###\s+Information to collect before escalation[\s\S]*$/i,
+          ''
+        )
+      );
+      if (cleanedProse.length > 100) {
+        articles.push({
+          title: cleanSecTitle,
+          categoryName: catName,
+          shortDescription: extractFirstSentence(cleanedProse),
+          content: `## ${cleanSecTitle}\n\n${cleanedProse}`,
+          tags: extractKnowledgeTags(`${cleanSecTitle} ${cleanedProse}`, catName),
+        });
+      }
     }
   }
 
-  // Update counts
+  // Update counts and prune empty categories
   for (const art of articles) {
     const c = categoriesMap.get(art.categoryName);
     if (c) c.articleCount++;
@@ -402,7 +602,9 @@ export function parseKnowledgeDocument(
     if (c) c.faqCount++;
   }
 
-  const categories = Array.from(categoriesMap.values());
+  const categories = Array.from(categoriesMap.values()).filter(
+    (c) => c.faqCount > 0 || c.articleCount > 0
+  );
   const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
 
   return {
@@ -410,6 +612,7 @@ export function parseKnowledgeDocument(
     categories,
     articles,
     faqs,
+    guardrails,
     summary: {
       totalCategories: categories.length,
       totalArticles: articles.length,

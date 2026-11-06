@@ -813,7 +813,7 @@ describe('CustomCare Unified Multi-Channel Support OS (Phases 2–11)', () => {
         },
       });
 
-      // 5a. Customer opens `/start tg_<TOKEN>` -> receives personalized welcome + inline keyboard
+      // 5a. Customer opens `/start tg_<TOKEN>` -> receives a natural greeting WITHOUT menu buttons
       const startRes = await ctx.channelService.processTelegramWebhookUpdate({
         update_id: 5001,
         message: {
@@ -824,10 +824,27 @@ describe('CustomCare Unified Multi-Channel Support OS (Phases 2–11)', () => {
         },
       });
       assert.equal(startRes.organizationId, orgId);
-      assert.ok(startRes.replyText?.includes('Welcome to PayStream FinTech! 👋'));
+      assert.ok(startRes.replyText?.includes('Welcome to PayStream FinTech!'));
       const welcomeOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
-      assert.ok(welcomeOutbound.replyMarkup, 'Welcome message must include inline keyboard buttons');
-      const keyboardJson = JSON.stringify(welcomeOutbound.replyMarkup);
+      assert.equal(
+        welcomeOutbound.replyMarkup,
+        undefined,
+        'Initial /start greeting must be a clean natural greeting with no inline menu buttons'
+      );
+
+      // Customer explicitly sends `/menu` to view support category buttons
+      await ctx.channelService.processTelegramWebhookUpdate({
+        update_id: 50015,
+        message: {
+          message_id: 5015,
+          from: { id: 333444, first_name: 'Diana', last_name: 'Prince', username: 'diana_p' },
+          chat: { id: 333444, type: 'private' },
+          text: '/menu',
+        },
+      });
+      const menuOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
+      assert.ok(menuOutbound.replyMarkup, 'Explicit /menu command must include inline keyboard buttons');
+      const keyboardJson = JSON.stringify(menuOutbound.replyMarkup);
       assert.ok(keyboardJson.includes('Payment or Deposit Issues'));
       assert.ok(keyboardJson.includes('Product Support'));
       assert.ok(keyboardJson.includes('Technical Issues'));
@@ -1277,6 +1294,101 @@ describe('CustomCare Unified Multi-Channel Support OS (Phases 2–11)', () => {
       assert.ok(
         subBotGreetQuestionRes.replyText?.includes('3 hours across Lagos'),
         'Combined greeting + question must answer the question from the business knowledge base'
+      );
+
+      // 6f. Customer opens sub-bot with `/start` -> receives natural greeting with NO menu buttons
+      const subBotStartRes = await ctx.channelService.processTelegramSubBotWebhookUpdate({
+        integrationId: tgInt.id,
+        update: {
+          update_id: 7003,
+          message: {
+            message_id: 703,
+            from: { id: 444555, first_name: 'Amaka', last_name: 'Okafor', username: 'amaka_ng' },
+            chat: { id: 444555, type: 'private' },
+            text: '/start',
+          },
+        },
+      });
+      assert.equal(subBotStartRes.handled, true);
+      const subBotStartOutbound = ctx.outboundTelegramLog[ctx.outboundTelegramLog.length - 1]!;
+      assert.equal(
+        subBotStartOutbound.replyMarkup,
+        undefined,
+        'Sub-bot /start must send a natural greeting only with no menu buttons'
+      );
+
+      // 6g. Customer asks "How are you doing" -> receives conversational reply instead of repeating static "Hi"
+      const howAreYouRes = await ctx.channelService.processTelegramSubBotWebhookUpdate({
+        integrationId: tgInt.id,
+        update: {
+          update_id: 7004,
+          message: {
+            message_id: 704,
+            from: { id: 444555, first_name: 'Amaka', last_name: 'Okafor', username: 'amaka_ng' },
+            chat: { id: 444555, type: 'private' },
+            text: 'How are you doing',
+          },
+        },
+      });
+      assert.ok(
+        howAreYouRes.replyText?.includes("I'm doing well, thank you!"),
+        'How are you doing must receive a natural conversational response instead of repeating the static Hi greeting'
+      );
+
+      // 6h. Multi-turn clarifying & pre-escalation detail gathering
+      // Turn 1: Broad product details statement asks clarifying question (does not immediately escalate)
+      const broadIssueRes = await ctx.channelService.processTelegramSubBotWebhookUpdate({
+        integrationId: tgInt.id,
+        update: {
+          update_id: 7005,
+          message: {
+            message_id: 705,
+            from: { id: 444555, first_name: 'Amaka', last_name: 'Okafor', username: 'amaka_ng' },
+            chat: { id: 444555, type: 'private' },
+            text: 'My product details is not correct',
+          },
+        },
+      });
+      assert.ok(
+        broadIssueRes.replyText?.includes('Could you tell me which specific feature, page, or item detail looks incorrect'),
+        'Turn 1 must ask a clarifying question for a broad product issue'
+      );
+      const convAfterTurn1 = await ctx.workspaceRepo.getConversationById(
+        orgId,
+        broadIssueRes.conversationId!
+      );
+      assert.equal(
+        convAfterTurn1?.status,
+        ConversationStatus.Open,
+        'Turn 1 clarifying question must keep conversation Open while gathering details'
+      );
+
+      // Turn 2: Customer provides specific issue details -> bot records details and escalates to human agent
+      const detailsFollowUpRes = await ctx.channelService.processTelegramSubBotWebhookUpdate({
+        integrationId: tgInt.id,
+        update: {
+          update_id: 7006,
+          message: {
+            message_id: 706,
+            from: { id: 444555, first_name: 'Amaka', last_name: 'Okafor', username: 'amaka_ng' },
+            chat: { id: 444555, type: 'private' },
+            text: 'On the checkout summary page my loyalty tier shows Bronze instead of Gold for amaka@example.com',
+          },
+        },
+      });
+      assert.ok(
+        detailsFollowUpRes.replyText?.includes('Thank you for sharing those details') ||
+          detailsFollowUpRes.replyText?.includes('escalated'),
+        'Turn 2 with issue details must confirm details are recorded and escalate to human support'
+      );
+      const convAfterTurn2 = await ctx.workspaceRepo.getConversationById(
+        orgId,
+        detailsFollowUpRes.conversationId!
+      );
+      assert.equal(
+        convAfterTurn2?.status,
+        ConversationStatus.Escalated,
+        'Conversation must transition to Escalated after customer shares issue details'
       );
     } finally {
       ctx.cleanup();

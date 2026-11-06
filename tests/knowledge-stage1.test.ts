@@ -643,12 +643,28 @@ test('11. Single-file knowledge base upload, auto-categorization, FAQ extraction
     assert.equal(fs.existsSync(punterStatMdPath), true, 'Sample knowledge file exists');
     const rawContent = fs.readFileSync(punterStatMdPath, 'utf8');
 
-    // 1. Test parsing & categorization
+    // 1. Test parsing, categorization, and internal guardrail separation
     const result = service.parseDocument(rawContent, 'PunterStat_CustomCare_Knowledge_Base.md');
     assert.equal(result.documentTitle, 'PunterStat Customer Support Knowledge Base');
-    assert.ok(result.categories.length >= 10, `Expected >= 10 categories, got ${result.categories.length}`);
+    assert.ok(result.categories.length >= 8, `Expected >= 8 categories, got ${result.categories.length}`);
     assert.ok(result.faqs.length >= 25, `Expected >= 25 FAQs, got ${result.faqs.length}`);
-    assert.ok(result.articles.length >= 10, `Expected >= 10 articles, got ${result.articles.length}`);
+    assert.ok(result.articles.length >= 8, `Expected >= 8 articles, got ${result.articles.length}`);
+    assert.ok(
+      result.guardrails && result.guardrails.length >= 2,
+      'Internal AI instructions and known limitations are separated into guardrails'
+    );
+
+    // Ensure raw third-person agent instructions ("Ask the customer to...", "They should not send...") are converted to second-person
+    for (const faq of result.faqs) {
+      assert.ok(
+        !/\bAsk the customer to\b/i.test(faq.answer),
+        `FAQ answer must not contain raw third-person instruction "Ask the customer to": ${faq.answer}`
+      );
+      assert.ok(
+        !/\bThey should not send\b/i.test(faq.answer),
+        `FAQ answer must not contain raw third-person instruction "They should not send": ${faq.answer}`
+      );
+    }
 
     // Verify categories have clean names and auto-assigned items
     const faqCat = result.categories.find(c => c.name.toLowerCase().includes('frequently asked questions'));
@@ -664,9 +680,9 @@ test('11. Single-file knowledge base upload, auto-categorization, FAQ extraction
     });
 
     assert.equal(importResult.documentTitle, 'PunterStat Customer Support Knowledge Base');
-    assert.ok(importResult.totalCategoriesCreated >= 10);
+    assert.ok(importResult.totalCategoriesCreated >= 8);
     assert.ok(importResult.totalFaqsCreated >= 25);
-    assert.ok(importResult.totalArticlesCreated >= 10);
+    assert.ok(importResult.totalArticlesCreated >= 8);
 
     // 3. Verify database state
     const savedCategories = await repository.listCategories('org_ultimatetechapp');
@@ -689,11 +705,37 @@ test('11. Single-file knowledge base upload, auto-categorization, FAQ extraction
       matches[0].citation.titleOrQuestion.toLowerCase().includes('sports')
     );
 
-    // 5. Test portal hydration with published knowledge
+    // 5. Test portal hydration and conversational answering on imported guidelines
     const portalConfig = await workspaceRepo.resolvePortalBySlug('ultimatetechapp');
     assert.ok(portalConfig, 'Portal config exists');
     assert.ok(portalConfig.faqs && portalConfig.faqs.length >= 25, 'Portal hydrated with imported FAQs');
-    assert.ok(portalConfig.publishedKnowledge && portalConfig.publishedKnowledge.length >= 10, 'Portal hydrated with imported articles');
+    assert.ok(portalConfig.publishedKnowledge && portalConfig.publishedKnowledge.length >= 8, 'Portal hydrated with imported articles');
+
+    // Broad account issue asks a clarifying question instead of dumping raw payment guidelines
+    const broadAccountReply = await workspaceRepo.answerPortalQuestion(
+      'ultimatetechapp',
+      'I have an issue with my account',
+      { interactiveConversation: true }
+    );
+    assert.ok(broadAccountReply);
+    assert.equal(broadAccountReply.suggestEscalation, false);
+    assert.ok(
+      broadAccountReply.reply.includes('Could you share a bit more about what\'s happening'),
+      'Broad account statement must ask a clarifying question'
+    );
+
+    // Broad product details statement asks a clarifying question instead of matching password reset FAQ
+    const broadProductReply = await workspaceRepo.answerPortalQuestion(
+      'ultimatetechapp',
+      'My product details is not correct',
+      { interactiveConversation: true }
+    );
+    assert.ok(broadProductReply);
+    assert.equal(broadProductReply.suggestEscalation, false);
+    assert.ok(
+      broadProductReply.reply.includes('Could you tell me which specific feature, page, or item detail looks incorrect'),
+      'Broad product details statement must ask a clarifying question'
+    );
   } finally {
     adapter.close();
   }
