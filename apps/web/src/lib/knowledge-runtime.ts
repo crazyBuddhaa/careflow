@@ -4,6 +4,7 @@ import {
   D1AuthIdentityService,
   D1ChannelIntegrationService,
   D1KnowledgeRepository,
+  D1OperationsManagementService,
   D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
   type D1DatabaseLike,
@@ -465,5 +466,24 @@ export async function getChannelIntegrationService(): Promise<D1ChannelIntegrati
     aiCompletionHandler: createDefaultAiCompletionHandler(env),
   });
 }
+
+export async function getOperationsManagementService(): Promise<D1OperationsManagementService> {
+  const db = await getKnowledgeDatabase();
+  const env = getActiveCloudflareEnv();
+
+  const encryptionKey =
+    (typeof env?.CAREFLOW_INTEGRATION_ENCRYPTION_KEY === 'string' &&
+      env.CAREFLOW_INTEGRATION_ENCRYPTION_KEY.trim()) ||
+    process.env.CAREFLOW_INTEGRATION_ENCRYPTION_KEY?.trim() ||
+    (typeof env?.CAREFLOW_ADMIN_SESSION_SECRET === 'string' &&
+      env.CAREFLOW_ADMIN_SESSION_SECRET.trim()) ||
+    process.env.CAREFLOW_ADMIN_SESSION_SECRET?.trim() ||
+    '';
+
+  return new D1OperationsManagementService(db, {
+    encryptionKey,
+  });
+}
+
 
 

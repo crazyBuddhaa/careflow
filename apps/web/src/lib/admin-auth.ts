@@ -32,6 +32,7 @@ export interface SignedSessionPayload {
   sessionToken?: string;
   emailVerified?: boolean;
   mfaEnabled?: boolean;
+  accountType?: 'business' | 'agent' | 'both';
   exp: number;
 }
 

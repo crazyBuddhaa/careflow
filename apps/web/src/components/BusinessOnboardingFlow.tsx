@@ -52,13 +52,13 @@ const COUNTRIES = [
 export function BusinessOnboardingFlow() {
   const router = useRouter();
 
-  // Registration role: 'business' or 'agent'
+  // Registration role: 'business' or 'agent' (strictly independent account types)
   const [registrationRole, setRegistrationRole] = useState<'business' | 'agent'>('business');
 
-  // Stage: 1 = Account Info & Role, 2 = First Business Setup (or Agent Profile & Invite)
+  // Stage: 1 = Account Info & Role (or complete Agent registration), 2 = First Business Setup (Business only)
   const [currentStage, setCurrentStage] = useState<1 | 2>(1);
 
-  // Stage 1 Fields
+  // Common Account Fields
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -67,14 +67,14 @@ export function BusinessOnboardingFlow() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
 
-  // Stage 2 Business Fields
+  // Business Setup Fields (only used when registrationRole === 'business')
   const [businessName, setBusinessName] = useState('');
   const [industry, setIndustry] = useState('Technology');
   const [customIndustry, setCustomIndustry] = useState('');
   const [country, setCountry] = useState('United States');
   const [website, setWebsite] = useState('');
 
-  // Stage 2 Agent Fields
+  // Support Agent Fields (only used when registrationRole === 'agent')
   const [agentSpecialty, setAgentSpecialty] = useState('Customer Support');
   const [invitationToken, setInvitationToken] = useState('');
 
@@ -91,51 +91,82 @@ export function BusinessOnboardingFlow() {
     isAgentAccount: boolean;
   } | null>(null);
 
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const roleParam = params.get('role');
+      if (roleParam === 'agent') {
+        setRegistrationRole('agent');
+        setCurrentStage(1);
+      } else if (roleParam === 'business') {
+        setRegistrationRole('business');
+      }
+    }
+  }, []);
+
   // Validation helpers
   const passwordHasMinLength = password.length >= 8;
   const passwordHasSymbolOrNumber = /[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
 
-  function handleContinueToStepTwo(e: React.FormEvent) {
-    e.preventDefault();
-    setErrorMessage(null);
-
+  function validateAccountFields(): boolean {
     if (!fullName.trim()) {
       setErrorMessage('Please enter your full name.');
-      return;
+      return false;
     }
     if (!email.trim() || !email.includes('@')) {
       setErrorMessage('Please enter a valid email address.');
-      return;
+      return false;
     }
     if (!passwordHasMinLength || !passwordHasSymbolOrNumber) {
       setErrorMessage(
         'Password must be at least 8 characters long and contain at least one number or special character.'
       );
-      return;
+      return false;
     }
     if (!passwordsMatch) {
       setErrorMessage('Passwords do not match. Please re-enter your password confirmation.');
-      return;
+      return false;
     }
     if (!agreeToTerms) {
       setErrorMessage('Please accept the Terms of Use, Privacy Policy, and Compliance Terms to continue.');
+      return false;
+    }
+    return true;
+  }
+
+  function handleStepOneSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    if (!validateAccountFields()) {
+      return;
+    }
+
+    // Support Agent accounts never go to Business Setup — submit immediately!
+    if (registrationRole === 'agent') {
+      void submitRegistration('agent');
       return;
     }
 
     setCurrentStage(2);
   }
 
-  async function handleFinalSubmit(e: React.FormEvent) {
+  async function handleBusinessFinalSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
     setErrorMessage(null);
 
-    if (registrationRole === 'business' && !businessName.trim()) {
+    if (!businessName.trim()) {
       setErrorMessage('Please enter your business name.');
-      setSubmitting(false);
       return;
     }
+
+    await submitRegistration('business');
+  }
+
+  async function submitRegistration(roleToSubmit: 'business' | 'agent') {
+    setSubmitting(true);
+    setErrorMessage(null);
 
     const selectedIndustry =
       industry === 'Other' && customIndustry.trim() ? customIndustry.trim() : industry;
@@ -151,18 +182,18 @@ export function BusinessOnboardingFlow() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          registrationRole,
+          registrationRole: roleToSubmit,
           fullName: fullName.trim(),
           email: email.trim().toLowerCase(),
           password,
           confirmPassword,
           agreeToTerms,
-          businessName: registrationRole === 'business' ? businessName.trim() : undefined,
-          industry: registrationRole === 'business' ? selectedIndustry : undefined,
-          country: registrationRole === 'business' ? country : undefined,
-          website: registrationRole === 'business' ? website.trim() : undefined,
-          specialty: registrationRole === 'agent' ? agentSpecialty.trim() || 'Customer Support' : undefined,
-          invitationToken: registrationRole === 'agent' ? cleanedInviteToken : undefined,
+          businessName: roleToSubmit === 'business' ? businessName.trim() : undefined,
+          industry: roleToSubmit === 'business' ? selectedIndustry : undefined,
+          country: roleToSubmit === 'business' ? country : undefined,
+          website: roleToSubmit === 'business' ? website.trim() : undefined,
+          specialty: roleToSubmit === 'agent' ? agentSpecialty.trim() || 'Customer Support' : undefined,
+          invitationToken: roleToSubmit === 'agent' ? cleanedInviteToken : undefined,
           turnstileToken: turnstileToken || undefined,
         }),
       });
@@ -182,8 +213,8 @@ export function BusinessOnboardingFlow() {
         orgId: body.data.organization.id,
         slug: body.data.organization.slug,
         businessName: body.data.organization.name,
-        roleLabel: registrationRole === 'agent' ? 'Support Agent' : 'Business Owner',
-        isAgentAccount: registrationRole === 'agent',
+        roleLabel: roleToSubmit === 'agent' ? 'Support Agent' : 'Business Owner',
+        isAgentAccount: roleToSubmit === 'agent',
       });
 
       setTimeout(() => {
@@ -205,6 +236,9 @@ export function BusinessOnboardingFlow() {
     : 'your-business';
 
   if (successInfo) {
+    const isUninvitedAgent =
+      successInfo.isAgentAccount && successInfo.orgId === 'org_customcare_agent_hub';
+
     return (
       <div className="max-w-xl mx-auto rounded-3xl border border-teal-200 bg-white p-8 sm:p-10 shadow-sm text-center space-y-6">
         <div className="w-16 h-16 mx-auto rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center">
@@ -213,15 +247,22 @@ export function BusinessOnboardingFlow() {
         <div className="space-y-2">
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">
             {successInfo.isAgentAccount
-              ? 'Personal Agent Account Ready!'
-              : 'Workspace Provisioned Successfully!'}
+              ? 'Support Agent Account Created!'
+              : 'Business Workspace Provisioned!'}
           </h2>
           <p className="text-sm text-slate-600 max-w-md mx-auto">
             Welcome to {CAREFLOW_NAME},{' '}
             <span className="font-semibold text-slate-900">{fullName}</span>.{' '}
-            {successInfo.isAgentAccount ? (
+            {isUninvitedAgent ? (
               <>
-                Your personal Support Agent account is active and connected to{' '}
+                Your dedicated Support Agent account is active.{' '}
+                <span className="font-semibold text-teal-800">
+                  Get an invite from a business workspace to start working.
+                </span>
+              </>
+            ) : successInfo.isAgentAccount ? (
+              <>
+                Your Support Agent account is active and connected to{' '}
                 <span className="font-semibold text-teal-800">{successInfo.businessName}</span>.
               </>
             ) : (
@@ -235,12 +276,14 @@ export function BusinessOnboardingFlow() {
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs font-mono text-slate-700 text-left space-y-1.5">
           <div className="flex justify-between">
-            <span className="text-slate-500 font-sans">Workspace ID:</span>
-            <span className="font-bold">{successInfo.orgId}</span>
-          </div>
-          <div className="flex justify-between">
             <span className="text-slate-500 font-sans">Account Type:</span>
             <span className="font-bold text-teal-700">{successInfo.roleLabel}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500 font-sans">Workspace Status:</span>
+            <span className="font-bold">
+              {isUninvitedAgent ? 'Awaiting Workspace Invite' : successInfo.businessName}
+            </span>
           </div>
           {!successInfo.isAgentAccount && (
             <div className="flex justify-between">
@@ -251,7 +294,7 @@ export function BusinessOnboardingFlow() {
         </div>
 
         <p className="text-xs text-slate-500 animate-pulse">
-          Opening your dashboard...
+          Opening your {successInfo.isAgentAccount ? 'Support Agent' : 'Business'} dashboard...
         </p>
       </div>
     );
@@ -259,52 +302,66 @@ export function BusinessOnboardingFlow() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      {/* Step Stepper Header */}
-      <div className="mb-8 grid grid-cols-2 gap-3 text-xs font-semibold">
-        <button
-          type="button"
-          onClick={() => currentStage === 2 && setCurrentStage(1)}
-          className={`flex items-center gap-2.5 p-3 rounded-2xl border transition-all text-left cursor-pointer ${
-            currentStage === 1
-              ? 'border-teal-600 bg-teal-50/70 text-teal-900 shadow-sm'
-              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-          }`}
-        >
-          <div
-            className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
-              currentStage === 1 ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-700'
+      {/* Step Header: Only show 2-step indicator for Business accounts; Support Agent is a direct 1-step registration */}
+      {registrationRole === 'business' ? (
+        <div className="mb-8 grid grid-cols-2 gap-3 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => currentStage === 2 && setCurrentStage(1)}
+            className={`flex items-center gap-2.5 p-3 rounded-2xl border transition-all text-left cursor-pointer ${
+              currentStage === 1
+                ? 'border-teal-600 bg-teal-50/70 text-teal-900 shadow-sm'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
             }`}
           >
-            1
-          </div>
-          <div>
-            <div className="text-[11px] text-slate-500 uppercase tracking-wider">Step 1</div>
-            <div>Role &amp; Account Info</div>
-          </div>
-        </button>
-
-        <div
-          className={`flex items-center gap-2.5 p-3 rounded-2xl border text-left ${
-            currentStage === 2
-              ? 'border-teal-600 bg-teal-50/70 text-teal-900 shadow-sm'
-              : 'border-slate-200 bg-white text-slate-400'
-          }`}
-        >
-          <div
-            className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
-              currentStage === 2 ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-400'
-            }`}
-          >
-            2
-          </div>
-          <div>
-            <div className="text-[11px] text-slate-400 uppercase tracking-wider">Step 2</div>
+            <div
+              className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
+                currentStage === 1 ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-700'
+              }`}
+            >
+              1
+            </div>
             <div>
-              {registrationRole === 'business' ? 'First Business Workspace' : 'Agent Profile & Invites'}
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Step 1</div>
+              <div>Business Owner Account</div>
+            </div>
+          </button>
+
+          <div
+            className={`flex items-center gap-2.5 p-3 rounded-2xl border text-left ${
+              currentStage === 2
+                ? 'border-teal-600 bg-teal-50/70 text-teal-900 shadow-sm'
+                : 'border-slate-200 bg-white text-slate-400'
+            }`}
+          >
+            <div
+              className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
+                currentStage === 2 ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-400'
+              }`}
+            >
+              2
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider">Step 2</div>
+              <div>Business Workspace Details</div>
             </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="mb-8 flex items-center justify-between gap-3 p-3.5 rounded-2xl border border-teal-600 bg-teal-50/70 text-teal-900 shadow-sm text-xs font-semibold">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-teal-600 text-white flex items-center justify-center">
+              <Headphones className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-[11px] text-teal-700 uppercase tracking-wider">
+                Direct Support Agent Registration
+              </div>
+              <div>Create your Support Agent account in one step — no business setup required</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-xs font-semibold text-rose-800 flex items-start gap-3">
@@ -313,20 +370,21 @@ export function BusinessOnboardingFlow() {
         </div>
       )}
 
-      {/* Stage 1: Role Selection & Personal Account Information */}
+      {/* Stage 1: Role Selection & Account Information (Direct Submit for Agent, Step 1 for Business) */}
       {currentStage === 1 && (
         <form
-          onSubmit={handleContinueToStepTwo}
+          onSubmit={handleStepOneSubmit}
           className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-sm space-y-6"
         >
           <div>
             <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
               <User className="w-6 h-6 text-teal-600" aria-hidden="true" />
-              <span>How will you use CustomCare?</span>
+              <span>Choose your account type</span>
             </h2>
             <p className="mt-1.5 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              Select your primary role below. Need both later? You can launch a business workspace
-              or accept agent invitations from other businesses anytime inside your web dashboard.
+              Business accounts and Support Agent accounts work independently. Select{' '}
+              <strong>Business Owner</strong> to launch a company workspace, or{' '}
+              <strong>Support Agent</strong> to join a business team via invitation.
             </p>
           </div>
 
@@ -334,7 +392,10 @@ export function BusinessOnboardingFlow() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <button
               type="button"
-              onClick={() => setRegistrationRole('business')}
+              onClick={() => {
+                setRegistrationRole('business');
+                setErrorMessage(null);
+              }}
               className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
                 registrationRole === 'business'
                   ? 'border-teal-600 bg-teal-50/60 ring-2 ring-teal-100'
@@ -352,7 +413,7 @@ export function BusinessOnboardingFlow() {
                       : 'bg-slate-100 text-slate-600'
                   }`}
                 >
-                  Business Owner
+                  Business Account
                 </span>
               </div>
               <h3 className="mt-3 text-sm font-bold text-slate-900">
@@ -366,7 +427,11 @@ export function BusinessOnboardingFlow() {
 
             <button
               type="button"
-              onClick={() => setRegistrationRole('agent')}
+              onClick={() => {
+                setRegistrationRole('agent');
+                setCurrentStage(1);
+                setErrorMessage(null);
+              }}
               className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
                 registrationRole === 'agent'
                   ? 'border-teal-600 bg-teal-50/60 ring-2 ring-teal-100'
@@ -384,15 +449,15 @@ export function BusinessOnboardingFlow() {
                       : 'bg-slate-100 text-slate-600'
                   }`}
                 >
-                  Support Agent
+                  Support Agent Account
                 </span>
               </div>
               <h3 className="mt-3 text-sm font-bold text-slate-900">
                 I am a Support Agent
               </h3>
               <p className="mt-1 text-xs text-slate-600 leading-relaxed">
-                Create a personal CustomCare agent account to accept workspace invitations, manage
-                multi-business memberships, and handle tickets.
+                Create a dedicated Support Agent account to receive workspace invitations from
+                businesses and handle customer conversations.
               </p>
             </button>
           </div>
@@ -437,7 +502,7 @@ export function BusinessOnboardingFlow() {
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
                 {registrationRole === 'agent'
-                  ? 'Use the email address where businesses send your workspace invitations.'
+                  ? 'Use the email address where business administrators send your workspace invitations.'
                   : 'This will be your login email. You can configure public support emails inside your workspace.'}
               </p>
             </div>
@@ -528,6 +593,54 @@ export function BusinessOnboardingFlow() {
               </div>
             </div>
 
+            {/* Support Agent Specific Fields (rendered inline so Agent registration completes in 1 step) */}
+            {registrationRole === 'agent' && (
+              <div className="pt-2 space-y-4 border-t border-slate-100">
+                <div>
+                  <label
+                    htmlFor="agentSpecialty"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
+                  >
+                    Primary Support Specialty / Department
+                  </label>
+                  <input
+                    id="agentSpecialty"
+                    type="text"
+                    required
+                    value={agentSpecialty}
+                    onChange={(e) => setAgentSpecialty(e.target.value)}
+                    placeholder="e.g. Technical Support, Billing & Accounts, Customer Success"
+                    className="w-full px-4 py-3 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="invitationToken"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
+                  >
+                    Workspace Invitation Token or Link{' '}
+                    <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="invitationToken"
+                      type="text"
+                      value={invitationToken}
+                      onChange={(e) => setInvitationToken(e.target.value)}
+                      placeholder="Paste invite token or https://getcustomcare.xyz/invite/..."
+                      className="w-full px-4 py-3 text-sm font-mono rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all pr-10"
+                    />
+                    <KeyRound className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5 pointer-events-none" />
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Have an invite already? Paste it here to join the workspace immediately. No invite
+                    yet? Leave blank — you can get an invite to start working anytime after signing in.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="pt-2">
               <label className="flex items-start gap-3 cursor-pointer">
                 <input
@@ -566,6 +679,13 @@ export function BusinessOnboardingFlow() {
                 </span>
               </label>
             </div>
+
+            {registrationRole === 'agent' && (
+              <TurnstileWidget
+                onVerify={(t) => setTurnstileToken(t)}
+                onExpire={() => setTurnstileToken('')}
+              />
+            )}
           </div>
 
           <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100">
@@ -577,25 +697,52 @@ export function BusinessOnboardingFlow() {
             </Link>
             <button
               type="submit"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold tracking-wide transition-all shadow-sm cursor-pointer"
+              disabled={submitting}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold tracking-wide transition-all shadow-sm cursor-pointer"
             >
-              <span>
-                {registrationRole === 'business'
-                  ? 'Continue to Business Info'
-                  : 'Continue to Agent Setup'}
-              </span>
-              <ArrowRight className="w-4 h-4" />
+              {registrationRole === 'agent' ? (
+                submitting ? (
+                  <span>Creating Support Agent Account...</span>
+                ) : (
+                  <>
+                    <span>Create Agent Account &amp; Enter Dashboard</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )
+              ) : (
+                <>
+                  <span>Continue to Business Info</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </div>
         </form>
       )}
 
-      {/* Stage 2A: Business Setup */}
+      {/* Stage 2: Business Setup (Strictly for Business Accounts only) */}
       {currentStage === 2 && registrationRole === 'business' && (
         <form
-          onSubmit={handleFinalSubmit}
+          onSubmit={handleBusinessFinalSubmit}
           className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-sm space-y-6"
         >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+            <span className="text-xs font-semibold text-slate-500">
+              Registering a Business Owner account
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setRegistrationRole('agent');
+                setCurrentStage(1);
+                setErrorMessage(null);
+              }}
+              className="text-xs font-bold text-teal-700 hover:text-teal-900 underline underline-offset-2 text-left sm:text-right cursor-pointer"
+            >
+              Creating a Support Agent account instead? Switch to Support Agent &rarr;
+            </button>
+          </div>
+
           <div>
             <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
               <Building2 className="w-6 h-6 text-teal-600" aria-hidden="true" />
@@ -740,102 +887,6 @@ export function BusinessOnboardingFlow() {
               ) : (
                 <>
                   <span>Create Workspace &amp; Enter Dashboard</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {/* Stage 2B: Personal Support Agent Setup */}
-      {currentStage === 2 && registrationRole === 'agent' && (
-        <form
-          onSubmit={handleFinalSubmit}
-          className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-10 shadow-sm space-y-6"
-        >
-          <div>
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
-              <Headphones className="w-6 h-6 text-teal-600" aria-hidden="true" />
-              <span>Complete your Support Agent profile</span>
-            </h2>
-            <p className="mt-1.5 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              Your personal CustomCare agent account lets you accept invitations from multiple
-              businesses and switch between workspaces in one click. You can also launch your own
-              business workspace later from your dashboard.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label
-                htmlFor="agentSpecialty"
-                className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
-              >
-                Primary Support Specialty / Department
-              </label>
-              <input
-                id="agentSpecialty"
-                type="text"
-                required
-                value={agentSpecialty}
-                onChange={(e) => setAgentSpecialty(e.target.value)}
-                placeholder="e.g. Technical Support, Billing & Accounts, Customer Success"
-                className="w-full px-4 py-3 text-sm rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="invitationToken"
-                className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
-              >
-                Workspace Invitation Token or Link{' '}
-                <span className="text-slate-400 font-normal">(Optional)</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="invitationToken"
-                  type="text"
-                  value={invitationToken}
-                  onChange={(e) => setInvitationToken(e.target.value)}
-                  placeholder="Paste invite token or https://getcustomcare.xyz/invite/..."
-                  className="w-full px-4 py-3 text-sm font-mono rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 outline-none transition-all pr-10"
-                />
-                <KeyRound className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5 pointer-events-none" />
-              </div>
-              <p className="mt-1 text-[11px] text-slate-500">
-                If a business administrator sent you an invitation link or token, paste it here to
-                join their workspace immediately—or leave blank and accept invitations later in your
-                dashboard.
-              </p>
-            </div>
-
-            <TurnstileWidget
-              onVerify={(t) => setTurnstileToken(t)}
-              onExpire={() => setTurnstileToken('')}
-            />
-          </div>
-
-          <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setCurrentStage(1)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors py-2.5 px-3 cursor-pointer"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Back to Account</span>
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold tracking-wide transition-all shadow-sm cursor-pointer"
-            >
-              {submitting ? (
-                <span>Creating Agent Account...</span>
-              ) : (
-                <>
-                  <span>Create Agent Account &amp; Enter Dashboard</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}

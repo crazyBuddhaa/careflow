@@ -31,6 +31,14 @@ export async function POST(request: Request) {
       return jsonApiError('UNAUTHORIZED', 'Authentication required to create a workspace.', 401);
     }
 
+    if (session.accountType === 'agent') {
+      return jsonApiError(
+        'FORBIDDEN',
+        'Support Agent accounts cannot create business workspaces. Business and Support Agent accounts operate independently.',
+        403
+      );
+    }
+
     let rawBody: unknown;
     try {
       rawBody = await request.json();
@@ -66,6 +74,7 @@ export async function POST(request: Request) {
       sessionToken: session.sessionToken,
       emailVerified: session.emailVerified,
       mfaEnabled: session.mfaEnabled,
+      accountType: 'business',
     });
 
     const cookieStore = await cookies();

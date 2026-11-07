@@ -29,6 +29,7 @@ import {
   getReplyForNode,
   type ChatTurn,
 } from '@/components/GuidedSupportPreview';
+import { PortalClaimsWidget } from '@/components/PortalClaimsWidget';
 import { getDefaultPortalTemplateConfig } from '@/config/business-portals';
 
 const ICON_MAP: Record<PortalIconKey, React.ComponentType<{ className?: string }>> = {
@@ -1026,6 +1027,11 @@ export function SupportPortalLanding({
             )}
           </div>
         </section>
+
+        <PortalClaimsWidget
+          slug={portalConfig.slug}
+          displayName={branding.displayName}
+        />
       </main>
 
       {/* 8. Portal Footer — Includes Powered by CareFlow link back to central platform */}

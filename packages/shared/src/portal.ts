@@ -443,6 +443,13 @@ export type AdminModuleSectionKey =
   | 'conversations'
   | 'customers'
   | 'analytics'
+  | 'claims-resolution'
+  | 'supervisor-workspace'
+  | 'replacement-inventory'
+  | 'operations-dashboard'
+  | 'team-performance'
+  | 'activity-timeline'
+  | 'reports-closing'
   | 'account-security';
 
 export interface OnboardingStepItemStatus {

@@ -27,12 +27,15 @@ import {
   ShieldCheck,
   Share2,
   ShieldAlert,
+  FileText,
+  Box,
 } from 'lucide-react';
 import {
   CAREFLOW_LOGO_ICON_PATH,
   CAREFLOW_NAME,
   type AdminModuleSectionKey,
   type ApiResponse,
+  SupportChannel,
   type UserWorkspaceMembership,
   UserRole,
 } from '@careflow/shared';
@@ -53,6 +56,9 @@ import { WorkspaceOnboardingGuide } from '@/components/admin/WorkspaceOnboarding
 import { AccountSecurityManager } from '@/components/admin/AccountSecurityManager';
 import { ChannelIntegrationsManager } from '@/components/admin/ChannelIntegrationsManager';
 import { WorkspaceRoleOverview } from '@/components/admin/WorkspaceRoleOverview';
+import { ClaimsAndSupervisorManager } from '@/components/admin/ClaimsAndSupervisorManager';
+import { ReplacementInventoryManager } from '@/components/admin/ReplacementInventoryManager';
+import { OperationsAnalyticsAndReportsManager } from '@/components/admin/OperationsAnalyticsAndReportsManager';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 interface NavModuleDescriptor {
@@ -64,7 +70,7 @@ interface NavModuleDescriptor {
 }
 
 /**
- * Clean, consolidated 6-item navigation for Business Owners & Admins
+ * Navigation for Business Owners & Admins
  */
 const BUSINESS_PRIMARY_MODULES: NavModuleDescriptor[] = [
   {
@@ -75,11 +81,44 @@ const BUSINESS_PRIMARY_MODULES: NavModuleDescriptor[] = [
     icon: LayoutDashboard,
   },
   {
+    key: 'operations-dashboard',
+    matchKeys: [
+      'operations-dashboard',
+      'team-performance',
+      'activity-timeline',
+      'reports-closing',
+    ],
+    title: 'Operations & Reports',
+    subtitle: 'Daily ops, SLA backlog & closing',
+    icon: BarChart3,
+  },
+  {
     key: 'conversations',
     matchKeys: ['conversations', 'customers', 'agents', 'analytics'],
     title: 'Inbox & Team',
     subtitle: 'Conversations, agents & metrics',
     icon: MessageSquare,
+  },
+  {
+    key: 'claims-resolution',
+    matchKeys: ['claims-resolution'],
+    title: 'Claims & Resolution',
+    subtitle: 'Complaints, escalations & fixes',
+    icon: FileText,
+  },
+  {
+    key: 'supervisor-workspace',
+    matchKeys: ['supervisor-workspace'],
+    title: 'Supervisor Workspace',
+    subtitle: '7 review queues & approvals',
+    icon: ShieldAlert,
+  },
+  {
+    key: 'replacement-inventory',
+    matchKeys: ['replacement-inventory'],
+    title: 'Replacement Inventory',
+    subtitle: 'Encrypted stock & accountability',
+    icon: Box,
   },
   {
     key: 'integrations',
@@ -118,7 +157,7 @@ const BUSINESS_PRIMARY_MODULES: NavModuleDescriptor[] = [
 ];
 
 /**
- * Focused 4-item navigation strictly for Support Agents (Agent / Supervisor / Viewer)
+ * Navigation for Support Agents & Supervisors
  */
 const AGENT_PRIMARY_MODULES: NavModuleDescriptor[] = [
   {
@@ -134,6 +173,27 @@ const AGENT_PRIMARY_MODULES: NavModuleDescriptor[] = [
     title: 'Support Inbox',
     subtitle: 'Assigned & unassigned chats',
     icon: MessageSquare,
+  },
+  {
+    key: 'claims-resolution',
+    matchKeys: ['claims-resolution'],
+    title: 'Claims & Resolution',
+    subtitle: 'Complaints, escalations & fixes',
+    icon: FileText,
+  },
+  {
+    key: 'supervisor-workspace',
+    matchKeys: ['supervisor-workspace'],
+    title: 'Supervisor Workspace',
+    subtitle: 'Investigation queues & decisions',
+    icon: ShieldAlert,
+  },
+  {
+    key: 'replacement-inventory',
+    matchKeys: ['replacement-inventory'],
+    title: 'Replacement Stock',
+    subtitle: 'Fulfil approved replacements',
+    icon: Box,
   },
   {
     key: 'customers',
@@ -154,8 +214,18 @@ const AGENT_PRIMARY_MODULES: NavModuleDescriptor[] = [
 const AGENT_ALLOWED_KEYS = new Set<AdminModuleSectionKey>([
   'overview',
   'conversations',
+  'claims-resolution',
+  'supervisor-workspace',
+  'replacement-inventory',
   'customers',
   'account-security',
+]);
+
+const OPERATIONS_ANALYTICS_KEYS = new Set<AdminModuleSectionKey>([
+  'operations-dashboard',
+  'team-performance',
+  'activity-timeline',
+  'reports-closing',
 ]);
 
 const KNOWLEDGE_KEYS = new Set<AdminModuleSectionKey>([
@@ -176,6 +246,13 @@ export function BusinessAdminShell() {
   const [selectedKey, setSelectedKey] = useState<AdminModuleSectionKey>('overview');
   const [sessionState, setSessionState] = useState<AdminSessionStatusDto | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [pendingComplaintFromConv, setPendingComplaintFromConv] = useState<{
+    conversationId: string;
+    customerName: string;
+    customerEmail: string;
+    channel: SupportChannel;
+    subject: string;
+  } | null>(null);
 
   // Workspace Switcher Dropdown State
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -385,7 +462,11 @@ export function BusinessAdminShell() {
   const activeSession = sessionState?.session ?? null;
   const workspaces = sessionState?.workspaces ?? [];
   const isBusinessManager =
-    activeSession?.role === UserRole.Owner || activeSession?.role === UserRole.Admin;
+    (activeSession?.role === UserRole.Owner || activeSession?.role === UserRole.Admin) &&
+    activeSession?.accountType !== 'agent';
+  const isAgentAccount = activeSession?.accountType === 'agent' || !isBusinessManager;
+  const hasNoActiveWorkspace =
+    activeSession?.organizationId === 'org_customcare_agent_hub' || workspaces.length === 0;
   const mfaSetupRequired = Boolean(
     activeSession &&
       (activeSession.mfaSetupRequired ||
@@ -396,7 +477,11 @@ export function BusinessAdminShell() {
     ? 'account-security'
     : !isBusinessManager && !AGENT_ALLOWED_KEYS.has(selectedKey)
       ? 'overview'
-      : selectedKey;
+      : isAgentAccount &&
+          hasNoActiveWorkspace &&
+          selectedKey !== 'account-security'
+        ? 'overview'
+        : selectedKey;
 
   const navModules = isBusinessManager ? BUSINESS_PRIMARY_MODULES : AGENT_PRIMARY_MODULES;
 
@@ -430,17 +515,25 @@ export function BusinessAdminShell() {
                   className="flex items-center gap-1.5 sm:gap-2 py-1.5 px-2.5 sm:px-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all text-xs font-bold text-slate-900 max-w-full cursor-pointer"
                 >
                   <Building2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                  <span className="truncate max-w-[105px] sm:max-w-[200px]">
-                    {activeSession.organizationName}
+                  <span className="truncate max-w-[125px] sm:max-w-[220px]">
+                    {isAgentAccount && hasNoActiveWorkspace
+                      ? 'No Active Workspace'
+                      : activeSession.organizationName}
                   </span>
                   <span
                     className={`hidden sm:inline-block px-2 py-0.5 rounded text-[10px] uppercase font-bold shrink-0 ${
                       isBusinessManager
                         ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                        : 'bg-teal-50 text-teal-800 border border-teal-200'
+                        : hasNoActiveWorkspace
+                          ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                          : 'bg-teal-50 text-teal-800 border border-teal-200'
                     }`}
                   >
-                    {isBusinessManager ? `Business · ${activeSession.role}` : `Agent · ${activeSession.role}`}
+                    {isBusinessManager
+                      ? `Business · ${activeSession.role}`
+                      : hasNoActiveWorkspace
+                        ? 'Agent · Unassigned'
+                        : `Agent · ${activeSession.role}`}
                   </span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 </button>
@@ -455,58 +548,66 @@ export function BusinessAdminShell() {
                     <div className="absolute left-0 top-full mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 space-y-1">
                       <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                         {isBusinessManager ? 'Your Businesses' : 'Assigned Workspaces'} (
-                        {workspaces.length > 0 ? workspaces.length : 1})
+                        {workspaces.length})
                       </div>
 
-                      <div className="max-h-60 overflow-y-auto space-y-0.5">
-                        {workspaces.map((ws) => {
-                          const isCurrent = ws.organizationId === activeSession.organizationId;
-                          return (
-                            <button
-                              key={ws.organizationId}
-                              type="button"
-                              onClick={() => void handleSwitchWorkspace(ws.organizationId)}
-                              disabled={isCurrent || switchingOrgId === ws.organizationId}
-                              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left text-xs transition-colors cursor-pointer ${
-                                isCurrent
-                                  ? 'bg-teal-50 text-teal-900 font-bold'
-                                  : 'text-slate-700 hover:bg-slate-50'
-                              }`}
-                            >
-                              <div className="truncate pr-2">
-                                <div className="truncate">{ws.organizationName}</div>
-                                <div className="text-[10px] text-slate-500 font-normal">
-                                  {ws.industry} · {ws.country}
+                      {workspaces.length === 0 ? (
+                        <div className="px-3 py-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-900 space-y-1">
+                          <div className="font-bold">Get an Invite to start working</div>
+                          <div className="text-[11px] text-amber-800 leading-relaxed">
+                            You have no active workspace memberships yet. Accept an invite from a
+                            business administrator to access their support queue.
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="max-h-60 overflow-y-auto space-y-0.5">
+                          {workspaces.map((ws) => {
+                            const isCurrent = ws.organizationId === activeSession.organizationId;
+                            return (
+                              <button
+                                key={ws.organizationId}
+                                type="button"
+                                onClick={() => void handleSwitchWorkspace(ws.organizationId)}
+                                disabled={isCurrent || switchingOrgId === ws.organizationId}
+                                className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left text-xs transition-colors cursor-pointer ${
+                                  isCurrent
+                                    ? 'bg-teal-50 text-teal-900 font-bold'
+                                    : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="truncate pr-2">
+                                  <div className="truncate">{ws.organizationName}</div>
+                                  <div className="text-[10px] text-slate-500 font-normal">
+                                    {ws.industry} · {ws.country}
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase font-semibold">
-                                  {ws.role}
-                                </span>
-                                {isCurrent && <Check className="w-3.5 h-3.5 text-teal-600" />}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase font-semibold">
+                                    {ws.role}
+                                  </span>
+                                  {isCurrent && <Check className="w-3.5 h-3.5 text-teal-600" />}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
 
-                      <div className="pt-1 border-t border-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSwitcherOpen(false);
-                            setCreateModalOpen(true);
-                          }}
-                          className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors cursor-pointer"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>
-                            {isBusinessManager
-                              ? 'Create Another Business'
-                              : 'Register a Business Workspace'}
-                          </span>
-                        </button>
-                      </div>
+                      {isBusinessManager && (
+                        <div className="pt-1 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSwitcherOpen(false);
+                              setCreateModalOpen(true);
+                            }}
+                            className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-teal-700 hover:bg-teal-50 transition-colors cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Create Another Business</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -563,16 +664,14 @@ export function BusinessAdminShell() {
         </div>
       </header>
 
-      {/* "Create / Register a Business" Modal (Available to both Business Owners and Support Agents) */}
-      {createModalOpen && activeSession && (
+      {/* "Create Another Business" Modal (Strictly for Business Owner/Admin Accounts only) */}
+      {createModalOpen && activeSession && isBusinessManager && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
           <div className="max-w-md w-full rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-2xl space-y-5">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-teal-600" />
-                <span>
-                  {isBusinessManager ? 'Create Another Business' : 'Register a Business Workspace'}
-                </span>
+                <span>Create Another Business</span>
               </h3>
               <button
                 type="button"
@@ -999,7 +1098,7 @@ export function BusinessAdminShell() {
 
             {effectiveSelectedKey === 'overview' ? (
               <WorkspaceRoleOverview
-                key={`${activeSession.organizationId}:${activeSession.role}:${String(activeSession.isPersonalAccount)}`}
+                key={`${activeSession.organizationId}:${activeSession.role}:${String(activeSession.isPersonalAccount)}:${workspaces.length}`}
                 organizationId={activeSession.organizationId}
                 organizationName={activeSession.organizationName}
                 organizationSlug={activeSession.organizationSlug}
@@ -1011,7 +1110,9 @@ export function BusinessAdminShell() {
                 pendingInvitations={sessionState?.pendingInvitations ?? []}
                 workspaces={workspaces}
                 onNavigateSection={(sec) => setSelectedKey(sec)}
-                onOpenCreateBusinessModal={() => setCreateModalOpen(true)}
+                onOpenCreateBusinessModal={
+                  isBusinessManager ? () => setCreateModalOpen(true) : undefined
+                }
                 onSessionMutated={() => void loadSession()}
               />
             ) : effectiveSelectedKey === 'onboarding-guide' ? (
@@ -1035,6 +1136,40 @@ export function BusinessAdminShell() {
                 key={activeSession.userId}
                 autoStartMfaEnrollment={mfaSetupRequired}
                 onSessionUpdated={() => void loadSession()}
+              />
+            ) : effectiveSelectedKey === 'claims-resolution' ||
+              effectiveSelectedKey === 'supervisor-workspace' ? (
+              <ClaimsAndSupervisorManager
+                key={`${activeSession.organizationId}:${effectiveSelectedKey}`}
+                mode={effectiveSelectedKey === 'supervisor-workspace' ? 'supervisor' : 'claims'}
+                currentUserId={activeSession.userId}
+                currentUserName={activeSession.userName || activeSession.email || 'Support Member'}
+                currentUserRole={activeSession.role}
+                initialLinkedConversation={pendingComplaintFromConv}
+                onClearInitialConversation={() => setPendingComplaintFromConv(null)}
+              />
+            ) : effectiveSelectedKey === 'replacement-inventory' ? (
+              <ReplacementInventoryManager
+                key={activeSession.organizationId}
+                currentUserId={activeSession.userId}
+                currentUserName={activeSession.userName || activeSession.email || 'Support Member'}
+                currentUserRole={activeSession.role}
+              />
+            ) : OPERATIONS_ANALYTICS_KEYS.has(effectiveSelectedKey) ? (
+              <OperationsAnalyticsAndReportsManager
+                key={activeSession.organizationId}
+                initialSection={
+                  effectiveSelectedKey as
+                    | 'operations-dashboard'
+                    | 'team-performance'
+                    | 'activity-timeline'
+                    | 'reports-closing'
+                }
+                currentUserRole={activeSession.role}
+                onNavigateToSection={(sec) => {
+                  if (sec === 'inbox') setSelectedKey('conversations');
+                  else setSelectedKey(sec);
+                }}
               />
             ) : KNOWLEDGE_KEYS.has(effectiveSelectedKey) ? (
               <KnowledgeAdminManager
@@ -1060,6 +1195,16 @@ export function BusinessAdminShell() {
                 currentUserName={activeSession.userName}
                 currentUserRole={activeSession.role}
                 onNavigateSubView={(view) => setSelectedKey(view)}
+                onCreateComplaintFromConversation={(conv) => {
+                  setPendingComplaintFromConv({
+                    conversationId: conv.id,
+                    customerName: conv.customerName,
+                    customerEmail: conv.customerEmail,
+                    channel: conv.channel,
+                    subject: conv.subject,
+                  });
+                  setSelectedKey('claims-resolution');
+                }}
               />
             )}
           </main>

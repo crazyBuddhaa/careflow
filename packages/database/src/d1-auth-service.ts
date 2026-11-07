@@ -860,8 +860,8 @@ export class D1AuthIdentityService {
     let activeMembership: UserWorkspaceMembership | undefined;
     if (workspaces.length === 0) {
       // Allow standalone registered personal agents (or platform admins) with 0 active workspaces
-      // to access their Agent Hub so they can accept invitations or launch a business workspace.
-      if (isPersonalAccount && (accountType === 'agent' || accountType === 'both' || isPlatformAdmin)) {
+      // to access their Agent Hub so they can accept invitations.
+      if (isPersonalAccount && (accountType === 'agent' || isPlatformAdmin)) {
         activeMembership = {
           organizationId: 'org_customcare_agent_hub',
           organizationSlug: 'customcare-agent-hub',
@@ -2114,8 +2114,11 @@ export class D1AuthIdentityService {
       finalAccessMode = nextIsPersonal === 1 ? 'personal_account' : 'business_managed';
 
       const currentAccountType = (existingUserRow.account_type as AccountRegistrationMode) || 'agent';
-      const nextAccountType: AccountRegistrationMode =
-        currentAccountType === 'business' ? 'both' : currentAccountType;
+      if (currentAccountType === 'business') {
+        throw new Error(
+          'FORBIDDEN: Business owner accounts cannot accept support agent invitations. Business and Support Agent accounts work independently.'
+        );
+      }
 
       await this.db
         .prepare(
@@ -2124,11 +2127,11 @@ export class D1AuthIdentityService {
                password_hash = ?,
                email_verified = 1,
                is_personal_account = ?,
-               account_type = ?,
+               account_type = 'agent',
                updated_at = ?
            WHERE id = ?`
         )
-        .bind(displayName, newPasswordHash, nextIsPersonal, nextAccountType, nowIso, userId)
+        .bind(displayName, newPasswordHash, nextIsPersonal, nowIso, userId)
         .run();
     } else {
       if (!params.password || params.password.length < 8) {

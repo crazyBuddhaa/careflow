@@ -159,6 +159,7 @@ export async function POST(request: Request) {
           sessionToken: d1RawSessionToken,
           emailVerified: agentResult.user.emailVerified,
           mfaEnabled: false,
+          accountType: 'agent',
         });
 
         const cookieStore = await cookies();
@@ -229,6 +230,7 @@ export async function POST(request: Request) {
         sessionToken: d1Session.rawSessionToken,
         emailVerified: result.user.emailVerified,
         mfaEnabled: false,
+        accountType: 'business',
       });
 
       const cookieStore = await cookies();

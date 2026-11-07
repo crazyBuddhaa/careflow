@@ -18,7 +18,7 @@ async function createTestHarness() {
 
 test('Agent Invitations, Dual Access Models, Identity Linking & Lifecycle', async (t) => {
   await t.test(
-    '1. Role-selective registration: Support Agent registration creates a personal account without forcing business creation, and allows launching a business later',
+    '1. Role-selective registration: Support Agent and Business accounts operate independently (agents cannot create businesses)',
     async () => {
       const { repo } = await createTestHarness();
 
@@ -34,21 +34,42 @@ test('Agent Invitations, Dual Access Models, Identity Linking & Lifecycle', asyn
       assert.equal(agentReg.user.accountType, 'agent');
       assert.equal(agentReg.user.isPersonalAccount, true);
       assert.equal(agentReg.workspaces.length, 0);
+      assert.equal(agentReg.activeMembership.organizationId, 'org_customcare_agent_hub');
 
-      // Cross-role expansion: Agent later launches their own Business Workspace from dashboard
-      const createdOrg = await repo.createAdditionalBusinessForUser(agentReg.user.id, {
-        businessName: 'Ada Labs Cloud',
-        industry: 'Cloud Infrastructure',
+      // Agent accounts must never be converted to or allowed to create a business account
+      await assert.rejects(
+        async () => {
+          await repo.createAdditionalBusinessForUser(agentReg.user.id, {
+            businessName: 'Ada Labs Cloud',
+            industry: 'Cloud Infrastructure',
+            country: 'United States',
+            website: 'https://adalabs.example.com',
+          });
+        },
+        /FORBIDDEN: Support Agent accounts cannot create business workspaces/
+      );
+
+      // Business accounts can create additional business workspaces and stay 'business'
+      const bizOwner = await repo.registerUserAndFirstBusiness({
+        fullName: 'Marcus Founder',
+        email: 'marcus.founder@example.com',
+        password: 'StrongBizPassword!2026',
+        businessName: 'Marcus Primary Corp',
+        industry: 'Technology',
         country: 'United States',
-        website: 'https://adalabs.example.com',
       });
+      assert.equal(bizOwner.user.accountType, 'business');
 
-      assert.ok(createdOrg.organizationId);
-      assert.equal(createdOrg.organizationName, 'Ada Labs Cloud');
+      const secondBiz = await repo.createAdditionalBusinessForUser(bizOwner.user.id, {
+        businessName: 'Marcus Ventures Labs',
+        industry: 'Financial Services',
+        country: 'United States',
+      });
+      assert.ok(secondBiz.organizationId);
+      assert.equal(secondBiz.organizationName, 'Marcus Ventures Labs');
 
-      const workspaces = await repo.getUserWorkspaces(agentReg.user.id);
-      assert.equal(workspaces.length, 1);
-      assert.equal(workspaces[0]?.role, UserRole.Owner);
+      const bizWorkspaces = await repo.getUserWorkspaces(bizOwner.user.id);
+      assert.equal(bizWorkspaces.length, 2);
     }
   );
 

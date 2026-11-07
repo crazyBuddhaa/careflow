@@ -1,4 +1,8 @@
-import { SupportChannel, UserRole } from '@careflow/shared';
+import {
+  SupportChannel,
+  UserRole,
+  type WorkspacePermissionKey,
+} from '@careflow/shared';
 import { hasMinimumRole } from '@careflow/support-engine';
 import {
   ReplyConversationSchema,
@@ -16,6 +20,7 @@ import {
 } from '@/lib/api-response';
 import {
   getChannelIntegrationService,
+  getOperationsManagementService,
   getWorkspaceRepository,
 } from '@/lib/knowledge-runtime';
 
@@ -61,6 +66,40 @@ export async function POST(request: Request, context: RouteContext) {
       isInternalNote: Boolean(input.isInternalNote),
       nextStatus: input.nextStatus,
     });
+
+    // Record meaningful agent action & timeline event
+    try {
+      const opsService = await getOperationsManagementService();
+      await opsService.recordMeaningfulAgentAction(
+        auth.session.identity.organizationId,
+        {
+          userId: auth.session.identity.userId,
+          userName: senderDisplayName,
+          userEmail: auth.session.identity.email || '',
+          userRole: auth.session.identity.role,
+          permissions: (auth.session.permissions || []) as WorkspacePermissionKey[],
+        },
+        input.isInternalNote ? 'internal_note' : 'conversation_reply',
+        input.isInternalNote
+          ? `Added internal note on conversation with ${updated.customerName}`
+          : `Replied to ${updated.customerName} (${updated.subject})`
+      );
+      await opsService.recordOperationalEvent({
+        organizationId: auth.session.identity.organizationId,
+        actorUserId: auth.session.identity.userId,
+        actorName: senderDisplayName,
+        actorRole: auth.session.identity.role,
+        eventCategory: 'conversation',
+        eventType: input.isInternalNote ? 'conversation_internal_note' : 'conversation_reply',
+        caseReference: updated.id,
+        conversationId: updated.id,
+        summary: input.isInternalNote
+          ? `Added internal note on conversation with ${updated.customerName}`
+          : `Sent customer reply on conversation with ${updated.customerName} (${updated.subject})`,
+      });
+    } catch {
+      // Do not fail reply if audit logging encounters a transient issue
+    }
 
     // If this is a public agent reply on a Telegram conversation, deliver through the central CustomCare bot
     if (!input.isInternalNote && updated.channel === SupportChannel.Telegram) {
@@ -137,6 +176,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       auth.session.identity.organizationId,
       conversationId
     );
+    const actorName =
+      auth.session.userName || auth.session.identity.email || 'Support Member';
     const updated = await repo.updateConversationStatus({
       organizationId: auth.session.identity.organizationId,
       conversationId,
@@ -146,8 +187,47 @@ export async function PATCH(request: Request, context: RouteContext) {
       assignedAgentName: input.assignedAgentName,
       assignedAgentId: input.assignedAgentId,
       actorUserId: auth.session.identity.userId,
-      actorName: auth.session.userName || auth.session.identity.email,
+      actorName,
     });
+
+    try {
+      const opsService = await getOperationsManagementService();
+      await opsService.recordMeaningfulAgentAction(
+        auth.session.identity.organizationId,
+        {
+          userId: auth.session.identity.userId,
+          userName: actorName,
+          userEmail: auth.session.identity.email || '',
+          userRole: auth.session.identity.role,
+          permissions: (auth.session.permissions || []) as WorkspacePermissionKey[],
+        },
+        input.status === 'resolved' ? 'conversation_resolved' : 'conversation_updated',
+        `Updated conversation ${updated.id} (${updated.status})`
+      );
+      await opsService.recordOperationalEvent({
+        organizationId: auth.session.identity.organizationId,
+        actorUserId: auth.session.identity.userId,
+        actorName,
+        actorRole: auth.session.identity.role,
+        eventCategory: 'conversation',
+        eventType:
+          input.status === 'resolved'
+            ? 'conversation_resolved'
+            : input.assignedAgentName !== undefined
+              ? 'conversation_assigned'
+              : 'conversation_updated',
+        caseReference: updated.id,
+        conversationId: updated.id,
+        summary:
+          input.status === 'resolved'
+            ? `Marked conversation with ${updated.customerName} as Resolved`
+            : input.assignedAgentName !== undefined
+              ? `Assigned conversation with ${updated.customerName} to ${input.assignedAgentName || 'Unassigned'}`
+              : `Updated conversation with ${updated.customerName} (status: ${updated.status})`,
+      });
+    } catch {
+      // Non-blocking audit hook
+    }
 
     if (
       updated.channel === SupportChannel.Telegram &&
@@ -160,12 +240,9 @@ export async function PATCH(request: Request, context: RouteContext) {
         organizationId: auth.session.identity.organizationId,
         conversation: updated,
         previousStatus: existingBefore?.status,
-        nextStatus: input.status,
-        assignedAgentName:
-          input.assignedAgentName !== existingBefore?.assignedAgentName
-            ? input.assignedAgentName
-            : undefined,
-        actorName: auth.session.userName || auth.session.identity.email,
+        nextStatus: updated.status,
+        assignedAgentName: input.assignedAgentName,
+        actorName,
         botToken: readRuntimeSecret('TELEGRAM_BOT_TOKEN'),
       });
     }
@@ -175,5 +252,3 @@ export async function PATCH(request: Request, context: RouteContext) {
     return handleKnowledgeApiException(err);
   }
 }
-
-

@@ -818,6 +818,10 @@ export class D1ChannelIntegrationService {
     organizationId: string,
     options?: { centralBotUsername?: string; appBaseUrl?: string }
   ): Promise<ChannelIntegrationRecord[]> {
+    if (organizationId === 'org_customcare_agent_hub') {
+      return [];
+    }
+
     const org = await this.db
       .prepare(
         `SELECT id, slug, name, onboarding_status

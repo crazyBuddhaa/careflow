@@ -89,7 +89,18 @@ export type WorkspacePermissionKey =
   | 'team:invite'
   | 'team:manage'
   | 'settings:manage'
-  | 'analytics:view';
+  | 'analytics:view'
+  | 'claims:view'
+  | 'claims:create'
+  | 'claims:escalate'
+  | 'claims:approve'
+  | 'claims:fulfil_replacement'
+  | 'inventory:view'
+  | 'inventory:manage'
+  | 'inventory:allocate'
+  | 'operations:view'
+  | 'reports:export'
+  | 'audit:view';
 
 export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, WorkspacePermissionKey[]> = {
   [UserRole.Owner]: [
@@ -104,6 +115,17 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, WorkspacePermissionKe
     'team:manage',
     'settings:manage',
     'analytics:view',
+    'claims:view',
+    'claims:create',
+    'claims:escalate',
+    'claims:approve',
+    'claims:fulfil_replacement',
+    'inventory:view',
+    'inventory:manage',
+    'inventory:allocate',
+    'operations:view',
+    'reports:export',
+    'audit:view',
   ],
   [UserRole.Admin]: [
     'conversations:view',
@@ -117,6 +139,17 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, WorkspacePermissionKe
     'team:manage',
     'settings:manage',
     'analytics:view',
+    'claims:view',
+    'claims:create',
+    'claims:escalate',
+    'claims:approve',
+    'claims:fulfil_replacement',
+    'inventory:view',
+    'inventory:manage',
+    'inventory:allocate',
+    'operations:view',
+    'reports:export',
+    'audit:view',
   ],
   [UserRole.Supervisor]: [
     'conversations:view',
@@ -126,17 +159,30 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, WorkspacePermissionKe
     'knowledge:view',
     'knowledge:edit',
     'analytics:view',
+    'claims:view',
+    'claims:create',
+    'claims:escalate',
+    'claims:approve',
+    'claims:fulfil_replacement',
+    'inventory:view',
+    'inventory:allocate',
+    'operations:view',
   ],
   [UserRole.Agent]: [
     'conversations:view',
     'conversations:reply',
     'customers:view',
     'knowledge:view',
+    'claims:view',
+    'claims:create',
+    'claims:escalate',
+    'claims:fulfil_replacement',
   ],
   [UserRole.Viewer]: [
     'conversations:view',
     'customers:view',
     'knowledge:view',
+    'claims:view',
   ],
   [UserRole.Customer]: [],
 };

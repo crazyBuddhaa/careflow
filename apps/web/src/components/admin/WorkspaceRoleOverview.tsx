@@ -108,7 +108,22 @@ export function WorkspaceRoleOverview({
     }, 3500);
   }, []);
 
+  const isStandaloneAgentHub =
+    organizationId === 'org_customcare_agent_hub' ||
+    (!isBusinessManager && workspaces.length === 0);
+
   const loadDashboardData = useCallback(async () => {
+    if (isStandaloneAgentHub) {
+      setConversations([]);
+      setIntegrations([]);
+      setAgentLinks([]);
+      setAgents([]);
+      setAnalytics(null);
+      setOnboarding(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setErrorBanner(null);
     try {
@@ -149,7 +164,7 @@ export function WorkspaceRoleOverview({
     } finally {
       setLoading(false);
     }
-  }, [isBusinessManager]);
+  }, [isBusinessManager, isStandaloneAgentHub]);
 
   useEffect(() => {
     void loadDashboardData();
@@ -309,7 +324,6 @@ export function WorkspaceRoleOverview({
     window.location.href = `/invite/${encodeURIComponent(token)}`;
   }
 
-  const isStandaloneAgentHub = organizationId === 'org_customcare_agent_hub';
   const canLeaveCurrentWorkspace =
     currentUserRole !== UserRole.Owner && !isStandaloneAgentHub;
 
@@ -384,23 +398,172 @@ export function WorkspaceRoleOverview({
           </div>
         )}
 
-        {/* Agent Header & Live Availability Bar */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-md bg-teal-50 border border-teal-200 text-teal-800 text-[11px] font-bold uppercase">
-                Agent Workspace · {currentUserRole}
-              </span>
-              <span className="text-xs text-slate-500">{organizationName}</span>
+        {isStandaloneAgentHub ? (
+          /* UNINVITED AGENT WITH NO ACTIVE WORKSPACE: "Get an Invite to start working" */
+          <div className="space-y-6">
+            <div className="rounded-3xl border-2 border-teal-600/30 bg-white p-6 sm:p-8 shadow-xs space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold">
+                <Mail className="w-3.5 h-3.5 text-amber-700" />
+                <span>Support Agent Account · No Active Workspace</span>
+              </div>
+
+              <div className="space-y-2 max-w-2xl">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+                  Get an Invite to start working
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Welcome, <span className="font-semibold text-slate-900">{currentUserName}</span>.
+                  Your Support Agent account is active, but you are not currently assigned to any
+                  business workspace. Ask your business administrator to send an invitation to your
+                  agent email or paste an invitation token below to join a support team.
+                </p>
+              </div>
             </div>
-            <h1 className="mt-1.5 text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Welcome back, {currentUserName.split(' ')[0]}
-            </h1>
-            <p className="mt-0.5 text-xs sm:text-sm text-slate-600">
-              Manage your assigned customer conversations, pick up unassigned escalations, and reply
-              from the web or Telegram.
-            </p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left: Accept Invitation Token or Pending Invites */}
+              <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-6 space-y-5">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-teal-600" />
+                    <span>Join a Workspace with an Invitation</span>
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Paste the invitation link or token shared by a business owner or administrator
+                    to unlock their Support Inbox.
+                  </p>
+                </div>
+
+                {pendingInvitations.length > 0 ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-2.5">
+                    <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                      <Mail className="w-4 h-4 text-amber-700" />
+                      <span>Pending Invitations for {currentUserEmail} ({pendingInvitations.length})</span>
+                    </div>
+                    <div className="space-y-2">
+                      {pendingInvitations.map((inv) => (
+                        <div
+                          key={inv.id}
+                          className="flex items-center justify-between gap-3 bg-white rounded-lg p-3 border border-amber-200/80 text-xs"
+                        >
+                          <div>
+                            <p className="font-bold text-slate-900">{inv.organizationName}</p>
+                            <p className="text-slate-500">
+                              Role: <span className="font-semibold uppercase">{inv.role}</span>
+                              {inv.department ? ` · ${inv.department}` : ''}
+                            </p>
+                          </div>
+                          <span className="text-[11px] font-semibold text-teal-700">
+                            Open link from email or paste token below
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-600">
+                    No pending invitations found for{' '}
+                    <span className="font-mono font-semibold text-slate-900">
+                      {currentUserEmail}
+                    </span>{' '}
+                    yet. Once a business invites you, it will appear here automatically.
+                  </div>
+                )}
+
+                <form onSubmit={handleOpenInviteToken} className="space-y-3">
+                  <label
+                    htmlFor="uninvitedAgentTokenInput"
+                    className="block text-xs font-bold uppercase tracking-wider text-slate-700"
+                  >
+                    Invitation Token or Link
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2.5">
+                    <div className="relative flex-1">
+                      <input
+                        id="uninvitedAgentTokenInput"
+                        type="text"
+                        value={inviteTokenInput}
+                        onChange={(e) => setInviteTokenInput(e.target.value)}
+                        placeholder="Paste invite token or https://getcustomcare.xyz/invite/..."
+                        className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs font-mono text-slate-900 focus:border-teal-600 focus:outline-none pr-8"
+                      />
+                      <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3 pointer-events-none" />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={!inviteTokenInput.trim()}
+                      className="py-2.5 px-5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap cursor-pointer"
+                    >
+                      Accept Invite &amp; Start Working &rarr;
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Right: Share Your Agent Email to Get Invited */}
+              <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+                <div>
+                  <span className="px-2 py-0.5 rounded bg-teal-50 text-teal-800 text-[10px] font-bold uppercase">
+                    How to Get Invited
+                  </span>
+                  <h2 className="mt-1 text-base font-bold text-slate-900">
+                    Share your Support Agent email
+                  </h2>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Give your registered email address to your business administrator so they can add
+                  you to their support workspace:
+                </p>
+
+                <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-xs font-mono font-bold text-slate-900 truncate">
+                    {currentUserEmail}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(currentUserEmail, 'agent email address')}
+                    className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shrink-0 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy Email</span>
+                  </button>
+                </div>
+
+                <ol className="space-y-2 text-xs text-slate-600 list-decimal list-inside pt-1">
+                  <li>
+                    Your business admin opens <strong>Inbox &amp; Team &rarr; Support Team</strong>.
+                  </li>
+                  <li>
+                    They invite <span className="font-mono font-semibold">{currentUserEmail}</span>{' '}
+                    and share the invitation link.
+                  </li>
+                  <li>
+                    Accept the invite to start handling customer chats on Web and Telegram.
+                  </li>
+                </ol>
+              </div>
+            </div>
           </div>
+        ) : (
+          <>
+            {/* Agent Header & Live Availability Bar */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-md bg-teal-50 border border-teal-200 text-teal-800 text-[11px] font-bold uppercase">
+                    Agent Workspace · {currentUserRole}
+                  </span>
+                  <span className="text-xs text-slate-500">{organizationName}</span>
+                </div>
+                <h1 className="mt-1.5 text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+                  Welcome back, {currentUserName.split(' ')[0]}
+                </h1>
+                <p className="mt-0.5 text-xs sm:text-sm text-slate-600">
+                  Manage your assigned customer conversations, pick up unassigned escalations, and reply
+                  from the web or Telegram.
+                </p>
+              </div>
 
           {/* Availability Toggle */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -716,144 +879,113 @@ export function WorkspaceRoleOverview({
           </form>
         )}
 
-        {/* Cross-Role Expansion, Multi-Workspace Table & Voluntary Departure */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left: My Workspaces & Pending Invitations */}
-          <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  My Workspaces &amp; Invitations
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Accept invitations from businesses or manage your active memberships
-                </p>
-              </div>
-              {canLeaveCurrentWorkspace && (
-                <button
-                  type="button"
-                  disabled={leavingWorkspace}
-                  onClick={() => void handleLeaveWorkspace()}
-                  className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold cursor-pointer"
-                  title="Voluntarily leave this workspace and unassign your open conversations"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>{leavingWorkspace ? 'Leaving...' : `Leave ${organizationName}`}</span>
-                </button>
-              )}
+        {/* Multi-Workspace Memberships, Invitations & Voluntary Departure */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                My Workspaces &amp; Invitations
+              </h2>
+              <p className="text-xs text-slate-500">
+                Accept invitations from businesses or manage your active workspace memberships
+              </p>
             </div>
-
-            {pendingInvitations.length > 0 && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-2.5">
-                <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                  <Mail className="w-4 h-4 text-amber-700" />
-                  <span>Pending Workspace Invitations ({pendingInvitations.length})</span>
-                </div>
-                <div className="space-y-2">
-                  {pendingInvitations.map((inv) => (
-                    <div
-                      key={inv.id}
-                      className="flex items-center justify-between gap-3 bg-white rounded-lg p-3 border border-amber-200/80 text-xs"
-                    >
-                      <div>
-                        <p className="font-bold text-slate-900">{inv.organizationName}</p>
-                        <p className="text-slate-500">
-                          Role: <span className="font-semibold uppercase">{inv.role}</span>
-                          {inv.department ? ` · ${inv.department}` : ''}
-                        </p>
-                      </div>
-                      <span className="text-[11px] font-semibold text-teal-700">
-                        Use invite link from email or paste token below
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Paste Invitation Link or Token */}
-            <form onSubmit={handleOpenInviteToken} className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={inviteTokenInput}
-                  onChange={(e) => setInviteTokenInput(e.target.value)}
-                  placeholder="Paste workspace invite token or /invite/... link"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-xs font-mono text-slate-900 focus:border-teal-600 focus:outline-none pr-8"
-                />
-                <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
-              </div>
-              <button
-                type="submit"
-                disabled={!inviteTokenInput.trim()}
-                className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap cursor-pointer"
-              >
-                Open Invitation &rarr;
-              </button>
-            </form>
-
-            {workspaces.length > 0 && (
-              <div className="border-t border-slate-100 pt-3">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-500 font-semibold">
-                      <th className="py-2 pr-3">Workspace</th>
-                      <th className="py-2 px-3">Role</th>
-                      <th className="py-2 pl-3 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {workspaces.map((ws) => (
-                      <tr key={ws.organizationId}>
-                        <td className="py-2.5 pr-3 font-semibold text-slate-900">
-                          {ws.organizationName}
-                        </td>
-                        <td className="py-2.5 px-3 uppercase font-semibold text-slate-600">
-                          {ws.role}
-                        </td>
-                        <td className="py-2.5 pl-3 text-right">
-                          <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold uppercase text-[10px]">
-                            {ws.status || 'active'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Right: Cross-Role Expansion — Launch a Business Workspace */}
-          <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 text-[10px] font-bold uppercase">
-                  Cross-Role Expansion
-                </span>
-                <h2 className="mt-1 text-base font-bold text-slate-900">
-                  Want to launch your own Business Workspace?
-                </h2>
-              </div>
-              <Building2 className="w-5 h-5 text-blue-600 shrink-0" />
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Your CustomCare account can act as both a Support Agent for other companies and an
-              Owner of your own isolated business workspaces. Set up a dedicated business portal,
-              knowledge base, and AI assistant anytime.
-            </p>
-            {onOpenCreateBusinessModal && (
+            {canLeaveCurrentWorkspace && (
               <button
                 type="button"
-                onClick={onOpenCreateBusinessModal}
-                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
+                disabled={leavingWorkspace}
+                onClick={() => void handleLeaveWorkspace()}
+                className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold cursor-pointer"
+                title="Voluntarily leave this workspace and unassign your open conversations"
               >
-                <Building2 className="w-4 h-4" />
-                <span>Register a Business Workspace</span>
+                <LogOut className="w-3.5 h-3.5" />
+                <span>{leavingWorkspace ? 'Leaving...' : `Leave ${organizationName}`}</span>
               </button>
             )}
           </div>
+
+          {pendingInvitations.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-2.5">
+              <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                <Mail className="w-4 h-4 text-amber-700" />
+                <span>Pending Workspace Invitations ({pendingInvitations.length})</span>
+              </div>
+              <div className="space-y-2">
+                {pendingInvitations.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex items-center justify-between gap-3 bg-white rounded-lg p-3 border border-amber-200/80 text-xs"
+                  >
+                    <div>
+                      <p className="font-bold text-slate-900">{inv.organizationName}</p>
+                      <p className="text-slate-500">
+                        Role: <span className="font-semibold uppercase">{inv.role}</span>
+                        {inv.department ? ` · ${inv.department}` : ''}
+                      </p>
+                    </div>
+                    <span className="text-[11px] font-semibold text-teal-700">
+                      Use invite link from email or paste token below
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Paste Invitation Link or Token */}
+          <form onSubmit={handleOpenInviteToken} className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={inviteTokenInput}
+                onChange={(e) => setInviteTokenInput(e.target.value)}
+                placeholder="Paste workspace invite token or /invite/... link"
+                className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-xs font-mono text-slate-900 focus:border-teal-600 focus:outline-none pr-8"
+              />
+              <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+            </div>
+            <button
+              type="submit"
+              disabled={!inviteTokenInput.trim()}
+              className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap cursor-pointer"
+            >
+              Open Invitation &rarr;
+            </button>
+          </form>
+
+          {workspaces.length > 0 && (
+            <div className="border-t border-slate-100 pt-3">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-semibold">
+                    <th className="py-2 pr-3">Workspace</th>
+                    <th className="py-2 px-3">Role</th>
+                    <th className="py-2 pl-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {workspaces.map((ws) => (
+                    <tr key={ws.organizationId}>
+                      <td className="py-2.5 pr-3 font-semibold text-slate-900">
+                        {ws.organizationName}
+                      </td>
+                      <td className="py-2.5 px-3 uppercase font-semibold text-slate-600">
+                        {ws.role}
+                      </td>
+                      <td className="py-2.5 pl-3 text-right">
+                        <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold uppercase text-[10px]">
+                          {ws.status || 'active'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
+          </>
+        )}
       </div>
     );
   }

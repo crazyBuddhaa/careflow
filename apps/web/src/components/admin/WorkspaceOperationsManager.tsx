@@ -46,6 +46,7 @@ interface WorkspaceOperationsManagerProps {
   currentUserName?: string;
   currentUserRole?: UserRole;
   onNavigateSubView?: (view: OperationsSubView) => void;
+  onCreateComplaintFromConversation?: (conv: WorkspaceConversationItem) => void;
 }
 
 function formatDateTime(iso: string): string {
@@ -67,6 +68,7 @@ export function WorkspaceOperationsManager({
   currentUserName,
   currentUserRole = UserRole.Owner,
   onNavigateSubView,
+  onCreateComplaintFromConversation,
 }: WorkspaceOperationsManagerProps) {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -1111,6 +1113,19 @@ export function WorkspaceOperationsManager({
                               <span>Accept</span>
                             </button>
                           )}
+
+                        {!isViewer && onCreateComplaintFromConversation && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onCreateComplaintFromConversation(activeConversation)
+                            }
+                            className="inline-flex items-center gap-1 py-1.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
+                          >
+                            <ShieldAlert className="w-3.5 h-3.5" />
+                            <span>Create Claim / Complaint</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"

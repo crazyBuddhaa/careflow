@@ -2789,12 +2789,17 @@ export class D1WorkspaceRepository {
   }> {
     const email = input.email.trim().toLowerCase();
     const existingUser = await this.db
-      .prepare(`SELECT id, is_personal_account FROM users WHERE email = ?`)
+      .prepare(`SELECT id, is_personal_account, account_type FROM users WHERE email = ?`)
       .bind(email)
-      .first<{ id: string; is_personal_account: number }>();
+      .first<{ id: string; is_personal_account: number; account_type: string }>();
 
     if (existingUser && Number(existingUser.is_personal_account ?? 1) === 1) {
       throw new Error('An account with this email address already exists. Please sign in.');
+    }
+    if (existingUser && existingUser.account_type === 'agent') {
+      throw new Error(
+        'This email is registered as a Support Agent account. Business and Support Agent accounts work independently.'
+      );
     }
 
     const nowMs = Date.now();
@@ -2809,7 +2814,7 @@ export class D1WorkspaceRepository {
         .prepare(
           `UPDATE users
            SET full_name = ?, password_hash = ?, email_verified = MAX(email_verified, ?),
-               account_type = 'both', is_personal_account = 1, is_platform_admin = MAX(is_platform_admin, ?), updated_at = ?
+               account_type = 'business', is_personal_account = 1, is_platform_admin = MAX(is_platform_admin, ?), updated_at = ?
            WHERE id = ?`
         )
         .bind(input.fullName.trim(), passwordHash, initialVerifiedFlag, isSuperAdmin, now, userId)
@@ -2976,7 +2981,7 @@ export class D1WorkspaceRepository {
         fullName: input.fullName.trim(),
         emailVerified: Boolean(initialVerifiedFlag),
         mfaEnabled: false,
-        accountType: existingUser ? 'both' : 'business',
+        accountType: 'business',
         isPersonalAccount: true,
         isPlatformAdmin: Boolean(isSuperAdmin),
         createdAt: now,
@@ -3392,6 +3397,12 @@ export class D1WorkspaceRepository {
       throw new Error('User account not found.');
     }
 
+    if (user.account_type === 'agent') {
+      throw new Error(
+        'FORBIDDEN: Support Agent accounts cannot create business workspaces. Business and Agent accounts operate independently.'
+      );
+    }
+
     const now = new Date().toISOString();
     let baseSlug = input.businessName
       .trim()
@@ -3435,15 +3446,13 @@ export class D1WorkspaceRepository {
       )
       .run();
 
-    // If user registered originally as 'agent', upgrade account_type to 'both' and ensure personal account is enabled
-    const nextAccountType = user.account_type === 'agent' ? 'both' : (user.account_type || 'business');
     await this.db
       .prepare(
         `UPDATE users
-         SET account_type = ?, is_personal_account = 1, updated_at = ?
+         SET account_type = 'business', is_personal_account = 1, updated_at = ?
          WHERE id = ?`
       )
-      .bind(nextAccountType, now, userId)
+      .bind(now, userId)
       .run();
 
     const memberId = `mem_${Math.random().toString(36).slice(2, 10)}`;
