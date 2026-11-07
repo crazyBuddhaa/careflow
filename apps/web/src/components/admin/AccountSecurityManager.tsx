@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Copy,
   Check,
-  Lock,
   Activity,
 } from 'lucide-react';
 import type {
@@ -849,75 +848,29 @@ export function AccountSecurityManager({
         </div>
       )}
 
-      {/* Section 5: Security Audit Events & Infrastructure Readiness */}
+      {/* Section 5: Recent Security Events */}
       {overview && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-              <Activity className="w-4 h-4 text-teal-600" />
-              <span>Recent Security Events</span>
-            </div>
-            <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
-              {overview.recentEvents.length === 0 ? (
-                <p className="text-xs text-slate-500 py-2">No security events recorded yet.</p>
-              ) : (
-                overview.recentEvents.map((ev) => (
-                  <div key={ev.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
-                    <div>
-                      <span className="font-bold text-slate-800">{ev.eventType}</span>
-                      <span className="text-slate-500 ml-2">IP: {ev.ipAddress}</span>
-                    </div>
-                    <span className="text-[11px] text-slate-400 shrink-0">
-                      {new Date(ev.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+            <Activity className="w-4 h-4 text-teal-600" />
+            <span>Recent Security Events</span>
           </div>
-
-          <div className="lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-              <Lock className="w-4 h-4 text-teal-600" />
-              <span>Email & Bot Protection Status</span>
-            </div>
-            <div className="space-y-3 text-xs">
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-slate-900">Resend Transactional Email</div>
-                  <div className="text-[11px] text-slate-500">
-                    RESEND_API_KEY + CAREFLOW_EMAIL_FROM_ADDRESS
+          <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+            {overview.recentEvents.length === 0 ? (
+              <p className="text-xs text-slate-500 py-2">No security events recorded yet.</p>
+            ) : (
+              overview.recentEvents.map((ev) => (
+                <div key={ev.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="font-bold text-slate-800">{ev.eventType}</span>
+                    <span className="text-slate-500 ml-2">IP: {ev.ipAddress}</span>
                   </div>
+                  <span className="text-[11px] text-slate-400 shrink-0">
+                    {new Date(ev.createdAt).toLocaleString()}
+                  </span>
                 </div>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    overview.infrastructure.resendConfigured
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : 'bg-amber-50 text-amber-800 border border-amber-200'
-                  }`}
-                >
-                  {overview.infrastructure.resendConfigured ? 'Configured' : 'Dev Fallback'}
-                </span>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-slate-900">Cloudflare Turnstile Bot Defense</div>
-                  <div className="text-[11px] text-slate-500">
-                    TURNSTILE_SECRET_KEY server verification
-                  </div>
-                </div>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    overview.infrastructure.turnstileConfigured
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : 'bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  {overview.infrastructure.turnstileConfigured ? 'Active' : 'Optional / Dev'}
-                </span>
-              </div>
-            </div>
+              ))
+            )}
           </div>
         </div>
       )}
