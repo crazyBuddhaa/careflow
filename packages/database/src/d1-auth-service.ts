@@ -1,6 +1,7 @@
 import {
   DEFAULT_PERMISSIONS_BY_ROLE,
   DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS,
+  isRegisteredPlatformSuperAdminEmail,
   UserRole,
   type AccountRegistrationMode,
   type AccountSecurityOverviewDto,
@@ -189,19 +190,7 @@ interface DbInvitationRow {
 }
 
 function isSuperAdminEmail(email: string): boolean {
-  const normalized = email.trim().toLowerCase();
-  if ((DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(normalized)) {
-    return true;
-  }
-  const envList =
-    (typeof process !== 'undefined' && process.env?.CAREFLOW_SUPER_ADMIN_EMAILS) || '';
-  if (envList) {
-    return envList
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .includes(normalized);
-  }
-  return false;
+  return isRegisteredPlatformSuperAdminEmail(email);
 }
 
 function parsePermissionsJson(raw: string | null | undefined, role: UserRole): WorkspacePermissionKey[] {
@@ -841,8 +830,7 @@ export class D1AuthIdentityService {
 
     const isPersonalAccount = userRow.is_personal_account !== 0;
     const accountType = (userRow.account_type as AccountRegistrationMode) || 'business';
-    const isPlatformAdmin =
-      Boolean(userRow.is_platform_admin) || isSuperAdminEmail(userRow.email);
+    const isPlatformAdmin = isRegisteredPlatformSuperAdminEmail(userRow.email);
 
     const workspaces = await this.getUserWorkspaces(userRow.id);
 
@@ -2364,8 +2352,7 @@ export class D1AuthIdentityService {
         mfaEnabled: Boolean(latestUserRow?.mfa_enabled),
         accountType: ((latestUserRow?.account_type as AccountRegistrationMode) || 'agent'),
         isPersonalAccount: finalAccessMode === 'personal_account',
-        isPlatformAdmin:
-          Boolean(latestUserRow?.is_platform_admin) || isSuperAdminEmail(providedEmail),
+        isPlatformAdmin: isRegisteredPlatformSuperAdminEmail(providedEmail),
         createdAt: latestUserRow?.created_at || nowIso,
       },
       agentIdentity,
@@ -2493,8 +2480,7 @@ export class D1AuthIdentityService {
         mfaEnabled: Boolean(userRow.mfa_enabled),
         accountType: (userRow.account_type as AccountRegistrationMode) || 'agent',
         isPersonalAccount: true,
-        isPlatformAdmin:
-          Boolean(userRow.is_platform_admin) || isSuperAdminEmail(userRow.email),
+        isPlatformAdmin: isRegisteredPlatformSuperAdminEmail(userRow.email),
         createdAt: userRow.created_at,
       },
       agentIdentity,
@@ -2870,8 +2856,7 @@ export class D1AuthIdentityService {
         envSource.TURNSTILE_SECRET_KEY.trim().length > 0
     );
 
-    const isPlatformAdmin =
-      Boolean(userRow.is_platform_admin) || isSuperAdminEmail(userRow.email);
+    const isPlatformAdmin = isRegisteredPlatformSuperAdminEmail(userRow.email);
 
     const mfaRequiredForRole =
       isPlatformAdmin || activeRole === UserRole.Owner || activeRole === UserRole.Admin;

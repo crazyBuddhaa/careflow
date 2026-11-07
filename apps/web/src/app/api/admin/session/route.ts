@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import {
   UserRole,
+  isRegisteredPlatformSuperAdminEmail,
   type AccountRegistrationMode,
   type UserWorkspaceMembership,
   type WorkspaceInvitationRecord,
@@ -78,9 +79,13 @@ export async function GET() {
       undefined;
 
     const enforceAdminMfa = readRuntimeSecret('CAREFLOW_ENFORCE_ADMIN_MFA') !== 'false';
+    const isPlatformAdminUser = Boolean(
+      resolved.isPlatformAdmin &&
+        isRegisteredPlatformSuperAdminEmail(resolved.identity?.email)
+    );
     const mfaRequiredForUser = Boolean(
       resolved.identity &&
-        (resolved.isPlatformAdmin ||
+        (isPlatformAdminUser ||
           ((resolved.identity.role === UserRole.Owner ||
             resolved.identity.role === UserRole.Admin) &&
             enforceAdminMfa))
@@ -105,7 +110,7 @@ export async function GET() {
             mfaSetupRequired,
             accountType: resolved.accountType,
             isPersonalAccount: resolved.isPersonalAccount,
-            isPlatformAdmin: resolved.isPlatformAdmin,
+            isPlatformAdmin: isPlatformAdminUser,
             department: resolved.department,
             permissions: resolved.permissions,
           }

@@ -74,6 +74,11 @@ export default function PlatformAdminPage() {
       const body = (await res.json()) as ApiResponse<PlatformAdminOverviewDto>;
       if (!body.ok) {
         setErrorBanner(body.error.message);
+        if (res.status === 401 || res.status === 403) {
+          window.setTimeout(() => {
+            router.replace('/admin');
+          }, 2000);
+        }
         return;
       }
       setOverview(body.data);
@@ -82,7 +87,7 @@ export default function PlatformAdminPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     void loadPlatformOverview();

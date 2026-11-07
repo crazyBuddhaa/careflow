@@ -2,6 +2,7 @@ import {
   ConversationStatus,
   DEFAULT_PERMISSIONS_BY_ROLE,
   DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS,
+  isRegisteredPlatformSuperAdminEmail,
   EscalationPriority,
   MessageSenderType,
   SupportChannel,
@@ -3171,9 +3172,7 @@ export class D1WorkspaceRepository {
     }
 
     const isPersonalAccount = Number(userRow.is_personal_account ?? 1) === 1;
-    const isPlatformAdmin =
-      Number(userRow.is_platform_admin ?? 0) === 1 ||
-      (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email);
+    const isPlatformAdmin = isRegisteredPlatformSuperAdminEmail(email);
 
     const workspaces = await this.getUserWorkspaces(userRow.id);
     if (workspaces.length === 0) {
@@ -3539,7 +3538,10 @@ export class D1WorkspaceRepository {
    * ------------------------------------------------------------------------- */
 
   async isUserPlatformAdmin(userId: string, email?: string): Promise<boolean> {
-    if (email && (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email.trim().toLowerCase())) {
+    if (email && !isRegisteredPlatformSuperAdminEmail(email)) {
+      return false;
+    }
+    if (email && isRegisteredPlatformSuperAdminEmail(email)) {
       return true;
     }
     const row = await this.db
@@ -3547,10 +3549,7 @@ export class D1WorkspaceRepository {
       .bind(userId)
       .first<{ email: string; is_platform_admin: number }>();
     if (!row) return false;
-    return (
-      Number(row.is_platform_admin ?? 0) === 1 ||
-      (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(row.email.toLowerCase())
-    );
+    return isRegisteredPlatformSuperAdminEmail(row.email);
   }
 
   async getPlatformAdminOverview(params: {

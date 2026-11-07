@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { UserRole } from '@careflow/shared';
+import { UserRole, isRegisteredPlatformSuperAdminEmail } from '@careflow/shared';
 import { hasMinimumRole, type AuthSessionIdentity } from '@careflow/support-engine';
 import { validateSafeRedirectUrl } from '@careflow/validation';
 import {
@@ -288,7 +288,10 @@ export async function resolveServerAdminSession(): Promise<{
       mfaEnabled: Boolean(dbValidated.user.mfaEnabled),
       accountType: dbValidated.user.accountType || 'business',
       isPersonalAccount: dbValidated.user.isPersonalAccount !== false,
-      isPlatformAdmin: Boolean(dbValidated.user.isPlatformAdmin),
+      isPlatformAdmin: Boolean(
+        dbValidated.user.isPlatformAdmin &&
+          isRegisteredPlatformSuperAdminEmail(dbValidated.user.email)
+      ),
       department: dbValidated.activeMembership.department ?? '',
       permissions: dbValidated.activeMembership.permissions ?? [],
       agentIdentityId: dbValidated.activeMembership.agentIdentityId ?? null,

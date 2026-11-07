@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { UserRole } from '@careflow/shared';
+import { UserRole, isRegisteredPlatformSuperAdminEmail } from '@careflow/shared';
 import {
   D1WorkspaceRepository,
   bootstrapKnowledgeD1Schema,
@@ -324,5 +324,45 @@ test('8. UltimateTechApp is not pre-seeded and registers through normal registra
   assert.ok(resolvedAfter);
   assert.equal(resolvedAfter.branding.displayName, 'UltimateTechApp');
   assert.equal(resolvedAfter.onboardingStatus, 'incomplete');
+});
+
+test('9. Central Platform Admin link and privileges are strictly restricted to registered platform super admin accounts', async () => {
+  const { workspaceRepo } = await createTestService();
+
+  // 1. Registered super admin accounts
+  assert.equal(isRegisteredPlatformSuperAdminEmail('oluwafemiadekanmi76@gmail.com'), true);
+  assert.equal(isRegisteredPlatformSuperAdminEmail('asuracorps@gmail.com'), true);
+  assert.equal(isRegisteredPlatformSuperAdminEmail('admin@getcustomcare.xyz'), true);
+  assert.equal(isRegisteredPlatformSuperAdminEmail('  OLUWAFEMIADEKANMI76@GMAIL.COM  '), true);
+
+  // 2. Non-super-admin accounts are rejected
+  assert.equal(isRegisteredPlatformSuperAdminEmail('normaluser@business.example'), false);
+  assert.equal(isRegisteredPlatformSuperAdminEmail('admin@anyothercompany.com'), false);
+  assert.equal(isRegisteredPlatformSuperAdminEmail(''), false);
+  assert.equal(isRegisteredPlatformSuperAdminEmail(undefined), false);
+
+  // 3. Register a normal business user and verify isPlatformAdmin is false
+  const regNormal = await workspaceRepo.registerUserAndFirstBusiness({
+    fullName: 'Regular Owner',
+    email: 'regularowner@store.example',
+    password: 'Password123!',
+    businessName: 'Regular Store',
+    industry: 'Retail',
+    country: 'United States',
+  });
+
+  assert.equal(regNormal.user.isPlatformAdmin, false);
+  const isSuperAdminNormal = await workspaceRepo.isUserPlatformAdmin(
+    regNormal.user.id,
+    'regularowner@store.example'
+  );
+  assert.equal(isSuperAdminNormal, false);
+
+  // 4. Authenticate registered super-admin account
+  const isSuperAdminRegistered = await workspaceRepo.isUserPlatformAdmin(
+    'dummy_super_id',
+    'oluwafemiadekanmi76@gmail.com'
+  );
+  assert.equal(isSuperAdminRegistered, true);
 });
 

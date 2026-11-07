@@ -38,6 +38,7 @@ import {
   SupportChannel,
   type UserWorkspaceMembership,
   UserRole,
+  isRegisteredPlatformSuperAdminEmail,
 } from '@careflow/shared';
 import type { AdminSessionStatusDto } from '@/app/api/admin/session/route';
 import {
@@ -467,10 +468,14 @@ export function BusinessAdminShell() {
   const isAgentAccount = activeSession?.accountType === 'agent' || !isBusinessManager;
   const hasNoActiveWorkspace =
     activeSession?.organizationId === 'org_customcare_agent_hub' || workspaces.length === 0;
+  const isPlatformAdminUser = Boolean(
+    activeSession?.isPlatformAdmin &&
+      isRegisteredPlatformSuperAdminEmail(activeSession?.email)
+  );
   const mfaSetupRequired = Boolean(
     activeSession &&
       (activeSession.mfaSetupRequired ||
-        (activeSession.isPlatformAdmin && !activeSession.mfaEnabled))
+        (isPlatformAdminUser && !activeSession.mfaEnabled))
   );
 
   const effectiveSelectedKey: AdminModuleSectionKey = mfaSetupRequired
@@ -621,13 +626,14 @@ export function BusinessAdminShell() {
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {sessionState?.authenticated && activeSession ? (
               <>
-                {activeSession.isPlatformAdmin && (
+                {isPlatformAdminUser && (
                   <Link
                     href="/platform-admin"
                     className="inline-flex items-center gap-1.5 py-2 px-3 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors whitespace-nowrap shrink-0"
+                    title="Central Platform Admin"
                   >
                     <ShieldAlert className="w-3.5 h-3.5 text-teal-400" aria-hidden="true" />
-                    <span className="hidden sm:inline">Platform Admin</span>
+                    <span className="hidden sm:inline">Central Platform Admin</span>
                     <span className="sm:hidden">Admin</span>
                   </Link>
                 )}
@@ -1070,7 +1076,8 @@ export function BusinessAdminShell() {
                   </div>
                   <p className="text-xs text-teal-900/90 leading-relaxed">
                     Your account ({activeSession.email}) requires Authenticator App (TOTP) 2FA
-                    protection before accessing workspace modules or Central Platform Admin. Scan
+                    protection before accessing workspace modules
+                    {isPlatformAdminUser ? ' or Central Platform Admin' : ''}. Scan
                     the QR code or enter the Base32 key in your Authenticator app below and verify
                     your 6-digit code to unlock full access.
                   </p>

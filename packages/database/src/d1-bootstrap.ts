@@ -371,7 +371,15 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     .bind(now, now)
     .run();
 
-  // Promote primary owner emails to platform super-admin automatically
+  // Ensure platform super-admin privileges are strictly limited to registered admin accounts
+  await db
+    .prepare(
+      `UPDATE users
+       SET is_platform_admin = 0
+       WHERE LOWER(email) NOT IN ('asuracorps@gmail.com', 'oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
+    )
+    .run();
+
   await db
     .prepare(
       `UPDATE users

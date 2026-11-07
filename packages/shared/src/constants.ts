@@ -23,3 +23,20 @@ export const DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS = [
   'oluwafemiadekanmi76@gmail.com',
   'admin@getcustomcare.xyz',
 ] as const;
+
+export function isRegisteredPlatformSuperAdminEmail(email?: string | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const normalized = email.trim().toLowerCase();
+  if ((DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(normalized)) {
+    return true;
+  }
+  const envList =
+    (typeof process !== 'undefined' && process.env?.CAREFLOW_SUPER_ADMIN_EMAILS) || '';
+  if (envList) {
+    return envList
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .includes(normalized);
+  }
+  return false;
+}

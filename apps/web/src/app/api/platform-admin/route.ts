@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { z } from 'zod';
-import { UserRole } from '@careflow/shared';
+import { UserRole, isRegisteredPlatformSuperAdminEmail } from '@careflow/shared';
 import {
   getCustomCareEmailTemplateGallery,
   resolveResendConfig,
@@ -87,13 +87,17 @@ export async function GET() {
 
     const repo = await getWorkspaceRepository();
     const isSuperAdmin =
-      Boolean(session.isPlatformAdmin) ||
-      (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email));
+      Boolean(
+        session.identity?.email &&
+          isRegisteredPlatformSuperAdminEmail(session.identity.email)
+      ) &&
+      (Boolean(session.isPlatformAdmin) ||
+        (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email)));
 
     if (!isSuperAdmin) {
       return jsonApiError(
         'FORBIDDEN',
-        'Access restricted to CustomCare Platform Super-Administrators.',
+        'Access restricted to registered CustomCare Platform Super-Administrators.',
         403
       );
     }
@@ -152,13 +156,17 @@ export async function POST(request: Request) {
 
     const repo = await getWorkspaceRepository();
     const isSuperAdmin =
-      Boolean(session.isPlatformAdmin) ||
-      (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email));
+      Boolean(
+        session.identity?.email &&
+          isRegisteredPlatformSuperAdminEmail(session.identity.email)
+      ) &&
+      (Boolean(session.isPlatformAdmin) ||
+        (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email)));
 
     if (!isSuperAdmin) {
       return jsonApiError(
         'FORBIDDEN',
-        'Access restricted to CustomCare Platform Super-Administrators.',
+        'Access restricted to registered CustomCare Platform Super-Administrators.',
         403
       );
     }
