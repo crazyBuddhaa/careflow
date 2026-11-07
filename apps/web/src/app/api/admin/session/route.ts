@@ -78,18 +78,12 @@ export async function GET() {
       readRuntimeSecret('TURNSTILE_SITE_KEY') ||
       undefined;
 
-    const enforceAdminMfa = readRuntimeSecret('CAREFLOW_ENFORCE_ADMIN_MFA') !== 'false';
     const isPlatformAdminUser = Boolean(
       resolved.isPlatformAdmin &&
         isRegisteredPlatformSuperAdminEmail(resolved.identity?.email)
     );
-    const mfaRequiredForUser = Boolean(
-      resolved.identity &&
-        (isPlatformAdminUser ||
-          ((resolved.identity.role === UserRole.Owner ||
-            resolved.identity.role === UserRole.Admin) &&
-            enforceAdminMfa))
-    );
+    // Only central admin has a mandatory 2fa setup, others should not be mandatory
+    const mfaRequiredForUser = Boolean(resolved.identity && isPlatformAdminUser);
     const mfaSetupRequired = mfaRequiredForUser && !resolved.mfaEnabled;
 
     const response: AdminSessionStatusDto = {

@@ -472,10 +472,9 @@ export function BusinessAdminShell() {
     activeSession?.isPlatformAdmin &&
       isRegisteredPlatformSuperAdminEmail(activeSession?.email)
   );
+  // Only central admin has a mandatory 2fa setup; others are optional
   const mfaSetupRequired = Boolean(
-    activeSession &&
-      (activeSession.mfaSetupRequired ||
-        (isPlatformAdminUser && !activeSession.mfaEnabled))
+    activeSession && isPlatformAdminUser && !activeSession.mfaEnabled
   );
 
   const effectiveSelectedKey: AdminModuleSectionKey = mfaSetupRequired
@@ -1067,17 +1066,16 @@ export function BusinessAdminShell() {
 
           {/* Main Workspace Panel */}
           <main className="min-w-0 w-full lg:col-span-8 xl:col-span-9 space-y-6">
-            {mfaSetupRequired && (
+            {mfaSetupRequired && isPlatformAdminUser && (
               <div className="rounded-2xl border-2 border-teal-600 bg-teal-50/90 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
                 <div className="space-y-1 min-w-0">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-900">
                     <ShieldAlert className="w-4 h-4 text-teal-700 shrink-0" />
-                    <span>Mandatory Two-Factor Authentication (2FA) Setup Required</span>
+                    <span>Mandatory Central Admin Two-Factor Authentication (2FA) Setup Required</span>
                   </div>
                   <p className="text-xs text-teal-900/90 leading-relaxed">
-                    Your account ({activeSession.email}) requires Authenticator App (TOTP) 2FA
-                    protection before accessing workspace modules
-                    {isPlatformAdminUser ? ' or Central Platform Admin' : ''}. Scan
+                    Your Central Platform Admin account ({activeSession.email}) requires Authenticator App (TOTP) 2FA
+                    protection before accessing workspace modules or Central Platform Admin. Scan
                     the QR code or enter the Base32 key in your Authenticator app below and verify
                     your 6-digit code to unlock full access.
                   </p>

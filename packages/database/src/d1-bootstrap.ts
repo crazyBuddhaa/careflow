@@ -376,7 +376,7 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     .prepare(
       `UPDATE users
        SET is_platform_admin = 0
-       WHERE LOWER(email) NOT IN ('asuracorps@gmail.com', 'oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
+       WHERE LOWER(email) NOT IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
     )
     .run();
 
@@ -384,7 +384,7 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     .prepare(
       `UPDATE users
        SET is_platform_admin = 1
-       WHERE LOWER(email) IN ('asuracorps@gmail.com', 'oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
+       WHERE LOWER(email) IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
     )
     .run();
 

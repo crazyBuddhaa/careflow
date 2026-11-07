@@ -19,7 +19,6 @@ export const CUSTOMCARE_LOGO_FULL_URL =
   '/assets/aistudio/Black_White_Minimalist_Simple_Modern_Bold_Letter_Q_Atelier_Logo_20261104_000639_0000_84dc5aab.png';
 
 export const DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS = [
-  'asuracorps@gmail.com',
   'oluwafemiadekanmi76@gmail.com',
   'admin@getcustomcare.xyz',
 ] as const;

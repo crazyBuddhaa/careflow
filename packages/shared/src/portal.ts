@@ -511,6 +511,8 @@ export interface PlatformAdminUserItem {
   mfaEnabled: boolean;
   isPlatformAdmin: boolean;
   workspaceCount: number;
+  workspacesSummary?: string | null;
+  lastActiveAt?: string | null;
   activeSessions: number;
   createdAt: string;
 }

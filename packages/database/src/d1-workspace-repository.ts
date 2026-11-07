@@ -3611,10 +3611,11 @@ export class D1WorkspaceRepository {
           `SELECT
              u.id, u.email, u.full_name, u.account_type, u.is_personal_account, u.is_platform_admin, u.email_verified, u.mfa_enabled, u.created_at,
              (SELECT COUNT(*) FROM organization_members om WHERE om.user_id = u.id AND om.is_active = 1 AND om.organization_id != 'org_customcare_agent_hub') AS workspace_count,
+             (SELECT GROUP_CONCAT(o.name || ' (' || om.role || ')') FROM organization_members om JOIN organizations o ON o.id = om.organization_id WHERE om.user_id = u.id AND om.is_active = 1 AND om.organization_id != 'org_customcare_agent_hub') AS workspaces_summary,
+             (SELECT s.created_at FROM auth_sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 1) AS last_active_at,
              (SELECT COUNT(*) FROM auth_sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL) AS active_sessions
            FROM users u
-           ORDER BY u.created_at DESC
-           LIMIT 200`
+           ORDER BY u.created_at DESC`
         )
         .all<{
           id: string;
@@ -3627,6 +3628,8 @@ export class D1WorkspaceRepository {
           mfa_enabled: number | null;
           created_at: string;
           workspace_count: number;
+          workspaces_summary: string | null;
+          last_active_at: string | null;
           active_sessions: number;
         }>(),
       this.db
@@ -3784,12 +3787,12 @@ export class D1WorkspaceRepository {
       fullName: u.full_name,
       accountType: ((u.account_type as AccountRegistrationMode) || 'business'),
       isPersonalAccount: Number(u.is_personal_account ?? 1) === 1,
-      isPlatformAdmin:
-        Number(u.is_platform_admin ?? 0) === 1 ||
-        (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(u.email.toLowerCase()),
+      isPlatformAdmin: isRegisteredPlatformSuperAdminEmail(u.email),
       emailVerified: Boolean(u.email_verified),
       mfaEnabled: Boolean(u.mfa_enabled),
       workspaceCount: Number(u.workspace_count ?? 0),
+      workspacesSummary: u.workspaces_summary || null,
+      lastActiveAt: u.last_active_at || null,
       activeSessions: Number(u.active_sessions ?? 0),
       createdAt: u.created_at,
     }));

@@ -2858,10 +2858,9 @@ export class D1AuthIdentityService {
 
     const isPlatformAdmin = isRegisteredPlatformSuperAdminEmail(userRow.email);
 
-    const mfaRequiredForRole =
-      isPlatformAdmin || activeRole === UserRole.Owner || activeRole === UserRole.Admin;
-    const mfaEnforcementActive =
-      isPlatformAdmin || envSource.CAREFLOW_ENFORCE_ADMIN_MFA === 'true';
+    // Only central admin has a mandatory 2fa setup; others are optional
+    const mfaRequiredForRole = isPlatformAdmin;
+    const mfaEnforcementActive = isPlatformAdmin;
 
     return {
       user: {

@@ -331,11 +331,11 @@ test('9. Central Platform Admin link and privileges are strictly restricted to r
 
   // 1. Registered super admin accounts
   assert.equal(isRegisteredPlatformSuperAdminEmail('oluwafemiadekanmi76@gmail.com'), true);
-  assert.equal(isRegisteredPlatformSuperAdminEmail('asuracorps@gmail.com'), true);
   assert.equal(isRegisteredPlatformSuperAdminEmail('admin@getcustomcare.xyz'), true);
   assert.equal(isRegisteredPlatformSuperAdminEmail('  OLUWAFEMIADEKANMI76@GMAIL.COM  '), true);
 
-  // 2. Non-super-admin accounts are rejected
+  // 2. Removed and non-super-admin accounts are rejected
+  assert.equal(isRegisteredPlatformSuperAdminEmail('asuracorps@gmail.com'), false);
   assert.equal(isRegisteredPlatformSuperAdminEmail('normaluser@business.example'), false);
   assert.equal(isRegisteredPlatformSuperAdminEmail('admin@anyothercompany.com'), false);
   assert.equal(isRegisteredPlatformSuperAdminEmail(''), false);
