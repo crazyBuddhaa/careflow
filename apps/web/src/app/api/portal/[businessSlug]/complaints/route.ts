@@ -92,6 +92,44 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (body.action === 'submit_feedback') {
+      const opsService = await getOperationsManagementService();
+      const referenceCode =
+        typeof body.referenceCode === 'string' ? body.referenceCode.trim() : '';
+      const customerEmail =
+        typeof body.customerEmail === 'string' ? body.customerEmail.trim().toLowerCase() : '';
+      const customerName =
+        typeof body.customerName === 'string' && body.customerName.trim()
+          ? body.customerName.trim()
+          : customerEmail || 'Portal Customer';
+      const rating = Number(body.rating ?? 5);
+      const comment = typeof body.comment === 'string' ? body.comment.trim() : undefined;
+
+      let complaintId: string | undefined;
+      if (referenceCode) {
+        const matches = await opsService.listComplaints(business.organizationId, {
+          search: referenceCode,
+        });
+        const found = matches.find(
+          (c) => c.referenceCode.toUpperCase() === referenceCode.toUpperCase(),
+        );
+        if (found) {
+          complaintId = found.id;
+        }
+      }
+
+      const feedback = await opsService.submitCustomerFeedback(business.organizationId, {
+        complaintId,
+        caseReference: referenceCode || undefined,
+        customerName,
+        customerEmail,
+        rating,
+        comment,
+      });
+      return jsonApiSuccess({ feedback }, 201);
+    }
+
     const customerName = typeof body.customerName === 'string' ? body.customerName.trim() : '';
     const customerEmail = typeof body.customerEmail === 'string' ? body.customerEmail.trim() : '';
     const productOrService =

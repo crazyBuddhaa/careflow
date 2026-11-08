@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Lock, Search } from 'lucide-react';
+import { CheckCircle2, Lock, Search, Star } from 'lucide-react';
 import type { ComplaintCategoryRecord } from '@careflow/shared';
 
 interface PortalClaimsWidgetProps {
@@ -49,6 +49,12 @@ export function PortalClaimsWidget({ slug, displayName }: PortalClaimsWidgetProp
     updatedAt: string;
   } | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
+
+  // CSAT Feedback state
+  const [csatRating, setCsatRating] = useState<number>(5);
+  const [csatComment, setCsatComment] = useState('');
+  const [csatSubmitting, setCsatSubmitting] = useState(false);
+  const [csatSubmitted, setCsatSubmitted] = useState(false);
 
   useEffect(() => {
     fetch(`/api/portal/${encodeURIComponent(slug)}/complaints`)
@@ -117,6 +123,7 @@ export function PortalClaimsWidget({ slug, displayName }: PortalClaimsWidgetProp
     e.preventDefault();
     setLookupError(null);
     setLookupResult(null);
+    setCsatSubmitted(false);
 
     try {
       const res = await fetch(
@@ -132,6 +139,32 @@ export function PortalClaimsWidget({ slug, displayName }: PortalClaimsWidgetProp
       setLookupResult(json.data.complaint);
     } catch {
       setLookupError('Unable to check claim status.');
+    }
+  };
+
+  const handleSubmitCsat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lookupResult) return;
+    setCsatSubmitting(true);
+    try {
+      const res = await fetch(`/api/portal/${encodeURIComponent(slug)}/complaints`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'submit_feedback',
+          referenceCode: lookupResult.referenceCode,
+          customerEmail: lookupEmail.trim(),
+          rating: csatRating,
+          comment: csatComment.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setCsatSubmitted(true);
+        setCsatComment('');
+      }
+    } finally {
+      setCsatSubmitting(false);
     }
   };
 
@@ -387,7 +420,7 @@ export function PortalClaimsWidget({ slug, displayName }: PortalClaimsWidgetProp
             {lookupError && <p className="font-semibold text-red-700">{lookupError}</p>}
 
             {lookupResult && (
-              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-sm font-bold text-teal-800">
                     {lookupResult.referenceCode}
@@ -405,6 +438,57 @@ export function PortalClaimsWidget({ slug, displayName }: PortalClaimsWidgetProp
                     Update / Resolution Note: <strong>{lookupResult.decisionReason}</strong>
                   </p>
                 )}
+
+                {/* Customer Satisfaction (CSAT) Feedback Section */}
+                <div className="pt-3 border-t border-slate-100">
+                  {csatSubmitted ? (
+                    <div className="flex items-center gap-2 text-emerald-700 font-semibold">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>Thank you! Your customer satisfaction feedback has been recorded.</span>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSubmitCsat} className="space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-bold text-slate-800">
+                          Rate Your Support Experience (CSAT):
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              type="button"
+                              onClick={() => setCsatRating(star)}
+                              className={`p-1 rounded transition ${
+                                star <= csatRating
+                                  ? 'text-amber-500'
+                                  : 'text-slate-300 hover:text-amber-400'
+                              }`}
+                            >
+                              <Star className="h-4 w-4 fill-current" />
+                            </button>
+                          ))}
+                          <span className="ml-1 font-bold text-slate-700">{csatRating}/5</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={csatComment}
+                          onChange={(e) => setCsatComment(e.target.value)}
+                          placeholder="Optional feedback on how your case was handled..."
+                          className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-slate-800"
+                        />
+                        <button
+                          type="submit"
+                          disabled={csatSubmitting}
+                          className="rounded-lg bg-teal-700 px-4 py-1.5 font-bold text-white hover:bg-teal-800 disabled:opacity-50"
+                        >
+                          {csatSubmitting ? 'Saving...' : 'Submit Rating'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -413,3 +497,4 @@ export function PortalClaimsWidget({ slug, displayName }: PortalClaimsWidgetProp
     </section>
   );
 }
+

@@ -472,4 +472,134 @@ describe('CustomCare Operations, Claims, Supervisor Verification, Replacement In
     assert.equal(betaInventory.length, 0, 'orgBeta must not access orgAlpha replacement inventory');
     assert.equal(betaTimeline.length, 0, 'orgBeta must not access orgAlpha operational timeline');
   });
+
+  it('TEST 13 & TEST 14: Specialised Personnel Routing, QA Evaluations, Agent Scorecards & Customer CSAT Feedback', async () => {
+    const claim = await opsService.createComplaint(orgAlpha, agentActor1, {
+      customerName: 'Chidi Obi',
+      customerEmail: 'chidi@fintech.ng',
+      orderId: 'DEP-2026-8801',
+      productOrService: 'Wallet Deposit ($250.00)',
+      categoryName: 'Deposit & Payment Verification',
+      priority: EscalationPriority.Urgent,
+      description: 'Customer bank transfer debited but wallet balance not credited.',
+      assignedAgentId: agentActor1.userId,
+      assignedAgentName: agentActor1.userName,
+      escalateImmediately: true,
+    });
+
+    assert.ok(claim.slaDeadlineAt, 'Complaint must compute an SLA deadline upon creation');
+
+    // Route from Supervisor to Specialised Personnel (Treasury & Deposit Reconciliation)
+    const routedToSpecialist = await opsService.reassignComplaint(
+      orgAlpha,
+      claim.id,
+      supervisorActor,
+      {
+        assignmentRole: 'specialist',
+        toUserId: 'usr_specialist_treasury_1',
+        toUserName: 'Adaeze Okafor (Treasury Specialist)',
+        specialistDepartment: 'Treasury & Deposit Reconciliation',
+        reason: 'Assigning to Treasury Specialist to reconcile gateway settlement batch.',
+      }
+    );
+
+    assert.equal(
+      routedToSpecialist.assignedSpecialistName,
+      'Adaeze Okafor (Treasury Specialist)'
+    );
+    assert.equal(
+      routedToSpecialist.assignedSpecialistDepartment,
+      'Treasury & Deposit Reconciliation'
+    );
+    assert.equal(routedToSpecialist.status, 'in_progress');
+    assert.ok(
+      routedToSpecialist.assignmentHistory?.some((h) => h.assignmentRole === 'specialist'),
+      'Assignment history must record specialist handoff'
+    );
+
+    // Record Supervisor QA Evaluation for Agent 1
+    const qaEval = await opsService.createQaEvaluation(orgAlpha, supervisorActor, {
+      complaintId: claim.id,
+      caseReference: claim.referenceCode,
+      agentId: agentActor1.userId,
+      agentName: agentActor1.userName,
+      accuracyScore: 5,
+      professionalismScore: 5,
+      resolutionEffectivenessScore: 4,
+      caseComplexity: 'complex',
+      feedbackNotes: 'Thorough intake and receipt verification before escalating.',
+      coachingRecommendations: 'Continue attaching transaction reference IDs in escalation notes.',
+    });
+
+    assert.equal(qaEval.overallScore, 93);
+    assert.equal(qaEval.caseComplexity, 'complex');
+
+    // Submit Customer CSAT Feedback
+    const csat = await opsService.submitCustomerFeedback(orgAlpha, {
+      complaintId: claim.id,
+      caseReference: claim.referenceCode,
+      customerName: 'Chidi Obi',
+      customerEmail: 'chidi@fintech.ng',
+      rating: 5,
+      comment: 'Fast reconciliation by the Treasury team!',
+    });
+    assert.equal(csat.rating, 5);
+
+    // Verify Agent Scorecards & Dashboard CSAT aggregation
+    const scorecards = await opsService.getAgentScorecards(orgAlpha);
+    const sarahCard = scorecards.find((s) => s.userId === agentActor1.userId)!;
+    assert.ok(sarahCard, 'Agent scorecard must be generated for Sarah Jenkins');
+    assert.equal(sarahCard.qaEvaluationsCount, 1);
+    assert.equal(sarahCard.avgQaScore, 93);
+    assert.equal(sarahCard.avgCsatScore, 5);
+
+    const metrics = await opsService.getOperationsDashboardMetrics(orgAlpha, {
+      preset: 'today',
+    });
+    assert.equal(metrics.overview.customerSatisfactionScore, 5);
+    assert.equal(metrics.backlogQueues.casesAwaitingSpecialisedPersonnel, 1);
+  });
+
+  it('TEST 15 & TEST 16: Configurable Workflow Automation Engine (Loop-Deduplicated) & 10-Step [DEMO] Deposit Scenario', async () => {
+    // Seed an unassigned open conversation so auto_assign_enquiry + auto_categorise_enquiry trigger
+    const now = new Date().toISOString();
+    await db
+      .prepare(
+        `INSERT INTO support_conversations
+           (id, organization_id, customer_name, customer_email, subject, status, priority, category, channel, escalation_count, created_at, updated_at)
+         VALUES ('conv_auto_1', ?, 'Zainab Bello', 'zainab@client.org', 'Urgent deposit payment receipt missing', 'open', 'high', 'General', 'web_chat', 0, ?, ?)`
+      )
+      .bind(orgAlpha, now, now)
+      .run();
+
+    const rules = await opsService.listAutomationRules(orgAlpha);
+    assert.equal(rules.length, 8, 'All 8 default workflow automation rules must be seeded');
+
+    // First sweep triggers actions on conv_auto_1
+    const firstSweep = await opsService.runAutomationRulesSweep(orgAlpha, adminActor);
+    assert.ok(firstSweep.executedActionsCount >= 2, 'First sweep should auto-assign and auto-categorise conv_auto_1');
+
+    // Second immediate sweep on the exact same unchanged state must trigger 0 duplicate actions (loop guard)
+    const secondSweep = await opsService.runAutomationRulesSweep(orgAlpha, adminActor);
+    assert.equal(
+      secondSweep.executedActionsCount,
+      0,
+      'Workflow automation loop guard must prevent duplicate execution on unchanged records'
+    );
+
+    // TEST 16: Run the 10-step [DEMO] Customer Deposit Complaint Scenario
+    const demoResult = await opsService.seedDemonstrationScenario(orgAlpha, adminActor);
+    assert.match(demoResult.demoReferenceCode, /^CLM-\d{4}-[A-Z0-9]+$/);
+    assert.equal(demoResult.stepsCompleted.length, 10);
+
+    const demoComplaint = await opsService.getComplaintDetail(orgAlpha, demoResult.complaintId);
+    assert.ok(demoComplaint);
+    assert.equal(demoComplaint.status, 'resolved');
+    assert.ok(demoComplaint.customerName.includes('[DEMO]'));
+    assert.equal(
+      demoComplaint.assignedSpecialistDepartment,
+      'Treasury & Deposit Reconciliation'
+    );
+  });
 });
+

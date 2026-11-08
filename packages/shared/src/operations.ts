@@ -108,7 +108,7 @@ export interface ComplaintAssignmentHistoryRecord {
   fromUserName?: string | null;
   toUserId?: string | null;
   toUserName: string;
-  assignmentRole: 'agent' | 'supervisor';
+  assignmentRole: 'agent' | 'supervisor' | 'specialist';
   reason: string;
   actorUserId?: string | null;
   actorName: string;
@@ -149,6 +149,9 @@ export interface SupportComplaintRecord {
   assignedAgentName?: string | null;
   assignedSupervisorId?: string | null;
   assignedSupervisorName?: string | null;
+  assignedSpecialistName?: string | null;
+  assignedSpecialistDepartment?: string | null;
+  slaDeadlineAt?: string | null;
   escalatedAt?: string | null;
   reviewedBySupervisorId?: string | null;
   reviewedBySupervisorName?: string | null;
@@ -296,6 +299,106 @@ export interface OperationalActivityEventRecord {
 
 export type OperationsDatePreset = 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'custom';
 
+export interface QaEvaluationRecord {
+  id: string;
+  organizationId: string;
+  conversationId?: string | null;
+  complaintId?: string | null;
+  caseReference: string;
+  agentId: string;
+  agentName: string;
+  evaluatorUserId?: string | null;
+  evaluatorName: string;
+  accuracyScore: number; // 1-5
+  professionalismScore: number; // 1-5
+  resolutionEffectivenessScore: number; // 1-5
+  overallScore: number; // 0-100
+  caseComplexity: 'low' | 'standard' | 'complex';
+  feedbackNotes: string;
+  coachingRecommendations: string;
+  createdAt: string;
+}
+
+export interface AgentScorecardDto {
+  agentId: string;
+  userId?: string | null;
+  displayName: string;
+  email: string;
+  role: UserRole;
+  department: string;
+  dailyHandled: number;
+  weeklyHandled: number;
+  monthlyHandled: number;
+  weeklyTarget: number;
+  resolutionRatePercent: number;
+  escalationRatePercent: number;
+  reopenedCasesCount: number;
+  pendingCasesCount: number;
+  slaCompliancePercent: number;
+  avgFirstResponseMinutes: number | null;
+  avgResolutionHours: number | null;
+  avgQaScore: number | null;
+  qaEvaluationsCount: number;
+  avgCsatScore: number | null;
+  workloadComplexityScore: number;
+}
+
+export interface CustomerFeedbackRecord {
+  id: string;
+  organizationId: string;
+  conversationId?: string | null;
+  complaintId?: string | null;
+  caseReference: string;
+  customerName: string;
+  customerEmail: string;
+  channel: string;
+  rating: number; // 1-5
+  comment: string;
+  createdAt: string;
+}
+
+export type AutomationRuleType =
+  | 'auto_assign_enquiry'
+  | 'auto_categorise_enquiry'
+  | 'auto_escalate_condition'
+  | 'notify_supervisor_overdue'
+  | 'reassign_unavailable_agent'
+  | 'notify_agent_sla_warning'
+  | 'notify_customer_status_change'
+  | 'trigger_pending_followup';
+
+export interface WorkflowAutomationRuleRecord {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  ruleType: AutomationRuleType;
+  triggerEvent: string;
+  conditions: Record<string, unknown>;
+  actions: Record<string, unknown>;
+  isEnabled: boolean;
+  priorityOrder: number;
+  executionCount: number;
+  lastTriggeredAt?: string | null;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowAutomationLogRecord {
+  id: string;
+  organizationId: string;
+  ruleId: string;
+  ruleName: string;
+  ruleType: AutomationRuleType;
+  targetType: 'conversation' | 'complaint' | 'agent' | 'system';
+  targetId: string;
+  targetReference: string;
+  actionSummary: string;
+  actorName: string;
+  createdAt: string;
+}
+
 export interface DailyOperationsMetricsDto {
   dateRange: {
     preset: OperationsDatePreset;
@@ -319,7 +422,26 @@ export interface DailyOperationsMetricsDto {
     avgFirstResponseMinutes: number | null;
     avgResolutionHours: number | null;
     customerSatisfactionScore: number | null;
+    slaCompliancePercentage?: number | null;
+    escalatedCasesCount?: number;
   };
+  channelAnalytics?: Array<{
+    channel: string;
+    label: string;
+    totalConversations: number;
+    openCount: number;
+    resolvedCount: number;
+    escalatedCount: number;
+  }>;
+  trendAnalytics?: Array<{
+    dateLabel: string;
+    isoDate: string;
+    newConversations: number;
+    resolvedConversations: number;
+    newComplaints: number;
+    resolvedComplaints: number;
+    backlogCount: number;
+  }>;
   agentPerformance: Array<{
     agentId: string;
     userId?: string | null;
@@ -342,6 +464,12 @@ export interface DailyOperationsMetricsDto {
     replacementsDelivered: number;
     avgFirstResponseMinutes: number | null;
     avgResolutionHours: number | null;
+    slaCompliancePercent?: number;
+    resolutionRatePercent?: number;
+    escalationRatePercent?: number;
+    reopenedCount?: number;
+    avgQaScore?: number | null;
+    avgCsatScore?: number | null;
   }>;
   supervisorPerformance: Array<{
     supervisorId: string;
@@ -397,6 +525,7 @@ export interface DailyOperationsMetricsDto {
     complaintsAwaitingCustomerInfo: number;
     approvedComplaintsAwaitingReplacement: number;
     replacementsAwaitingDelivery: number;
+    casesAwaitingSpecialisedPersonnel?: number;
     overdueCases24h: number;
     overdueCases48h: number;
     casesWithoutUpdates24h: number;
@@ -407,11 +536,19 @@ export interface DailyOperationsMetricsDto {
       recordType: 'conversation' | 'complaint';
       customerName: string;
       subjectOrProduct: string;
+      category?: string;
+      department?: string;
       status: string;
       priority: string;
       assignedTo: string;
+      assignedAgentName?: string;
+      assignedSupervisorName?: string;
+      assignedSpecialistName?: string;
       ageHours: number;
       hoursSinceLastUpdate: number;
+      slaDeadlineAt?: string;
+      slaCondition?: 'within_sla' | 'approaching_sla' | 'overdue_24h' | 'overdue_48h';
+      waitingOn?: 'agent' | 'customer' | 'supervisor' | 'specialist';
       isOverdue24h: boolean;
       isOverdue48h: boolean;
       isUnassigned: boolean;

@@ -4,37 +4,45 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  Award,
   BarChart3,
-  Calendar,
   CheckCircle2,
   Clock,
   Download,
   FileSpreadsheet,
   FileText,
-  Filter,
   Loader2,
+  Play,
+  Plus,
   Printer,
   RefreshCw,
-  Search,
   Settings,
   ShieldAlert,
   Sparkles,
+  Star,
   TrendingUp,
   UserCheck,
   Users,
+  Workflow,
   X,
+  Zap,
 } from 'lucide-react';
 import {
+  type AgentScorecardDto,
   type ApiResponse,
+  type AutomationRuleType,
+  type CustomerFeedbackRecord,
   type DailyClosingReportDto,
   type DailyOperationsMetricsDto,
-  type OperationalActivityCategory,
   type OperationalActivityEventRecord,
   type OperationsDatePreset,
   type OrganizationOperationsConfig,
+  type QaEvaluationRecord,
   type ReplacementFulfilmentMethod,
   type SupportComplaintRecord,
   UserRole,
+  type WorkflowAutomationLogRecord,
+  type WorkflowAutomationRuleRecord,
   type WorkspaceAgentRecord,
 } from '@careflow/shared';
 
@@ -44,13 +52,19 @@ interface OperationsDashboardDto {
   closingReport: DailyClosingReportDto;
   activityTimeline: OperationalActivityEventRecord[];
   teamMembers: WorkspaceAgentRecord[];
+  agentScorecards?: AgentScorecardDto[];
+  qaEvaluations?: QaEvaluationRecord[];
+  automationRules?: WorkflowAutomationRuleRecord[];
+  automationLogs?: WorkflowAutomationLogRecord[];
+  customerFeedback?: CustomerFeedbackRecord[];
 }
 
 export type OperationsAnalyticsSection =
   | 'operations-dashboard'
   | 'team-performance'
   | 'activity-timeline'
-  | 'reports-closing';
+  | 'reports-closing'
+  | 'workflow-automation';
 
 interface OperationsAnalyticsAndReportsManagerProps {
   initialSection?: OperationsAnalyticsSection;
@@ -67,6 +81,17 @@ const DATE_PRESETS: Array<{ value: OperationsDatePreset; label: string }> = [
   { value: 'last_30_days', label: 'Last 30 Days' },
   { value: 'custom', label: 'Custom Range' },
 ];
+
+const AUTOMATION_RULE_TYPE_LABELS: Record<AutomationRuleType, string> = {
+  auto_assign_enquiry: '1. Auto-Assign New Enquiries',
+  auto_categorise_enquiry: '2. Auto-Categorise Incoming Enquiries',
+  auto_escalate_condition: '3. Auto-Escalate High-Risk Complaints',
+  notify_supervisor_overdue: '4. Alert Supervisor on Overdue Cases',
+  reassign_unavailable_agent: '5. Reassign from Unavailable Agents',
+  notify_agent_sla_warning: '6. Agent Approaching-SLA Warning',
+  notify_customer_status_change: '7. Customer Status Change Notification',
+  trigger_pending_followup: '8. Automated Pending Case Follow-Up',
+};
 
 export function OperationsAnalyticsAndReportsManager({
   initialSection = 'operations-dashboard',
@@ -85,6 +110,16 @@ export function OperationsAnalyticsAndReportsManager({
   const [timelineRefSearch, setTimelineRefSearch] = useState<string>('');
   const [timelineProductSearch, setTimelineProductSearch] = useState<string>('');
 
+  // Multi-Dimensional Backlog Filters (Phase 3)
+  const [backlogDeptFilter, setBacklogDeptFilter] = useState<string>('all');
+  const [backlogAgentFilter, setBacklogAgentFilter] = useState<string>('all');
+  const [backlogSupervisorFilter, setBacklogSupervisorFilter] = useState<string>('all');
+  const [backlogCategoryFilter, setBacklogCategoryFilter] = useState<string>('all');
+  const [backlogPriorityFilter, setBacklogPriorityFilter] = useState<string>('all');
+  const [backlogStatusFilter, setBacklogStatusFilter] = useState<string>('all');
+  const [backlogAgeFilter, setBacklogAgeFilter] = useState<string>('all');
+  const [backlogSlaConditionFilter, setBacklogSlaConditionFilter] = useState<string>('all');
+
   // Data
   const [data, setData] = useState<OperationsDashboardDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,6 +133,36 @@ export function OperationsAnalyticsAndReportsManager({
     complaints: SupportComplaintRecord[];
     loading: boolean;
   } | null>(null);
+
+  // Demo Scenario Modal
+  const [runningDemo, setRunningDemo] = useState(false);
+  const [demoResultModal, setDemoResultModal] = useState<{
+    referenceCode: string;
+    conversationId: string;
+    complaintId: string;
+    stepsCompleted: string[];
+  } | null>(null);
+
+  // QA Evaluation Form state
+  const [qaTargetType, setQaTargetType] = useState<'complaint' | 'conversation'>('complaint');
+  const [qaTargetRef, setQaTargetRef] = useState('');
+  const [qaAgentName, setQaAgentName] = useState('');
+  const [qaAccuracy, setQaAccuracy] = useState(5);
+  const [qaProfessionalism, setQaProfessionalism] = useState(5);
+  const [qaResolution, setQaResolution] = useState(5);
+  const [qaComplexity, setQaComplexity] = useState<'simple' | 'standard' | 'complex' | 'critical'>(
+    'standard',
+  );
+  const [qaNotes, setQaNotes] = useState('');
+  const [qaCoaching, setQaCoaching] = useState('');
+  const [submittingQa, setSubmittingQa] = useState(false);
+
+  // Workflow Automation state
+  const [runningSweep, setRunningSweep] = useState(false);
+  const [newRuleName, setNewRuleName] = useState('');
+  const [newRuleDesc, setNewRuleDesc] = useState('');
+  const [newRuleType, setNewRuleType] = useState<AutomationRuleType>('auto_assign_enquiry');
+  const [submittingRule, setSubmittingRule] = useState(false);
 
   // Operational Settings modal
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -114,6 +179,8 @@ export function OperationsAnalyticsAndReportsManager({
 
   const isAdmin =
     currentUserRole === UserRole.Admin || currentUserRole === UserRole.Owner;
+  const isSupervisorOrAdmin =
+    isAdmin || currentUserRole === UserRole.Supervisor;
 
   useEffect(() => {
     setActiveTab(initialSection);
@@ -160,6 +227,9 @@ export function OperationsAnalyticsAndReportsManager({
       setConfigSlaResolutionHours(cfg.slaResolutionHours);
       setConfigSlaOverdueHours(cfg.slaOverdueHours);
       setConfigInactivityTimeout(cfg.inactivityTimeoutMinutes);
+      if (!qaAgentName && json.data.teamMembers.length > 0) {
+        setQaAgentName(json.data.teamMembers[0].displayName);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load operations data.');
     } finally {
@@ -174,6 +244,7 @@ export function OperationsAnalyticsAndReportsManager({
     timelineRoleFilter,
     timelineRefSearch,
     timelineProductSearch,
+    qaAgentName,
   ]);
 
   useEffect(() => {
@@ -211,6 +282,168 @@ export function OperationsAnalyticsAndReportsManager({
       setError(err instanceof Error ? err.message : 'Failed to save settings.');
     } finally {
       setSubmittingConfig(false);
+    }
+  };
+
+  const handleRunDemoScenario = async () => {
+    setRunningDemo(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/operations/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'seed_demo_scenario' }),
+      });
+      const json = (await res.json()) as ApiResponse<{
+        conversationId: string;
+        complaintId: string;
+        demoReferenceCode?: string;
+        referenceCode?: string;
+        stepsCompleted: string[];
+      }>;
+      if (!res.ok || !json.ok) {
+        throw new Error((!json.ok && json.error?.message) || 'Failed to run demo scenario.');
+      }
+      const refCode = json.data.demoReferenceCode || json.data.referenceCode || 'CLM-DEMO';
+      setDemoResultModal({
+        conversationId: json.data.conversationId,
+        complaintId: json.data.complaintId,
+        referenceCode: refCode,
+        stepsCompleted: json.data.stepsCompleted,
+      });
+      showToastMessage(`Executed 10-step [DEMO] Deposit Complaint Scenario (${refCode}).`);
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run demo scenario.');
+    } finally {
+      setRunningDemo(false);
+    }
+  };
+
+  const handleCreateQaEvaluation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!qaAgentName.trim() || !qaTargetRef.trim()) {
+      setError('Target case reference and agent name are required for QA evaluation.');
+      return;
+    }
+    setSubmittingQa(true);
+    try {
+      const matchedMember = data?.teamMembers.find((m) => m.displayName === qaAgentName);
+      const res = await fetch('/api/admin/operations/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_qa_evaluation',
+          targetType: qaTargetType,
+          targetId: qaTargetRef.trim(),
+          caseReference: qaTargetRef.trim(),
+          agentId: matchedMember?.userId || matchedMember?.id || qaAgentName.trim(),
+          agentName: qaAgentName.trim(),
+          accuracyScore: qaAccuracy,
+          professionalismScore: qaProfessionalism,
+          resolutionEffectivenessScore: qaResolution,
+          caseComplexity:
+            qaComplexity === 'simple'
+              ? 'low'
+              : qaComplexity === 'critical'
+                ? 'complex'
+                : qaComplexity,
+          feedbackNotes: qaNotes.trim(),
+          coachingRecommendations: qaCoaching.trim(),
+        }),
+      });
+      const json = (await res.json()) as ApiResponse<unknown>;
+      if (!res.ok || !json.ok) {
+        throw new Error((!json.ok && json.error?.message) || 'Failed to record QA evaluation.');
+      }
+      setQaTargetRef('');
+      setQaNotes('');
+      setQaCoaching('');
+      showToastMessage('Quality Assurance (QA) evaluation recorded and agent scorecard updated.');
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save QA evaluation.');
+    } finally {
+      setSubmittingQa(false);
+    }
+  };
+
+  const handleToggleAutomationRule = async (ruleId: string, isEnabled: boolean) => {
+    try {
+      const res = await fetch('/api/admin/operations/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'toggle_automation_rule',
+          ruleId,
+          isEnabled,
+        }),
+      });
+      const json = (await res.json()) as ApiResponse<unknown>;
+      if (!res.ok || !json.ok) {
+        throw new Error((!json.ok && json.error?.message) || 'Failed to toggle rule.');
+      }
+      showToastMessage(`Automation rule ${isEnabled ? 'enabled' : 'paused'}.`);
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to toggle rule.');
+    }
+  };
+
+  const handleRunAutomationSweep = async () => {
+    setRunningSweep(true);
+    try {
+      const res = await fetch('/api/admin/operations/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'run_automation_sweep' }),
+      });
+      const json = (await res.json()) as ApiResponse<{
+        executedActionsCount: number;
+        logs: WorkflowAutomationLogRecord[];
+      }>;
+      if (!res.ok || !json.ok) {
+        throw new Error((!json.ok && json.error?.message) || 'Failed to execute automation sweep.');
+      }
+      showToastMessage(
+        `Automation sweep completed: ${json.data.executedActionsCount} new actions triggered (loop-deduplicated).`,
+      );
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to execute automation sweep.');
+    } finally {
+      setRunningSweep(false);
+    }
+  };
+
+  const handleCreateAutomationRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRuleName.trim()) return;
+    setSubmittingRule(true);
+    try {
+      const res = await fetch('/api/admin/operations/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert_automation_rule',
+          name: newRuleName.trim(),
+          description: newRuleDesc.trim(),
+          ruleType: newRuleType,
+          isEnabled: true,
+        }),
+      });
+      const json = (await res.json()) as ApiResponse<unknown>;
+      if (!res.ok || !json.ok) {
+        throw new Error((!json.ok && json.error?.message) || 'Failed to create automation rule.');
+      }
+      setNewRuleName('');
+      setNewRuleDesc('');
+      showToastMessage('Custom workflow automation rule saved.');
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create automation rule.');
+    } finally {
+      setSubmittingRule(false);
     }
   };
 
@@ -367,6 +600,82 @@ export function OperationsAnalyticsAndReportsManager({
   const metrics = data?.metrics;
   const closingReport = data?.closingReport;
   const timeline = useMemo(() => data?.activityTimeline ?? [], [data]);
+  const scorecards = useMemo(() => data?.agentScorecards ?? [], [data]);
+  const qaEvaluations = useMemo(() => data?.qaEvaluations ?? [], [data]);
+  const automationRules = useMemo(() => data?.automationRules ?? [], [data]);
+  const automationLogs = useMemo(() => data?.automationLogs ?? [], [data]);
+
+  // Extract unique options for Backlog Filters
+  const backlogRecords = useMemo(() => metrics?.backlogQueues.records ?? [], [metrics]);
+  const filteredBacklogRecords = useMemo(() => {
+    return backlogRecords.filter((rec) => {
+      if (backlogDeptFilter !== 'all' && (rec.department || 'General Support') !== backlogDeptFilter) {
+        return false;
+      }
+      if (backlogAgentFilter !== 'all' && (rec.assignedAgentName || 'Unassigned') !== backlogAgentFilter) {
+        return false;
+      }
+      if (
+        backlogSupervisorFilter !== 'all' &&
+        (rec.assignedSupervisorName || 'Unassigned') !== backlogSupervisorFilter
+      ) {
+        return false;
+      }
+      if (backlogCategoryFilter !== 'all' && (rec.category || 'General') !== backlogCategoryFilter) {
+        return false;
+      }
+      if (backlogPriorityFilter !== 'all' && rec.priority.toLowerCase() !== backlogPriorityFilter) {
+        return false;
+      }
+      if (backlogStatusFilter !== 'all' && rec.status.toLowerCase() !== backlogStatusFilter) {
+        return false;
+      }
+      if (backlogAgeFilter === 'under_4h' && rec.ageHours >= 4) return false;
+      if (backlogAgeFilter === '4h_to_24h' && (rec.ageHours < 4 || rec.ageHours >= 24)) return false;
+      if (backlogAgeFilter === 'over_24h' && rec.ageHours < 24) return false;
+      if (backlogAgeFilter === 'over_48h' && rec.ageHours < 48) return false;
+
+      if (backlogSlaConditionFilter === 'approaching_sla' && rec.slaCondition !== 'approaching_sla') {
+        return false;
+      }
+      if (backlogSlaConditionFilter === 'overdue_24h' && !rec.isOverdue24h) return false;
+      if (backlogSlaConditionFilter === 'overdue_48h' && !rec.isOverdue48h) return false;
+      if (backlogSlaConditionFilter === 'awaiting_customer' && rec.waitingOn !== 'customer') {
+        return false;
+      }
+      if (backlogSlaConditionFilter === 'awaiting_agent' && rec.waitingOn !== 'agent') {
+        return false;
+      }
+      if (backlogSlaConditionFilter === 'awaiting_supervisor' && rec.waitingOn !== 'supervisor') {
+        return false;
+      }
+      if (backlogSlaConditionFilter === 'awaiting_specialist' && rec.waitingOn !== 'specialist') {
+        return false;
+      }
+      if (backlogSlaConditionFilter === 'reopened' && !rec.isReopened) return false;
+
+      return true;
+    });
+  }, [
+    backlogRecords,
+    backlogDeptFilter,
+    backlogAgentFilter,
+    backlogSupervisorFilter,
+    backlogCategoryFilter,
+    backlogPriorityFilter,
+    backlogStatusFilter,
+    backlogAgeFilter,
+    backlogSlaConditionFilter,
+  ]);
+
+  const uniqueBacklogDepts = useMemo(
+    () => Array.from(new Set(backlogRecords.map((r) => r.department || 'General Support'))),
+    [backlogRecords],
+  );
+  const uniqueBacklogCategories = useMemo(
+    () => Array.from(new Set(backlogRecords.map((r) => r.category || 'General'))),
+    [backlogRecords],
+  );
 
   return (
     <div className="space-y-6">
@@ -380,11 +689,11 @@ export function OperationsAnalyticsAndReportsManager({
               </div>
               <div>
                 <h1 className="text-xl font-bold text-slate-900">
-                  Administrator Operations, Accountability &amp; Reporting
+                  Administrator Operations, Accountability, QA &amp; Automation
                 </h1>
                 <p className="text-xs text-slate-500">
-                  Real-time operational command center, agent/supervisor performance, SLA backlog
-                  tracking, and daily closing reports.
+                  Real-time operational command center, agent scorecards, supervisor QA evaluations,
+                  multi-channel analytics, SLA backlog filters, and workflow automation.
                 </p>
               </div>
             </div>
@@ -408,6 +717,16 @@ export function OperationsAnalyticsAndReportsManager({
                 </button>
               ))}
             </div>
+
+            <button
+              type="button"
+              disabled={runningDemo}
+              onClick={() => void handleRunDemoScenario()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-xs font-bold text-indigo-800"
+            >
+              <Play className="w-3.5 h-3.5 text-indigo-600" />
+              {runningDemo ? 'Running Demo...' : 'Run [DEMO] Deposit Scenario'}
+            </button>
 
             {isAdmin && (
               <button
@@ -467,7 +786,7 @@ export function OperationsAnalyticsAndReportsManager({
             }`}
           >
             <TrendingUp className="w-3.5 h-3.5" />
-            1. Operations &amp; Backlog Overview
+            1. Operations, Analytics &amp; Backlog
           </button>
           <button
             type="button"
@@ -479,7 +798,7 @@ export function OperationsAnalyticsAndReportsManager({
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            2. Agent &amp; Supervisor Accountability
+            2. Scorecards, Accountability &amp; QA ({scorecards.length})
           </button>
           <button
             type="button"
@@ -504,6 +823,18 @@ export function OperationsAnalyticsAndReportsManager({
           >
             <FileText className="w-3.5 h-3.5" />
             4. Daily Closing &amp; Period Reports
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('workflow-automation')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'workflow-automation'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Workflow className="w-3.5 h-3.5" />
+            5. Workflow Automation Engine ({automationRules.length})
           </button>
         </div>
       </div>
@@ -540,27 +871,27 @@ export function OperationsAnalyticsAndReportsManager({
       ) : null}
 
       {/* =================================================================== */}
-      {/* TAB 1: DAILY OPERATIONS OVERVIEW, COMPLAINT/INVENTORY ANALYTICS & BACKLOG */}
+      {/* TAB 1: DAILY OPERATIONS OVERVIEW, CHANNEL/TREND ANALYTICS & BACKLOG */}
       {/* =================================================================== */}
       {activeTab === 'operations-dashboard' && metrics && (
         <div className="space-y-6">
           {/* Primary Executive KPI Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase">
-                Unique Customers Attended
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
+                Customers Attended
               </div>
               <div className="text-2xl font-bold text-slate-900 mt-1">
                 {metrics.overview.uniqueCustomersAttended}
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                {metrics.overview.newConversations} new conversations
+                {metrics.overview.newConversations} new enquiries
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase">
-                Conversations Handled
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
+                Convs Handled
               </div>
               <div className="text-2xl font-bold text-indigo-700 mt-1">
                 {metrics.overview.totalConversationsHandled}
@@ -572,71 +903,204 @@ export function OperationsAnalyticsAndReportsManager({
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase">
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
                 Support Tickets
               </div>
               <div className="text-2xl font-bold text-slate-900 mt-1">
                 {metrics.overview.newTickets}
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                {metrics.overview.closedTickets} closed in period
+                {metrics.overview.closedTickets} closed
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase">
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
                 Product Complaints
               </div>
               <div className="text-2xl font-bold text-amber-700 mt-1">
                 {metrics.overview.newComplaints}
               </div>
               <div className="text-[11px] text-slate-600 mt-1">
-                {metrics.overview.approvedComplaints} approved ·{' '}
-                {metrics.overview.declinedComplaints} declined
+                {metrics.overview.approvedComplaints} appr ·{' '}
+                {metrics.overview.declinedComplaints} decl
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase">
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
                 Replacements Issued
               </div>
               <div className="text-2xl font-bold text-emerald-700 mt-1">
                 {metrics.overview.replacementsIssued}
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                {metrics.overview.pendingVerificationComplaints} awaiting review
+                {metrics.overview.pendingVerificationComplaints} pending review
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="text-[11px] font-semibold text-slate-500 uppercase">
-                Response &amp; Resolution SLA
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
+                Response / Res Time
               </div>
               <div className="text-lg font-bold text-slate-900 mt-1">
                 {metrics.overview.avgFirstResponseMinutes !== null
-                  ? `${metrics.overview.avgFirstResponseMinutes}m resp`
+                  ? `${metrics.overview.avgFirstResponseMinutes}m`
                   : 'N/A'}
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                Avg resolution:{' '}
+                Res:{' '}
                 {metrics.overview.avgResolutionHours !== null
                   ? `${metrics.overview.avgResolutionHours}h`
                   : 'N/A'}
               </div>
             </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-3.5">
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
+                SLA Compliance
+              </div>
+              <div className="text-2xl font-bold text-emerald-700 mt-1">
+                {metrics.overview.slaCompliancePercentage ?? 100}%
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                {metrics.overview.escalatedCasesCount ?? 0} escalated
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-3.5">
+              <div className="text-[10px] font-bold text-slate-500 uppercase">
+                Customer CSAT
+              </div>
+              <div className="text-2xl font-bold text-amber-600 mt-1 flex items-center gap-1">
+                {metrics.overview.customerSatisfactionScore !== null
+                  ? `${metrics.overview.customerSatisfactionScore}/5`
+                  : '—'}
+                <Star className="w-4 h-4 fill-amber-400 text-amber-500" />
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                {(data?.customerFeedback ?? []).length} ratings
+              </div>
+            </div>
           </div>
 
-          {/* Open Issues & Backlog Monitoring */}
+          {/* Channel Analytics & 7-Day Trend Analytics Side-by-Side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Channel Analytics */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Multi-Channel Support Analytics
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Enquiry volume, resolution rate, and response time across Website Widget, Support
+                  Portal, and Telegram.
+                </p>
+              </div>
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
+                      <th className="py-2 px-3">Channel</th>
+                      <th className="py-2 px-3">Total Convs</th>
+                      <th className="py-2 px-3">Open</th>
+                      <th className="py-2 px-3">Resolved</th>
+                      <th className="py-2 px-3">Escalated</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(metrics.channelAnalytics ?? []).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-4 text-center text-slate-400">
+                          No channel traffic recorded in this period.
+                        </td>
+                      </tr>
+                    ) : (
+                      (metrics.channelAnalytics ?? []).map((ch) => (
+                        <tr key={ch.channel} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-semibold text-slate-900">
+                            {ch.label}
+                          </td>
+                          <td className="py-2 px-3 font-mono font-bold text-indigo-700">
+                            {ch.totalConversations}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-slate-700">
+                            {ch.openCount}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-emerald-700">
+                            {ch.resolvedCount}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-amber-700">
+                            {ch.escalatedCount}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 7-Day Trend Analytics */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  7-Day Operational Volume &amp; Resolution Trend
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Daily trajectory of new conversations, resolved enquiries, complaints, and net
+                  backlog.
+                </p>
+              </div>
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
+                      <th className="py-2 px-3">Date</th>
+                      <th className="py-2 px-3">New Convs</th>
+                      <th className="py-2 px-3">Resolved</th>
+                      <th className="py-2 px-3">New Claims</th>
+                      <th className="py-2 px-3">Resolved Claims</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(metrics.trendAnalytics ?? []).map((t) => (
+                      <tr key={t.dateLabel} className="hover:bg-slate-50">
+                        <td className="py-1.5 px-3 font-mono font-semibold text-slate-800">
+                          {t.dateLabel}
+                        </td>
+                        <td className="py-1.5 px-3 font-mono text-indigo-700">
+                          {t.newConversations}
+                        </td>
+                        <td className="py-1.5 px-3 font-mono text-emerald-700">
+                          {t.resolvedConversations}
+                        </td>
+                        <td className="py-1.5 px-3 font-mono text-amber-700">
+                          {t.newComplaints}
+                        </td>
+                        <td className="py-1.5 px-3 font-mono font-bold text-emerald-800">
+                          {t.resolvedComplaints}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Open Issues & Backlog Monitoring with 8-Dimensional Filter Bar */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <Clock className="w-4 h-4 text-rose-600" />
-                  Open Issues &amp; Live Backlog Queues
+                  Backlog &amp; Complaint Management Queues
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Real-time operational bottlenecks, unassigned conversations, pending supervisor
-                  verifications, and SLA overdue cases (&gt;24h / &gt;48h).
+                  Track unassigned complaints, unattended enquiries, overdue tickets, escalated
+                  cases, cases awaiting customer/agent/supervisor/specialised personnel, and
+                  reopened complaints.
                 </p>
               </div>
               {onNavigateToSection && (
@@ -659,7 +1123,7 @@ export function OperationsAnalyticsAndReportsManager({
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-[10px] font-bold uppercase text-slate-500">
                   Unassigned Convs
@@ -676,9 +1140,17 @@ export function OperationsAnalyticsAndReportsManager({
                   {metrics.backlogQueues.complaintsAwaitingSupervisorReview}
                 </div>
               </div>
+              <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200">
+                <div className="text-[10px] font-bold uppercase text-indigo-800">
+                  Awaiting Specialist
+                </div>
+                <div className="text-xl font-bold text-indigo-900 mt-0.5">
+                  {metrics.backlogQueues.casesAwaitingSpecialisedPersonnel ?? 0}
+                </div>
+              </div>
               <div className="p-3 rounded-xl bg-purple-50/70 border border-purple-200">
                 <div className="text-[10px] font-bold uppercase text-purple-800">
-                  Awaiting Customer Info
+                  Awaiting Customer
                 </div>
                 <div className="text-xl font-bold text-purple-900 mt-0.5">
                   {metrics.backlogQueues.complaintsAwaitingCustomerInfo}
@@ -694,7 +1166,7 @@ export function OperationsAnalyticsAndReportsManager({
               </div>
               <div className="p-3 rounded-xl bg-rose-50/70 border border-rose-200">
                 <div className="text-[10px] font-bold uppercase text-rose-800">
-                  Overdue &gt; 24 Hours
+                  Overdue &gt; 24h
                 </div>
                 <div className="text-xl font-bold text-rose-700 mt-0.5">
                   {metrics.backlogQueues.overdueCases24h}
@@ -702,7 +1174,7 @@ export function OperationsAnalyticsAndReportsManager({
               </div>
               <div className="p-3 rounded-xl bg-rose-100/80 border border-rose-300">
                 <div className="text-[10px] font-bold uppercase text-rose-900">
-                  Critical &gt; 48 Hours
+                  Critical &gt; 48h
                 </div>
                 <div className="text-xl font-bold text-rose-900 mt-0.5">
                   {metrics.backlogQueues.overdueCases48h}
@@ -710,40 +1182,188 @@ export function OperationsAnalyticsAndReportsManager({
               </div>
             </div>
 
+            {/* 8-Dimensional Backlog Filter Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-1">
+              <select
+                value={backlogDeptFilter}
+                onChange={(e) => setBacklogDeptFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="all">All Departments</option>
+                {uniqueBacklogDepts.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={backlogAgentFilter}
+                onChange={(e) => setBacklogAgentFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="all">All Agents</option>
+                <option value="Unassigned">Unassigned</option>
+                {(data?.teamMembers ?? []).map((m) => (
+                  <option key={m.id} value={m.displayName}>
+                    {m.displayName}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={backlogSupervisorFilter}
+                onChange={(e) => setBacklogSupervisorFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="all">All Supervisors</option>
+                <option value="Unassigned">Unassigned</option>
+                {(data?.teamMembers ?? [])
+                  .filter(
+                    (m) =>
+                      m.role === UserRole.Supervisor ||
+                      m.role === UserRole.Admin ||
+                      m.role === UserRole.Owner,
+                  )
+                  .map((m) => (
+                    <option key={m.id} value={m.displayName}>
+                      {m.displayName}
+                    </option>
+                  ))}
+              </select>
+
+              <select
+                value={backlogCategoryFilter}
+                onChange={(e) => setBacklogCategoryFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="all">All Categories</option>
+                {uniqueBacklogCategories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={backlogPriorityFilter}
+                onChange={(e) => setBacklogPriorityFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="all">All Priorities</option>
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+
+              <select
+                value={backlogStatusFilter}
+                onChange={(e) => setBacklogStatusFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="all">All Statuses</option>
+                <option value="submitted">Submitted</option>
+                <option value="pending_review">Pending Review</option>
+                <option value="in_progress">In Progress</option>
+                <option value="awaiting_information">Awaiting Info</option>
+                <option value="awaiting_replacement">Awaiting Replacement</option>
+                <option value="open">Open Conversation</option>
+                <option value="escalated">Escalated Conversation</option>
+              </select>
+
+              <select
+                value={backlogAgeFilter}
+                onChange={(e) => setBacklogAgeFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="all">Any Case Age</option>
+                <option value="under_4h">&lt; 4 Hours</option>
+                <option value="4h_to_24h">4 – 24 Hours</option>
+                <option value="over_24h">&gt; 24 Hours</option>
+                <option value="over_48h">&gt; 48 Hours</option>
+              </select>
+
+              <select
+                value={backlogSlaConditionFilter}
+                onChange={(e) => setBacklogSlaConditionFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white font-semibold"
+              >
+                <option value="all">All SLA / Waiting States</option>
+                <option value="approaching_sla">Approaching SLA</option>
+                <option value="overdue_24h">Overdue &gt; 24h</option>
+                <option value="overdue_48h">Critical &gt; 48h</option>
+                <option value="awaiting_customer">Awaiting Customer</option>
+                <option value="awaiting_agent">Awaiting Agent</option>
+                <option value="awaiting_supervisor">Awaiting Supervisor</option>
+                <option value="awaiting_specialist">Awaiting Specialised Personnel</option>
+                <option value="reopened">Reopened Cases</option>
+              </select>
+            </div>
+
             {/* Active Backlog Table */}
-            {metrics.backlogQueues.records.length > 0 ? (
+            {filteredBacklogRecords.length > 0 ? (
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
                       <th className="py-2.5 px-3">Ref</th>
-                      <th className="py-2.5 px-3">Type</th>
+                      <th className="py-2.5 px-3">Type / Dept</th>
                       <th className="py-2.5 px-3">Customer</th>
-                      <th className="py-2.5 px-3">Product / Subject</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3">Assigned To</th>
-                      <th className="py-2.5 px-3">Age</th>
-                      <th className="py-2.5 px-3">Flags</th>
+                      <th className="py-2.5 px-3">Product / Category</th>
+                      <th className="py-2.5 px-3">Status &amp; Waiting On</th>
+                      <th className="py-2.5 px-3">Assigned Personnel</th>
+                      <th className="py-2.5 px-3">Age / SLA Deadline</th>
+                      <th className="py-2.5 px-3">SLA &amp; Flags</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {metrics.backlogQueues.records.slice(0, 15).map((rec) => (
+                    {filteredBacklogRecords.slice(0, 25).map((rec) => (
                       <tr key={`${rec.recordType}:${rec.id}`} className="hover:bg-slate-50">
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
                           {rec.referenceCode}
                         </td>
-                        <td className="py-2.5 px-3 capitalize text-slate-600">{rec.recordType}</td>
+                        <td className="py-2.5 px-3">
+                          <div className="capitalize font-semibold text-slate-700">
+                            {rec.recordType}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {rec.department || 'General Support'}
+                          </div>
+                        </td>
                         <td className="py-2.5 px-3 font-medium text-slate-800">
                           {rec.customerName}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-700">{rec.subjectOrProduct}</td>
+                        <td className="py-2.5 px-3">
+                          <div className="text-slate-800 font-medium">{rec.subjectOrProduct}</div>
+                          <div className="text-[10px] text-slate-500">{rec.category}</div>
+                        </td>
                         <td className="py-2.5 px-3">
                           <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold text-[11px]">
                             {rec.status}
                           </span>
+                          {rec.waitingOn && (
+                            <div className="text-[10px] text-indigo-700 font-semibold mt-0.5 uppercase">
+                              Waiting: {rec.waitingOn}
+                            </div>
+                          )}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-700">{rec.assignedTo}</td>
-                        <td className="py-2.5 px-3 font-mono text-slate-700">{rec.ageHours}h</td>
+                        <td className="py-2.5 px-3 text-slate-700">
+                          <div>{rec.assignedTo}</div>
+                          {rec.assignedSpecialistName && (
+                            <div className="text-[10px] text-indigo-700 font-semibold">
+                              Specialist: {rec.assignedSpecialistName}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-700">
+                          <div className="font-bold">{rec.ageHours}h elapsed</div>
+                          {rec.slaDeadlineAt && (
+                            <div className="text-[10px] text-slate-500">
+                              Due: {new Date(rec.slaDeadlineAt).toLocaleDateString()}
+                            </div>
+                          )}
+                        </td>
                         <td className="py-2.5 px-3">
                           <div className="flex flex-wrap gap-1">
                             {rec.isOverdue48h ? (
@@ -752,9 +1372,17 @@ export function OperationsAnalyticsAndReportsManager({
                               </span>
                             ) : rec.isOverdue24h ? (
                               <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
-                                &gt;24h
+                                &gt;24h SLA
                               </span>
-                            ) : null}
+                            ) : rec.slaCondition === 'approaching_sla' ? (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-300 text-amber-800 text-[10px] font-bold">
+                                Approaching SLA
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-semibold">
+                                Within SLA
+                              </span>
+                            )}
                             {rec.isUnassigned && (
                               <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold">
                                 Unassigned
@@ -774,7 +1402,7 @@ export function OperationsAnalyticsAndReportsManager({
               </div>
             ) : (
               <div className="text-xs text-slate-500 py-4 text-center bg-slate-50 rounded-xl">
-                Zero active backlog records at this moment.
+                No backlog records match the selected filter criteria.
               </div>
             )}
           </div>
@@ -943,22 +1571,108 @@ export function OperationsAnalyticsAndReportsManager({
       )}
 
       {/* =================================================================== */}
-      {/* TAB 2: AGENT & SUPERVISOR PERFORMANCE & ACCOUNTABILITY              */}
+      {/* TAB 2: AGENT SCORECARDS, ACCOUNTABILITY & QUALITY ASSURANCE (QA)     */}
       {/* =================================================================== */}
       {activeTab === 'team-performance' && metrics && (
         <div className="space-y-6">
-          {/* Support Agent Performance Table */}
+          {/* Agent Performance Scorecards (Daily / Weekly / Monthly Targets + QA + CSAT) */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Award className="w-4 h-4 text-indigo-600" />
+                Agent Performance Scorecards (Daily / Weekly / Monthly Targets, SLA &amp; QA)
+              </h2>
+              <p className="text-xs text-slate-500">
+                Tracks daily, weekly, and monthly output against targets, resolution rate,
+                escalation rate, reopened cases, SLA compliance %, QA evaluation average, CSAT, and
+                case complexity index.
+              </p>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
+                    <th className="py-3 px-3">Agent</th>
+                    <th className="py-3 px-3">Daily vs Target</th>
+                    <th className="py-3 px-3">Weekly vs Target</th>
+                    <th className="py-3 px-3">Monthly vs Target</th>
+                    <th className="py-3 px-3">Resolution %</th>
+                    <th className="py-3 px-3">Escalation %</th>
+                    <th className="py-3 px-3">Reopened</th>
+                    <th className="py-3 px-3">SLA %</th>
+                    <th className="py-3 px-3">Avg QA Score</th>
+                    <th className="py-3 px-3">Avg CSAT</th>
+                    <th className="py-3 px-3">Workload Index</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {scorecards.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} className="py-6 text-center text-slate-400">
+                        No agent scorecards available yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    scorecards.map((sc) => (
+                      <tr key={sc.agentId} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3">
+                          <div className="font-bold text-slate-900">{sc.displayName}</div>
+                          <div className="text-[10px] text-slate-500">{sc.role}</div>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">
+                          <span className="font-bold text-indigo-700">{sc.dailyHandled}</span> / 5
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">
+                          <span className="font-bold text-indigo-700">{sc.weeklyHandled}</span> /{' '}
+                          {sc.weeklyTarget}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">
+                          <span className="font-bold text-indigo-700">{sc.monthlyHandled}</span> /{' '}
+                          {sc.weeklyTarget * 4}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
+                          {sc.resolutionRatePercent}%
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-amber-700">
+                          {sc.escalationRatePercent}%
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-rose-700">
+                          {sc.reopenedCasesCount}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-800">
+                          {sc.slaCompliancePercent}%
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-indigo-800">
+                          {sc.avgQaScore !== null
+                            ? `${sc.avgQaScore}% (${sc.qaEvaluationsCount})`
+                            : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-amber-700 font-bold">
+                          {sc.avgCsatScore !== null ? `${sc.avgCsatScore}/5` : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-700">
+                          {sc.workloadComplexityScore} pts
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Support Agent Real Activity Table */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
             <div>
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <UserCheck className="w-4 h-4 text-indigo-600" />
-                Support Agent Performance &amp; Real Activity Tracking
+                Support Agent Real Activity &amp; Case Drilldown
               </h2>
               <p className="text-xs text-slate-500">
-                Clearly separates assigned conversations from conversations actually handled and
-                resolved. Activity status is derived from real system actions (replies, claims,
-                notes, resolutions), not passive page presence. Click any agent to drill down into
-                their cases.
+                Separates assigned conversations from conversations actually handled and resolved.
+                Activity status is derived from real system actions (replies, claims, notes,
+                resolutions).
               </p>
             </div>
 
@@ -1166,6 +1880,215 @@ export function OperationsAnalyticsAndReportsManager({
               </table>
             </div>
           </div>
+
+          {/* Supervisor Quality Assurance (QA) Evaluations & Coaching */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Star className="w-4 h-4 text-amber-500" />
+                Supervisor Quality Assurance (QA) Evaluations &amp; Coaching
+              </h2>
+              <p className="text-xs text-slate-500">
+                Evaluate agent conversations and complaints across Accuracy (1–5), Professionalism
+                (1–5), and Resolution Effectiveness (1–5), assign case complexity, and log coaching
+                recommendations.
+              </p>
+            </div>
+
+            {isSupervisorOrAdmin && (
+              <form
+                onSubmit={handleCreateQaEvaluation}
+                className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3 text-xs"
+              >
+                <div className="font-bold text-slate-800">Record New QA Evaluation</div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Target Type
+                    </label>
+                    <select
+                      value={qaTargetType}
+                      onChange={(e) =>
+                        setQaTargetType(e.target.value as 'complaint' | 'conversation')
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                    >
+                      <option value="complaint">Complaint Case</option>
+                      <option value="conversation">Support Conversation</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Case Reference / ID *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={qaTargetRef}
+                      onChange={(e) => setQaTargetRef(e.target.value)}
+                      placeholder="e.g. CLM-2026-1001"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Evaluated Agent *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={qaAgentName}
+                      onChange={(e) => setQaAgentName(e.target.value)}
+                      placeholder="Agent Display Name"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Case Complexity
+                    </label>
+                    <select
+                      value={qaComplexity}
+                      onChange={(e) =>
+                        setQaComplexity(
+                          e.target.value as 'simple' | 'standard' | 'complex' | 'critical',
+                        )
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                    >
+                      <option value="simple">Simple (1x)</option>
+                      <option value="standard">Standard (1.5x)</option>
+                      <option value="complex">Complex (2.5x)</option>
+                      <option value="critical">Critical (4x)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Accuracy Score (1–5): <strong>{qaAccuracy}/5</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={5}
+                      value={qaAccuracy}
+                      onChange={(e) => setQaAccuracy(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Professionalism Score (1–5): <strong>{qaProfessionalism}/5</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={5}
+                      value={qaProfessionalism}
+                      onChange={(e) => setQaProfessionalism(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Resolution Effectiveness (1–5): <strong>{qaResolution}/5</strong>
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={5}
+                      value={qaResolution}
+                      onChange={(e) => setQaResolution(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={qaNotes}
+                    onChange={(e) => setQaNotes(e.target.value)}
+                    placeholder="Evaluation feedback notes..."
+                    className="px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                  />
+                  <input
+                    type="text"
+                    value={qaCoaching}
+                    onChange={(e) => setQaCoaching(e.target.value)}
+                    placeholder="Coaching recommendation for agent..."
+                    className="px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={submittingQa}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                  >
+                    {submittingQa ? 'Recording QA...' : 'Save QA Evaluation'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* QA Evaluations History */}
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
+                    <th className="py-2.5 px-3">Case Ref</th>
+                    <th className="py-2.5 px-3">Agent</th>
+                    <th className="py-2.5 px-3">Evaluator</th>
+                    <th className="py-2.5 px-3">Complexity</th>
+                    <th className="py-2.5 px-3">Acc / Prof / Res</th>
+                    <th className="py-2.5 px-3">Overall QA</th>
+                    <th className="py-2.5 px-3">Feedback &amp; Coaching</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {qaEvaluations.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-6 text-center text-slate-400">
+                        No supervisor QA evaluations recorded yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    qaEvaluations.map((ev) => (
+                      <tr key={ev.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-mono font-bold text-indigo-700">
+                          {ev.caseReference}
+                        </td>
+                        <td className="py-2.5 px-3 font-semibold text-slate-900">{ev.agentName}</td>
+                        <td className="py-2.5 px-3 text-slate-600">{ev.evaluatorName}</td>
+                        <td className="py-2.5 px-3 uppercase text-[10px] font-bold text-slate-700">
+                          {ev.caseComplexity}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-700">
+                          {ev.accuracyScore} / {ev.professionalismScore} /{' '}
+                          {ev.resolutionEffectivenessScore}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
+                          {ev.overallScore}%
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-700">
+                          <div>{ev.feedbackNotes || '—'}</div>
+                          {ev.coachingRecommendations && (
+                            <div className="text-[11px] text-indigo-700 font-medium">
+                              Coaching: {ev.coachingRecommendations}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1182,7 +2105,7 @@ export function OperationsAnalyticsAndReportsManager({
               </h2>
               <p className="text-xs text-slate-500">
                 Chronological, immutable audit stream of every operational action across agents,
-                supervisors, claims, and replacement stock.
+                supervisors, claims, QA, automation, and replacement stock.
               </p>
             </div>
           </div>
@@ -1196,11 +2119,11 @@ export function OperationsAnalyticsAndReportsManager({
             >
               <option value="">All Action Categories</option>
               <option value="complaint">Complaint &amp; Escalation</option>
-              <option value="supervisor">Supervisor Decision</option>
+              <option value="supervisor">Supervisor Decision &amp; QA</option>
               <option value="replacement">Replacement Fulfilment</option>
               <option value="inventory">Inventory Movement</option>
               <option value="conversation">Conversation &amp; Ticket</option>
-              <option value="settings">Operations Settings</option>
+              <option value="settings">Operations &amp; Automation</option>
             </select>
 
             <select
@@ -1490,6 +2413,242 @@ export function OperationsAnalyticsAndReportsManager({
                   </table>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* TAB 5: WORKFLOW AUTOMATION ENGINE (PHASE FOUR)                      */}
+      {/* =================================================================== */}
+      {activeTab === 'workflow-automation' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Workflow className="w-4 h-4 text-indigo-600" />
+                  Configurable Workflow Automation Engine
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Automates routine operational tasks without code: enquiry assignment,
+                  categorisation, high-risk escalation, overdue supervisor alerts, unavailable agent
+                  reassignment, SLA warnings, customer status updates, and pending follow-ups.
+                  Includes built-in loop deduplication and full execution audit logging.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={runningSweep}
+                onClick={() => void handleRunAutomationSweep()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shrink-0 shadow-xs"
+              >
+                <Zap className="w-4 h-4" />
+                {runningSweep ? 'Running Sweep...' : 'Run Automation Sweep Now'}
+              </button>
+            </div>
+
+            {/* Active Rules Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {automationRules.map((rule) => (
+                <div
+                  key={rule.id}
+                  className={`p-4 rounded-xl border text-xs flex flex-col justify-between gap-3 ${
+                    rule.isEnabled
+                      ? 'bg-white border-slate-200'
+                      : 'bg-slate-50/70 border-slate-200/60 opacity-75'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold text-[10px]">
+                        {AUTOMATION_RULE_TYPE_LABELS[rule.ruleType] || rule.ruleType}
+                      </span>
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={rule.isEnabled}
+                          onChange={(e) =>
+                            void handleToggleAutomationRule(rule.id, e.target.checked)
+                          }
+                          className="rounded border-slate-300"
+                        />
+                        <span className="font-bold text-[11px] text-slate-700">
+                          {rule.isEnabled ? 'Enabled' : 'Paused'}
+                        </span>
+                      </label>
+                    </div>
+                    <div className="font-bold text-slate-900 text-sm">{rule.name}</div>
+                    <p className="text-slate-600 text-[11px]">{rule.description}</p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+                    <span>
+                      Triggered: <strong className="text-slate-800">{rule.executionCount}x</strong>
+                    </span>
+                    <span>
+                      {rule.lastTriggeredAt
+                        ? `Last run: ${new Date(rule.lastTriggeredAt).toLocaleString()}`
+                        : 'Ready'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Add Custom Automation Rule Form */}
+            {isSupervisorOrAdmin && (
+              <form
+                onSubmit={handleCreateAutomationRule}
+                className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3 text-xs"
+              >
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5 text-indigo-600" />
+                  Create Custom Workflow Automation Rule
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <input
+                    type="text"
+                    required
+                    value={newRuleName}
+                    onChange={(e) => setNewRuleName(e.target.value)}
+                    placeholder="Rule Name (e.g. Escalate VIP Deposit Claims)..."
+                    className="px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                  />
+                  <select
+                    value={newRuleType}
+                    onChange={(e) => setNewRuleType(e.target.value as AutomationRuleType)}
+                    className="px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                  >
+                    {Object.entries(AUTOMATION_RULE_TYPE_LABELS).map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newRuleDesc}
+                      onChange={(e) => setNewRuleDesc(e.target.value)}
+                      placeholder="Rule condition & action description..."
+                      className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                    />
+                    <button
+                      type="submit"
+                      disabled={submittingRule}
+                      className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold shrink-0"
+                    >
+                      Save Rule
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* Automation Execution Audit Trail */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                Automation Execution Audit Log ({automationLogs.length})
+              </h3>
+              <p className="text-xs text-slate-500">
+                Every automated assignment, categorisation, escalation, and SLA alert is logged and
+                deduplicated per target record to prevent infinite loops.
+              </p>
+            </div>
+            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
+                    <th className="py-2.5 px-3">Rule</th>
+                    <th className="py-2.5 px-3">Type</th>
+                    <th className="py-2.5 px-3">Target Ref</th>
+                    <th className="py-2.5 px-3">Automated Action Summary</th>
+                    <th className="py-2.5 px-3">Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {automationLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-slate-400">
+                        No automated actions triggered yet. Click &ldquo;Run Automation Sweep
+                        Now&rdquo; above to evaluate all active rules.
+                      </td>
+                    </tr>
+                  ) : (
+                    automationLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-semibold text-slate-900">{log.ruleName}</td>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-indigo-700">
+                          {log.ruleType}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
+                          {log.targetReference}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-700">{log.actionSummary}</td>
+                        <td className="py-2.5 px-3 text-slate-500">
+                          {new Date(log.createdAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* MODAL: [DEMO] DEPOSIT COMPLAINT SCENARIO LIFECYCLE                  */}
+      {/* =================================================================== */}
+      {demoResultModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-bold uppercase text-indigo-600">
+                  Phase 9 Demonstration Scenario Complete
+                </div>
+                <h3 className="text-base font-bold text-slate-900">
+                  [DEMO] Customer Deposit Complaint Lifecycle ({demoResultModal.referenceCode})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDemoResultModal(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto space-y-2.5 text-xs">
+              <p className="text-slate-600">
+                All 10 operational stages have been executed in the database and are now visible in
+                your Claims Workspace, Supervisor Queue, Scorecards, QA Evaluations, and Analytics:
+              </p>
+              <div className="space-y-2">
+                {demoResultModal.stepsCompleted.map((step, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 text-emerald-950 flex items-start gap-2.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span className="font-medium">{step}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDemoResultModal(null)}
+                className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>

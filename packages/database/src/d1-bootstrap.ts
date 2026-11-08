@@ -76,6 +76,12 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     `ALTER TABLE support_messages ADD COLUMN delivery_error TEXT`,
     `ALTER TABLE channel_customer_identities ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
     `ALTER TABLE telegram_customer_contexts ADD COLUMN session_state_json TEXT NOT NULL DEFAULT '{}'`,
+    `ALTER TABLE support_complaints ADD COLUMN assigned_specialist_name TEXT`,
+    `ALTER TABLE support_complaints ADD COLUMN assigned_specialist_department TEXT`,
+    `ALTER TABLE support_complaints ADD COLUMN sla_deadline_at TEXT`,
+    `ALTER TABLE support_conversations ADD COLUMN department TEXT NOT NULL DEFAULT 'Support'`,
+    `ALTER TABLE support_conversations ADD COLUMN reopened_count INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE support_conversations ADD COLUMN sla_deadline_at TEXT`,
   ];
   for (const alterSql of schemaAlterations) {
     try {
@@ -83,6 +89,58 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     } catch {
       // Column already exists or already upgraded
     }
+  }
+
+  // Upgrade complaint_assignments_history CHECK constraint to include 'specialist' if pre-existing
+  try {
+    const cahMeta = await db
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'complaint_assignments_history'`
+      )
+      .first<{ sql: string }>();
+    if (cahMeta?.sql && !cahMeta.sql.includes("'specialist'")) {
+      await db.prepare(`PRAGMA foreign_keys = OFF`).run();
+      await db
+        .prepare(
+          `CREATE TABLE complaint_assignments_history_v2 (
+            id TEXT PRIMARY KEY NOT NULL,
+            organization_id TEXT NOT NULL,
+            complaint_id TEXT NOT NULL,
+            from_user_id TEXT,
+            from_user_name TEXT,
+            to_user_id TEXT,
+            to_user_name TEXT NOT NULL,
+            assignment_role TEXT NOT NULL DEFAULT 'supervisor' CHECK (assignment_role IN ('agent', 'supervisor', 'specialist')),
+            reason TEXT NOT NULL DEFAULT '',
+            actor_user_id TEXT,
+            actor_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+            FOREIGN KEY (complaint_id, organization_id) REFERENCES support_complaints(id, organization_id) ON DELETE CASCADE
+          )`
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO complaint_assignments_history_v2
+             (id, organization_id, complaint_id, from_user_id, from_user_name, to_user_id, to_user_name, assignment_role, reason, actor_user_id, actor_name, created_at)
+           SELECT id, organization_id, complaint_id, from_user_id, from_user_name, to_user_id, to_user_name, assignment_role, reason, actor_user_id, actor_name, created_at
+           FROM complaint_assignments_history`
+        )
+        .run();
+      await db.prepare(`DROP TABLE complaint_assignments_history`).run();
+      await db
+        .prepare(`ALTER TABLE complaint_assignments_history_v2 RENAME TO complaint_assignments_history`)
+        .run();
+      await db
+        .prepare(
+          `CREATE INDEX IF NOT EXISTS idx_complaint_assignments_org_complaint ON complaint_assignments_history (organization_id, complaint_id, created_at ASC)`
+        )
+        .run();
+      await db.prepare(`PRAGMA foreign_keys = ON`).run();
+    }
+  } catch {
+    // Table already upgraded
   }
 
   // Upgrade support_conversations CHECK constraint to include 'pending' status if pre-existing

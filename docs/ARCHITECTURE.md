@@ -1,21 +1,24 @@
-# CareFlow Architecture (`v0.1.0`)
+# CustomCare Architecture (`v2.0`)
 
 ## 1. Architectural Principles
 
-CareFlow is structured as a **pnpm workspace monorepo** built around strict separation of concerns, vendor portability, and multi-channel convergence:
+CustomCare is structured as a **TypeScript workspace monorepo** built around strict multi-business isolation, Cloudflare-first portability, and unified multi-channel operations:
 
-1. **Portability (Ports & Adapters):** Core domain rules and repository contracts live in `@careflow/support-engine` and `@careflow/shared` with zero hard dependencies on Vercel or Next.js internals. HTTP Route Handlers in `apps/web` act strictly as thin transport adapters.
+1. **Portability (Ports & Adapters):** Core domain rules, operational DTOs, and repository services live in `@careflow/database`, `@careflow/support-engine`, and `@careflow/shared`. HTTP Route Handlers in `apps/web` act strictly as thin transport adapters.
 2. **Validation Boundary:** Every external input—both runtime environment variables and incoming HTTP JSON payloads—passes through `@careflow/validation` (Zod) before touching domain services.
-3. **Unified Multi-Channel Intake:** Both the Website Widget (`apps/widget`) and Telegram webhook adapter (`modules/telegram-integration`) target the shared `ChannelConversationGatewayPort` so conversations, messages, and escalations follow a single lifecycle regardless of origin channel.
-4. **Defense-in-Depth Security:** Browser bundles only ever receive `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Privileged `SUPABASE_SERVICE_ROLE_KEY` clients throw immediately if imported into a browser runtime, and PostgreSQL Row Level Security (RLS) enforces tenant boundaries at the database engine level.
+3. **Unified Multi-Channel Intake:** Hosted Support Portals (`/portal/[businessSlug]`), the Embeddable Website Widget (`apps/widget` -> `/api/widget/[publicToken]`), the Central Telegram Bot (`@CustomCareBot`), Dedicated Business Sub-Bots, and the Telegram Mini App (`/tg-app`) all converge into the same `support_conversations`, `support_messages`, and `support_complaints` tables.
+4. **Defense-in-Depth Multi-Tenant Security:**
+   - Every tenant-scoped table requires `organization_id TEXT NOT NULL`.
+   - SQLite/D1 triggers (`trg_support_messages_tenant_insert`, `trg_knowledge_articles_category_tenant_insert`, etc.) block cross-tenant foreign key references at the database engine level.
+   - Sensitive credentials (Telegram bot tokens, customer-supplied complaint login credentials, and replacement inventory credentials) are encrypted at rest with **AES-256-GCM** and masked in all list queries, logs, and audit events.
 
 ---
 
 ## 2. Workspace Dependency Graph
 
 ```text
-apps/web  ──────┬──► @careflow/support-engine ──► @careflow/validation ──► @careflow/shared
-                ├──► @careflow/database       ──► @careflow/validation ──► @careflow/shared
+apps/web  ──────┬──► @careflow/database       ──► @careflow/validation ──► @careflow/shared
+                ├──► @careflow/support-engine ──► @careflow/validation ──► @careflow/shared
                 └──► @careflow/shared
 
 apps/widget ────┬──► @careflow/validation     ──► @careflow/shared
@@ -24,25 +27,13 @@ apps/widget ────┬──► @careflow/validation     ──► @careflo
 
 ---
 
-## 3. Core Domain Modules (`@careflow/support-engine`)
+## 3. Six Interconnected Operational Modules
 
-All nine core support modules are scaffolded with explicit TypeScript service ports in `packages/support-engine/src/modules/`:
-
-| Module | Directory | Responsibility |
+| Module | Primary Services & Components | Responsibility |
 | :--- | :--- | :--- |
-| **Authentication** | `authentication/` | Session identity contract and UI-independent `hasMinimumRole()` RBAC policy helper (`customer`, `agent`, `supervisor`, `admin`). |
-| **Customer Management** | `customer-management/` | Multi-tenant customer profile lookup and external ID linking. |
-| **Conversations** | `conversations/` | Lifecycle state machine (`open`, `troubleshooting`, `escalated`, `resolved`, `closed`) and `ChannelConversationGatewayPort`. |
-| **Messages** | `messages/` | Ordered message ledger contract with attachment URL support. |
-| **Knowledge Base** | `knowledge-base/` | Published product documentation search and canonical slug retrieval. |
-| **Smart Troubleshooting** | `smart-troubleshooting/` | Deterministic decision-tree evaluation prior to human queue entry. |
-| **Human Escalation** | `human-escalation/` | Escalation ticket creation carrying structured diagnostic context and priority tiers. |
-| **Agent Management** | `agent-management/` | Specialist availability states and active conversation assignment. |
-| **Telegram Integration** | `telegram-integration/` | Webhook signature verification and normalization into `NormalizedInboundChannelEnvelope`. |
-
----
-
-## 4. Realtime & Storage Readiness
-
-- **Supabase Realtime (`@careflow/database/realtime`):** Defines deterministic topic naming (`org:{orgId}:conversation:{convId}` and `org:{orgId}:agent-queue`) alongside `RealtimePublisherPort` so WebSocket subscriptions can be wired in v0.2 without coupling UI views to raw channel strings.
-- **Supabase Storage (`@careflow/database/storage`):** Defines `StorageAdapterPort` for short-lived signed upload and download URLs against a private `support-attachments` bucket.
+| **A. Customer Support & Channels** | `D1ChannelService`, `SupportPortalLanding`, `PortalClaimsWidget`, `apps/widget` | Multi-channel intake (Portal, Web Widget, Telegram), KB search, guided troubleshooting, human escalation, complaint tracking, and CSAT ratings. |
+| **B. Agent Workspace** | `WorkspaceOperationsManager`, `/api/workspace/conversations/[id]/copilot` | Unified inbox, real-time replies, internal notes, saved replies, grounded KB Copilot, and complaint creation. |
+| **C. Supervisor Workspace** | `ClaimsAndSupervisorManager`, `D1OperationsManagementService` | 7 supervisor verification queues, credential reveal auditing, mandatory decision reasons, Specialised Personnel routing (`CUSTOMER → AGENT → SUPERVISOR → SPECIALISED PERSONNEL → RESOLUTION`), and QA reviews. |
+| **D. Administrator Dashboard** | `BusinessAdminShell`, `WorkspaceSettingsManager`, `ReplacementInventoryManager` | Organization settings, branding, team invitations, SLA policies, encrypted replacement stock pools, and fulfilment method controls. |
+| **E. Performance Management & QA** | `OperationsAnalyticsAndReportsManager`, `D1OperationsManagementService` | Meaningful agent action tracking, Daily/Weekly/Monthly Agent Scorecards, SLA compliance, workload/complexity weighting, and Supervisor QA Evaluations with coaching notes. |
+| **F. Support Analytics, Backlog & Automation** | `OperationsAnalyticsAndReportsManager`, `D1OperationsManagementService` | Executive KPIs, Channel & Category analytics, Trend series, multi-dimensional Backlog filtering, Daily/Weekly/Monthly Closing Reports (CSV/Excel/Print), and Configurable Workflow Automation Engine. |

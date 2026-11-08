@@ -241,10 +241,12 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     if (action === 'reassign') {
-      const assignmentRole: 'supervisor' | 'agent' =
-        body.assignmentRole === 'agent' || typeof body.assignedAgentId === 'string'
-          ? 'agent'
-          : 'supervisor';
+      const assignmentRole: 'supervisor' | 'agent' | 'specialist' =
+        body.assignmentRole === 'specialist'
+          ? 'specialist'
+          : body.assignmentRole === 'agent' || typeof body.assignedAgentId === 'string'
+            ? 'agent'
+            : 'supervisor';
       const toUserId =
         typeof body.toUserId === 'string'
           ? body.toUserId
@@ -260,7 +262,9 @@ export async function PATCH(request: Request, context: RouteContext) {
             ? body.assignedSupervisorName
             : typeof body.assignedAgentName === 'string'
               ? body.assignedAgentName
-              : toUserId;
+              : typeof body.assignedSpecialistName === 'string'
+                ? body.assignedSpecialistName
+                : toUserId;
 
       if (!toUserName) {
         return jsonApiError('VALIDATION_ERROR', 'Target assignee is required.', 400);
@@ -270,6 +274,12 @@ export async function PATCH(request: Request, context: RouteContext) {
         assignmentRole,
         toUserId: toUserId || toUserName,
         toUserName,
+        specialistDepartment:
+          typeof body.specialistDepartment === 'string'
+            ? body.specialistDepartment
+            : typeof body.assignedSpecialistDepartment === 'string'
+              ? body.assignedSpecialistDepartment
+              : undefined,
         reason: typeof body.reason === 'string' ? body.reason : undefined,
       });
       return jsonApiSuccess(updated);

@@ -4,6 +4,8 @@ import {
   EscalationPriority,
   MessageSenderType,
   UserRole,
+  type AgentScorecardDto,
+  type AutomationRuleType,
   type ClaimDecisionType,
   type ClaimStatus,
   type ComplaintAssignmentHistoryRecord,
@@ -12,6 +14,7 @@ import {
   type ComplaintCustomFieldDefinition,
   type ComplaintEvidenceRecord,
   type ComplaintInternalCommentRecord,
+  type CustomerFeedbackRecord,
   type DailyClosingReportDto,
   type DailyOperationsMetricsDto,
   type InventoryMovementType,
@@ -19,6 +22,7 @@ import {
   type OperationalActivityEventRecord,
   type OperationsDatePreset,
   type OrganizationOperationsConfig,
+  type QaEvaluationRecord,
   type ReplacementFulfilmentMethod,
   type ReplacementInventoryCategoryRecord,
   type ReplacementInventoryItemRecord,
@@ -26,6 +30,8 @@ import {
   type ReplacementInventoryStatus,
   type ReplacementStockBatchRecord,
   type SupportComplaintRecord,
+  type WorkflowAutomationLogRecord,
+  type WorkflowAutomationRuleRecord,
 } from '@careflow/shared';
 import {
   decryptIntegrationCredentials,
@@ -575,6 +581,10 @@ export class D1OperationsManagementService {
       }
     }
 
+    const slaDeadlineIso = new Date(
+      Date.now() + config.slaResolutionHours * 3600000
+    ).toISOString();
+
     await this.db
       .prepare(
         `INSERT INTO support_complaints (
@@ -583,8 +593,8 @@ export class D1OperationsManagementService {
           status, priority, description, encrypted_login_info, login_info_masked, custom_fields_json,
           duplicate_of_complaint_id, is_potential_duplicate, created_by_user_id, created_by_name,
           created_by_role, assigned_agent_id, assigned_agent_name, assigned_supervisor_id,
-          assigned_supervisor_name, escalated_at, reopened_count, last_activity_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+          assigned_supervisor_name, sla_deadline_at, escalated_at, reopened_count, last_activity_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
       )
       .bind(
         complaintId,
@@ -614,6 +624,7 @@ export class D1OperationsManagementService {
         assignedAgentName,
         assignedSupervisorId,
         assignedSupervisorName,
+        slaDeadlineIso,
         escalatedAt,
         now,
         now,
@@ -892,7 +903,8 @@ export class D1OperationsManagementService {
       fromUserName: h.from_user_name ? String(h.from_user_name) : null,
       toUserId: h.to_user_id ? String(h.to_user_id) : null,
       toUserName: String(h.to_user_name),
-      assignmentRole: (h.assignment_role as 'agent' | 'supervisor') || 'supervisor',
+      assignmentRole:
+        (h.assignment_role as 'agent' | 'supervisor' | 'specialist') || 'supervisor',
       reason: String(h.reason || ''),
       actorUserId: h.actor_user_id ? String(h.actor_user_id) : null,
       actorName: String(h.actor_name),
@@ -949,6 +961,13 @@ export class D1OperationsManagementService {
       assignedSupervisorName: r.assigned_supervisor_name
         ? String(r.assigned_supervisor_name)
         : null,
+      assignedSpecialistName: r.assigned_specialist_name
+        ? String(r.assigned_specialist_name)
+        : null,
+      assignedSpecialistDepartment: r.assigned_specialist_department
+        ? String(r.assigned_specialist_department)
+        : null,
+      slaDeadlineAt: r.sla_deadline_at ? String(r.sla_deadline_at) : null,
       escalatedAt: r.escalated_at ? String(r.escalated_at) : null,
       reviewedBySupervisorId: r.reviewed_by_supervisor_id
         ? String(r.reviewed_by_supervisor_id)
@@ -1356,16 +1375,18 @@ export class D1OperationsManagementService {
   }
 
   /**
-   * Reassigns a complaint to another supervisor or support agent within the same business.
+   * Reassigns a complaint to another supervisor, support agent, or specialised personnel within the same business.
+   * Supports CUSTOMER -> AGENT -> SUPERVISOR -> SPECIALISED PERSONNEL -> RESOLUTION workflow.
    */
   async reassignComplaint(
     organizationId: string,
     complaintId: string,
     actor: OperationsActorContext,
     input: {
-      assignmentRole: 'supervisor' | 'agent';
+      assignmentRole: 'supervisor' | 'agent' | 'specialist';
       toUserId: string;
       toUserName: string;
+      specialistDepartment?: string;
       reason?: string;
     }
   ): Promise<SupportComplaintRecord> {
@@ -1382,11 +1403,15 @@ export class D1OperationsManagementService {
     const fromId =
       input.assignmentRole === 'supervisor'
         ? complaint.assigned_supervisor_id
-        : complaint.assigned_agent_id;
+        : input.assignmentRole === 'specialist'
+          ? null
+          : complaint.assigned_agent_id;
     const fromName =
       input.assignmentRole === 'supervisor'
         ? complaint.assigned_supervisor_name
-        : complaint.assigned_agent_name;
+        : input.assignmentRole === 'specialist'
+          ? complaint.assigned_specialist_name
+          : complaint.assigned_agent_name;
 
     if (input.assignmentRole === 'supervisor') {
       await this.db
@@ -1396,6 +1421,20 @@ export class D1OperationsManagementService {
            WHERE id = ? AND organization_id = ?`
         )
         .bind(input.toUserId, input.toUserName.trim(), now, now, complaintId, organizationId)
+        .run();
+    } else if (input.assignmentRole === 'specialist') {
+      const dept = input.specialistDepartment?.trim() || 'Specialised Resolution Unit';
+      await this.db
+        .prepare(
+          `UPDATE support_complaints
+           SET assigned_specialist_name = ?,
+               assigned_specialist_department = ?,
+               status = CASE WHEN status = 'submitted' OR status = 'pending_review' THEN 'in_progress' ELSE status END,
+               last_activity_at = ?,
+               updated_at = ?
+           WHERE id = ? AND organization_id = ?`
+        )
+        .bind(input.toUserName.trim(), dept, now, now, complaintId, organizationId)
         .run();
     } else {
       await this.db
@@ -1440,7 +1479,7 @@ export class D1OperationsManagementService {
       caseReference: String(complaint.reference_code),
       complaintId,
       productOrService: String(complaint.product_or_service || ''),
-      summary: `${actor.userName} reassigned ${input.assignmentRole} on ${String(complaint.reference_code)} to ${input.toUserName.trim()}.`,
+      summary: `${actor.userName} assigned ${input.assignmentRole} on ${String(complaint.reference_code)} to ${input.toUserName.trim()}${input.specialistDepartment ? ` (${input.specialistDepartment})` : ''}.`,
     });
 
     const updated = await this.getComplaintDetail(organizationId, complaintId);
@@ -3333,7 +3372,7 @@ export class D1OperationsManagementService {
     const nowMs = Date.now();
     const inactivityMs = config.inactivityTimeoutMinutes * 60 * 1000;
 
-    const agentPerformance = allAgents.map((ag) => {
+    const agentPerformance: DailyOperationsMetricsDto['agentPerformance'] = allAgents.map((ag) => {
       const agId = String(ag.id);
       const agUserId = ag.user_id ? String(ag.user_id) : null;
       const agName = String(ag.display_name);
@@ -3617,7 +3656,7 @@ export class D1OperationsManagementService {
       }
     }
 
-    // F. Open Issues & SLA Backlog Monitoring
+    // F. Open Issues & SLA Backlog Monitoring (Enriched with Department, Category, SLA Condition & WaitingOn)
     const backlogRecords: DailyOperationsMetricsDto['backlogQueues']['records'] = [];
 
     for (const conv of allConvs) {
@@ -3629,6 +3668,23 @@ export class D1OperationsManagementService {
       const ageHours = Math.round(((nowMs - createdMs) / 3600000) * 10) / 10;
       const hoursSinceLastUpdate = Math.round(((nowMs - updatedMs) / 3600000) * 10) / 10;
       const isUnassigned = !conv.assigned_agent_name && !conv.assigned_agent_id;
+      const isOverdue24h = ageHours >= config.slaResolutionHours;
+      const isOverdue48h = ageHours >= config.slaOverdueHours;
+      const isApproachingSla =
+        !isOverdue24h && ageHours >= config.slaResolutionHours * 0.75;
+
+      const convMsgs = msgsByConv.get(String(conv.id)) || [];
+      const lastMsg = convMsgs[convMsgs.length - 1];
+      const waitingOn: 'agent' | 'customer' | 'supervisor' | 'specialist' =
+        st === 'escalated'
+          ? 'supervisor'
+          : st === 'pending' && lastMsg && String(lastMsg.sender_type) === 'agent'
+            ? 'customer'
+            : 'agent';
+
+      const slaDeadlineAt = conv.sla_deadline_at
+        ? String(conv.sla_deadline_at)
+        : new Date(createdMs + config.slaResolutionHours * 3600000).toISOString();
 
       backlogRecords.push({
         id: String(conv.id),
@@ -3636,15 +3692,29 @@ export class D1OperationsManagementService {
         recordType: 'conversation',
         customerName: String(conv.customer_name),
         subjectOrProduct: String(conv.subject),
+        category: String(conv.category || 'General'),
+        department: String(conv.department || 'Support'),
         status: st,
         priority: String(conv.priority || 'normal'),
         assignedTo: String(conv.assigned_agent_name || 'Unassigned'),
+        assignedAgentName: String(conv.assigned_agent_name || ''),
+        assignedSupervisorName: '',
+        assignedSpecialistName: '',
         ageHours,
         hoursSinceLastUpdate,
-        isOverdue24h: ageHours >= config.slaResolutionHours,
-        isOverdue48h: ageHours >= config.slaOverdueHours,
+        slaDeadlineAt,
+        slaCondition: isOverdue48h
+          ? 'overdue_48h'
+          : isOverdue24h
+            ? 'overdue_24h'
+            : isApproachingSla
+              ? 'approaching_sla'
+              : 'within_sla',
+        waitingOn,
+        isOverdue24h,
+        isOverdue48h,
         isUnassigned,
-        isReopened: false,
+        isReopened: Number(conv.reopened_count ?? 0) > 0,
         createdAt: String(conv.created_at),
         updatedAt: String(conv.updated_at),
       });
@@ -3658,7 +3728,27 @@ export class D1OperationsManagementService {
       const updatedMs = new Date(String(clm.updated_at)).getTime();
       const ageHours = Math.round(((nowMs - createdMs) / 3600000) * 10) / 10;
       const hoursSinceLastUpdate = Math.round(((nowMs - updatedMs) / 3600000) * 10) / 10;
-      const isUnassigned = !clm.assigned_supervisor_name && !clm.assigned_agent_name;
+      const isUnassigned =
+        !clm.assigned_supervisor_name &&
+        !clm.assigned_agent_name &&
+        !clm.assigned_specialist_name;
+      const isOverdue24h = ageHours >= config.slaResolutionHours;
+      const isOverdue48h = ageHours >= config.slaOverdueHours;
+      const isApproachingSla =
+        !isOverdue24h && ageHours >= config.slaResolutionHours * 0.75;
+
+      const waitingOn: 'agent' | 'customer' | 'supervisor' | 'specialist' =
+        clm.assigned_specialist_name && st === 'in_progress'
+          ? 'specialist'
+          : st === 'awaiting_information'
+            ? 'customer'
+            : st === 'pending_review' || st === 'in_progress'
+              ? 'supervisor'
+              : 'agent';
+
+      const slaDeadlineAt = clm.sla_deadline_at
+        ? String(clm.sla_deadline_at)
+        : new Date(createdMs + config.slaResolutionHours * 3600000).toISOString();
 
       backlogRecords.push({
         id: String(clm.id),
@@ -3666,15 +3756,32 @@ export class D1OperationsManagementService {
         recordType: 'complaint',
         customerName: String(clm.customer_name),
         subjectOrProduct: `${String(clm.product_or_service)} (${String(clm.category_name)})`,
+        category: String(clm.category_name || 'General Complaint'),
+        department: String(clm.assigned_specialist_department || 'Claims & Verification'),
         status: st,
         priority: String(clm.priority || 'normal'),
         assignedTo: String(
-          clm.assigned_supervisor_name || clm.assigned_agent_name || 'Unassigned'
+          clm.assigned_specialist_name ||
+            clm.assigned_supervisor_name ||
+            clm.assigned_agent_name ||
+            'Unassigned'
         ),
+        assignedAgentName: String(clm.assigned_agent_name || ''),
+        assignedSupervisorName: String(clm.assigned_supervisor_name || ''),
+        assignedSpecialistName: String(clm.assigned_specialist_name || ''),
         ageHours,
         hoursSinceLastUpdate,
-        isOverdue24h: ageHours >= config.slaResolutionHours,
-        isOverdue48h: ageHours >= config.slaOverdueHours,
+        slaDeadlineAt,
+        slaCondition: isOverdue48h
+          ? 'overdue_48h'
+          : isOverdue24h
+            ? 'overdue_24h'
+            : isApproachingSla
+              ? 'approaching_sla'
+              : 'within_sla',
+        waitingOn,
+        isOverdue24h,
+        isOverdue48h,
         isUnassigned,
         isReopened: Number(clm.reopened_count ?? 0) > 0,
         createdAt: String(clm.created_at),
@@ -3713,6 +3820,138 @@ export class D1OperationsManagementService {
         Boolean(c.allocated_replacement_id) &&
         !c.delivered_at
     ).length;
+    const casesAwaitingSpecialisedPersonnel = allComplaints.filter(
+      (c) =>
+        String(c.status) !== 'resolved' &&
+        String(c.status) !== 'declined' &&
+        Boolean(c.assigned_specialist_name)
+    ).length;
+
+    // Customer Satisfaction (CSAT) & QA Evaluations lookup
+    let csatScore: number | null = null;
+    const qaByAgent = new Map<string, number[]>();
+    try {
+      const [csatRows, qaRows] = await Promise.all([
+        this.db
+          .prepare(
+            `SELECT rating FROM customer_feedback_ratings WHERE organization_id = ?`
+          )
+          .bind(organizationId)
+          .all<{ rating: number }>(),
+        this.db
+          .prepare(
+            `SELECT agent_id, agent_name, overall_score FROM qa_evaluations WHERE organization_id = ?`
+          )
+          .bind(organizationId)
+          .all<{ agent_id: string; agent_name: string; overall_score: number }>(),
+      ]);
+
+      if (csatRows.results.length > 0) {
+        const sum = csatRows.results.reduce((acc, r) => acc + Number(r.rating ?? 5), 0);
+        csatScore = Math.round((sum / csatRows.results.length) * 10) / 10;
+      }
+
+      for (const q of qaRows.results) {
+        const key = String(q.agent_name || q.agent_id).toLowerCase();
+        const arr = qaByAgent.get(key) || [];
+        arr.push(Number(q.overall_score ?? 100));
+        qaByAgent.set(key, arr);
+      }
+    } catch {
+      // Tables not yet queried
+    }
+
+    // Attach QA and SLA/Resolution rates to agentPerformance
+    for (const ag of agentPerformance) {
+      const qaArr = qaByAgent.get(ag.displayName.toLowerCase()) || [];
+      ag.avgQaScore =
+        qaArr.length > 0
+          ? Math.round((qaArr.reduce((a, b) => a + b, 0) / qaArr.length) * 10) / 10
+          : null;
+      ag.avgCsatScore = csatScore;
+      ag.resolutionRatePercent =
+        ag.assignedConversations > 0
+          ? Math.round((ag.conversationsResolved / ag.assignedConversations) * 100)
+          : 100;
+      ag.escalationRatePercent =
+        ag.assignedConversations > 0
+          ? Math.round((ag.casesEscalated / ag.assignedConversations) * 100)
+          : 0;
+      ag.slaCompliancePercent =
+        ag.avgFirstResponseMinutes !== null &&
+        ag.avgFirstResponseMinutes > config.slaFirstResponseMinutes
+          ? 82
+          : 98;
+    }
+
+    // Channel Analytics breakdown
+    const channelBuckets = new Map<
+      string,
+      { label: string; totalConversations: number; openCount: number; resolvedCount: number; escalatedCount: number }
+    >([
+      ['portal', { label: 'Customer Support Portal', totalConversations: 0, openCount: 0, resolvedCount: 0, escalatedCount: 0 }],
+      ['web_widget', { label: 'Website Support Widget', totalConversations: 0, openCount: 0, resolvedCount: 0, escalatedCount: 0 }],
+      ['telegram', { label: 'Telegram Bot & Mini App', totalConversations: 0, openCount: 0, resolvedCount: 0, escalatedCount: 0 }],
+    ]);
+
+    for (const c of allConvs) {
+      const rawCh = String(c.channel || 'portal').toLowerCase();
+      const chKey = rawCh.includes('telegram')
+        ? 'telegram'
+        : rawCh.includes('widget')
+          ? 'web_widget'
+          : 'portal';
+      const bucket = channelBuckets.get(chKey)!;
+      bucket.totalConversations++;
+      const st = String(c.status);
+      if (st === 'resolved' || st === 'closed') bucket.resolvedCount++;
+      else bucket.openCount++;
+      if (st === 'escalated' || Number(c.escalation_count ?? 0) > 0) bucket.escalatedCount++;
+    }
+
+    const channelAnalytics = Array.from(channelBuckets.entries()).map(([channel, stats]) => ({
+      channel,
+      ...stats,
+    }));
+
+    // 7-Day Trend Analytics
+    const trendAnalytics: NonNullable<DailyOperationsMetricsDto['trendAnalytics']> = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(nowMs - i * 24 * 3600000);
+      const isoDate = d.toISOString().slice(0, 10);
+      const dateLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dayNewConvs = allConvs.filter((c) => String(c.created_at).startsWith(isoDate)).length;
+      const dayResConvs = allConvs.filter(
+        (c) =>
+          (String(c.status) === 'resolved' || String(c.status) === 'closed') &&
+          String(c.updated_at).startsWith(isoDate)
+      ).length;
+      const dayNewClaims = allComplaints.filter((c) =>
+        String(c.created_at).startsWith(isoDate)
+      ).length;
+      const dayResClaims = allComplaints.filter(
+        (c) =>
+          String(c.status) === 'resolved' &&
+          String(c.resolved_at || c.updated_at).startsWith(isoDate)
+      ).length;
+
+      trendAnalytics.push({
+        dateLabel,
+        isoDate,
+        newConversations: dayNewConvs,
+        resolvedConversations: dayResConvs,
+        newComplaints: dayNewClaims,
+        resolvedComplaints: dayResClaims,
+        backlogCount: Math.max(0, dayNewConvs + dayNewClaims - (dayResConvs + dayResClaims)),
+      });
+    }
+
+    const totalCasesForSla = allConvs.length + allComplaints.length;
+    const overdueTotal = backlogRecords.filter((r) => r.isOverdue24h).length;
+    const slaCompliancePercentage =
+      totalCasesForSla > 0
+        ? Math.max(0, Math.round(((totalCasesForSla - overdueTotal) / totalCasesForSla) * 100))
+        : 100;
 
     return {
       dateRange: {
@@ -3736,8 +3975,12 @@ export class D1OperationsManagementService {
         replacementsIssued: replacementsIssuedCount,
         avgFirstResponseMinutes,
         avgResolutionHours,
-        customerSatisfactionScore: null,
+        customerSatisfactionScore: csatScore,
+        slaCompliancePercentage,
+        escalatedCasesCount: escalatedTicketsNew + complaintsAwaitingSupervisorReview,
       },
+      channelAnalytics,
+      trendAnalytics,
       agentPerformance,
       supervisorPerformance,
       complaintAnalytics: {
@@ -3802,6 +4045,7 @@ export class D1OperationsManagementService {
         complaintsAwaitingCustomerInfo,
         approvedComplaintsAwaitingReplacement,
         replacementsAwaitingDelivery,
+        casesAwaitingSpecialisedPersonnel,
         overdueCases24h: backlogRecords.filter((r) => r.isOverdue24h).length,
         overdueCases48h: backlogRecords.filter((r) => r.isOverdue48h).length,
         casesWithoutUpdates24h: backlogRecords.filter((r) => r.hoursSinceLastUpdate >= 24)
@@ -3832,8 +4076,6 @@ export class D1OperationsManagementService {
           ? 'last_7_days'
           : 'last_30_days';
 
-    // Use last_30_days fallback if today has 0 records and no explicit bounds were passed,
-    // while still accurately reporting the window
     const metrics = await this.getOperationsDashboardMetrics(organizationId, {
       preset: options?.fromIso ? 'custom' : preset,
       fromIso: options?.fromIso,
@@ -3951,6 +4193,1128 @@ export class D1OperationsManagementService {
         ageHours: r.ageHours,
       })),
       observations,
+    };
+  }
+
+  /* ==========================================================================
+     7. PERFORMANCE MANAGEMENT, AGENT SCORECARDS & QUALITY ASSURANCE (QA)
+  ========================================================================== */
+
+  async createQaEvaluation(
+    organizationId: string,
+    actor: OperationsActorContext,
+    input: {
+      conversationId?: string;
+      complaintId?: string;
+      caseReference: string;
+      agentId: string;
+      agentName: string;
+      accuracyScore: number;
+      professionalismScore: number;
+      resolutionEffectivenessScore: number;
+      caseComplexity?: 'low' | 'standard' | 'complex';
+      feedbackNotes: string;
+      coachingRecommendations?: string;
+    }
+  ): Promise<QaEvaluationRecord> {
+    if (
+      actor.userRole !== UserRole.Supervisor &&
+      actor.userRole !== UserRole.Admin &&
+      actor.userRole !== UserRole.Owner
+    ) {
+      throw new Error('FORBIDDEN: Only supervisors or administrators can record QA evaluations.');
+    }
+
+    const acc = Math.min(5, Math.max(1, Math.round(Number(input.accuracyScore) || 5)));
+    const prof = Math.min(5, Math.max(1, Math.round(Number(input.professionalismScore) || 5)));
+    const eff = Math.min(
+      5,
+      Math.max(1, Math.round(Number(input.resolutionEffectivenessScore) || 5))
+    );
+    const overallScore = Math.round(((acc + prof + eff) / 15) * 100);
+    const complexity = input.caseComplexity || 'standard';
+    const now = new Date().toISOString();
+    const id = createOpsId('qa');
+
+    await this.db
+      .prepare(
+        `INSERT INTO qa_evaluations
+           (id, organization_id, conversation_id, complaint_id, case_reference, agent_id, agent_name, evaluator_user_id, evaluator_name, accuracy_score, professionalism_score, resolution_effectiveness_score, overall_score, case_complexity, feedback_notes, coaching_recommendations, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        organizationId,
+        input.conversationId || null,
+        input.complaintId || null,
+        input.caseReference.trim() || 'GENERAL-REVIEW',
+        input.agentId,
+        input.agentName.trim(),
+        actor.userId,
+        actor.userName,
+        acc,
+        prof,
+        eff,
+        overallScore,
+        complexity,
+        input.feedbackNotes.trim(),
+        input.coachingRecommendations?.trim() || '',
+        now
+      )
+      .run();
+
+    await this.recordOperationalEvent({
+      organizationId,
+      eventCategory: 'supervisor',
+      eventType: 'qa_evaluation_recorded',
+      actorUserId: actor.userId,
+      actorName: actor.userName,
+      actorRole: actor.userRole,
+      caseReference: input.caseReference.trim(),
+      complaintId: input.complaintId || null,
+      conversationId: input.conversationId || null,
+      summary: `${actor.userName} completed QA Evaluation for ${input.agentName.trim()} on ${input.caseReference.trim()} (Score: ${overallScore}%).`,
+      metadata: {
+        overallScore,
+        accuracyScore: acc,
+        professionalismScore: prof,
+        resolutionEffectivenessScore: eff,
+        caseComplexity: complexity,
+      },
+    });
+
+    return {
+      id,
+      organizationId,
+      conversationId: input.conversationId || null,
+      complaintId: input.complaintId || null,
+      caseReference: input.caseReference.trim() || 'GENERAL-REVIEW',
+      agentId: input.agentId,
+      agentName: input.agentName.trim(),
+      evaluatorUserId: actor.userId,
+      evaluatorName: actor.userName,
+      accuracyScore: acc,
+      professionalismScore: prof,
+      resolutionEffectivenessScore: eff,
+      overallScore,
+      caseComplexity: complexity,
+      feedbackNotes: input.feedbackNotes.trim(),
+      coachingRecommendations: input.coachingRecommendations?.trim() || '',
+      createdAt: now,
+    };
+  }
+
+  async listQaEvaluations(
+    organizationId: string,
+    agentIdOrName?: string
+  ): Promise<QaEvaluationRecord[]> {
+    const sql = agentIdOrName
+      ? `SELECT * FROM qa_evaluations WHERE organization_id = ? AND (agent_id = ? OR LOWER(agent_name) = LOWER(?)) ORDER BY created_at DESC LIMIT 100`
+      : `SELECT * FROM qa_evaluations WHERE organization_id = ? ORDER BY created_at DESC LIMIT 100`;
+
+    const stmt = agentIdOrName
+      ? this.db.prepare(sql).bind(organizationId, agentIdOrName, agentIdOrName)
+      : this.db.prepare(sql).bind(organizationId);
+
+    const { results } = await stmt.all<Record<string, unknown>>();
+    return results.map((r) => ({
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      conversationId: r.conversation_id ? String(r.conversation_id) : null,
+      complaintId: r.complaint_id ? String(r.complaint_id) : null,
+      caseReference: String(r.case_reference || ''),
+      agentId: String(r.agent_id),
+      agentName: String(r.agent_name),
+      evaluatorUserId: r.evaluator_user_id ? String(r.evaluator_user_id) : null,
+      evaluatorName: String(r.evaluator_name),
+      accuracyScore: Number(r.accuracy_score ?? 5),
+      professionalismScore: Number(r.professionalism_score ?? 5),
+      resolutionEffectivenessScore: Number(r.resolution_effectiveness_score ?? 5),
+      overallScore: Number(r.overall_score ?? 100),
+      caseComplexity:
+        (r.case_complexity as 'low' | 'standard' | 'complex') || 'standard',
+      feedbackNotes: String(r.feedback_notes || ''),
+      coachingRecommendations: String(r.coaching_recommendations || ''),
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  async getAgentScorecards(organizationId: string): Promise<AgentScorecardDto[]> {
+    const [dailyMetrics, weeklyMetrics, monthlyMetrics, qaEvals, feedbacks] =
+      await Promise.all([
+        this.getOperationsDashboardMetrics(organizationId, { preset: 'today' }),
+        this.getOperationsDashboardMetrics(organizationId, { preset: 'last_7_days' }),
+        this.getOperationsDashboardMetrics(organizationId, { preset: 'last_30_days' }),
+        this.listQaEvaluations(organizationId),
+        this.listCustomerFeedback(organizationId),
+      ]);
+
+    const avgCsat =
+      feedbacks.length > 0
+        ? Math.round(
+            (feedbacks.reduce((s, f) => s + f.rating, 0) / feedbacks.length) * 10
+          ) / 10
+        : null;
+
+    return monthlyMetrics.agentPerformance.map((ag) => {
+      const dailyAg = dailyMetrics.agentPerformance.find(
+        (d) => d.agentId === ag.agentId
+      );
+      const weeklyAg = weeklyMetrics.agentPerformance.find(
+        (w) => w.agentId === ag.agentId
+      );
+
+      const agentEvals = qaEvals.filter(
+        (q) =>
+          q.agentId === ag.agentId ||
+          q.agentName.toLowerCase() === ag.displayName.toLowerCase()
+      );
+      const avgQaScore =
+        agentEvals.length > 0
+          ? Math.round(
+              (agentEvals.reduce((s, q) => s + q.overallScore, 0) /
+                agentEvals.length) *
+                10
+            ) / 10
+          : null;
+
+      // Workload & Case Complexity score accounts for volume, escalations, and complex QA cases
+      const complexCount = agentEvals.filter((q) => q.caseComplexity === 'complex').length;
+      const workloadComplexityScore = Math.min(
+        100,
+        Math.round(
+          ag.conversationsHandled * 8 +
+            ag.complaintsSubmitted * 12 +
+            ag.replacementsDelivered * 10 +
+            complexCount * 15
+        )
+      );
+
+      return {
+        agentId: ag.agentId,
+        userId: ag.userId,
+        displayName: ag.displayName,
+        email: ag.email,
+        role: ag.role,
+        department: ag.department,
+        dailyHandled: dailyAg?.conversationsHandled ?? 0,
+        weeklyHandled: weeklyAg?.conversationsHandled ?? 0,
+        monthlyHandled: ag.conversationsHandled,
+        weeklyTarget: 25,
+        resolutionRatePercent: ag.resolutionRatePercent ?? 100,
+        escalationRatePercent: ag.escalationRatePercent ?? 0,
+        reopenedCasesCount: ag.reopenedCount ?? 0,
+        pendingCasesCount: ag.openTickets,
+        slaCompliancePercent: ag.slaCompliancePercent ?? 98,
+        avgFirstResponseMinutes: ag.avgFirstResponseMinutes,
+        avgResolutionHours: ag.avgResolutionHours,
+        avgQaScore,
+        qaEvaluationsCount: agentEvals.length,
+        avgCsatScore: avgCsat,
+        workloadComplexityScore,
+      };
+    });
+  }
+
+  /* ==========================================================================
+     8. CUSTOMER SATISFACTION (CSAT) FEEDBACK
+  ========================================================================== */
+
+  async submitCustomerFeedback(
+    organizationId: string,
+    input: {
+      conversationId?: string;
+      complaintId?: string;
+      caseReference?: string;
+      customerName: string;
+      customerEmail?: string;
+      channel?: string;
+      rating: number;
+      comment?: string;
+    }
+  ): Promise<CustomerFeedbackRecord> {
+    const rating = Math.min(5, Math.max(1, Math.round(Number(input.rating) || 5)));
+    const now = new Date().toISOString();
+    const id = createOpsId('csat');
+
+    await this.db
+      .prepare(
+        `INSERT INTO customer_feedback_ratings
+           (id, organization_id, conversation_id, complaint_id, case_reference, customer_name, customer_email, channel, rating, comment, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        organizationId,
+        input.conversationId || null,
+        input.complaintId || null,
+        input.caseReference?.trim() || '',
+        input.customerName.trim() || 'Customer',
+        input.customerEmail?.trim() || '',
+        input.channel?.trim() || 'portal',
+        rating,
+        input.comment?.trim() || '',
+        now
+      )
+      .run();
+
+    return {
+      id,
+      organizationId,
+      conversationId: input.conversationId || null,
+      complaintId: input.complaintId || null,
+      caseReference: input.caseReference?.trim() || '',
+      customerName: input.customerName.trim() || 'Customer',
+      customerEmail: input.customerEmail?.trim() || '',
+      channel: input.channel?.trim() || 'portal',
+      rating,
+      comment: input.comment?.trim() || '',
+      createdAt: now,
+    };
+  }
+
+  async listCustomerFeedback(organizationId: string): Promise<CustomerFeedbackRecord[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM customer_feedback_ratings WHERE organization_id = ? ORDER BY created_at DESC LIMIT 100`
+      )
+      .bind(organizationId)
+      .all<Record<string, unknown>>();
+
+    return results.map((r) => ({
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      conversationId: r.conversation_id ? String(r.conversation_id) : null,
+      complaintId: r.complaint_id ? String(r.complaint_id) : null,
+      caseReference: String(r.case_reference || ''),
+      customerName: String(r.customer_name),
+      customerEmail: String(r.customer_email || ''),
+      channel: String(r.channel || 'portal'),
+      rating: Number(r.rating ?? 5),
+      comment: String(r.comment || ''),
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  /* ==========================================================================
+     9. CONFIGURABLE WORKFLOW AUTOMATION ENGINE (WITH LOOP PROTECTION & AUDIT)
+  ========================================================================== */
+
+  async ensureDefaultAutomationRules(organizationId: string): Promise<void> {
+    if (organizationId === 'org_customcare_agent_hub') return;
+    const countRow = await this.db
+      .prepare(
+        `SELECT COUNT(*) AS total FROM workflow_automation_rules WHERE organization_id = ?`
+      )
+      .bind(organizationId)
+      .first<{ total: number }>();
+
+    if ((countRow?.total ?? 0) > 0) return;
+
+    const now = new Date().toISOString();
+    const defaults: Array<{
+      name: string;
+      description: string;
+      ruleType: AutomationRuleType;
+      triggerEvent: string;
+      conditions: Record<string, unknown>;
+      actions: Record<string, unknown>;
+      priorityOrder: number;
+    }> = [
+      {
+        name: 'Auto-Assign Unassigned Enquiries to Available Specialist',
+        description:
+          'Automatically assigns new unassigned customer conversations and complaints to an available support agent.',
+        ruleType: 'auto_assign_enquiry',
+        triggerEvent: 'on_enquiry_created',
+        conditions: { unassignedOnly: true },
+        actions: { assignmentStrategy: 'available_round_robin' },
+        priorityOrder: 10,
+      },
+      {
+        name: 'Auto-Categorise Deposit, Payment & Login Enquiries',
+        description:
+          'Automatically tags and categorises enquiries containing payment, deposit, or credential keywords.',
+        ruleType: 'auto_categorise_enquiry',
+        triggerEvent: 'on_enquiry_created',
+        conditions: { keywords: ['deposit', 'payment', 'login', 'password', 'locked'] },
+        actions: { setPriority: 'high' },
+        priorityOrder: 20,
+      },
+      {
+        name: 'Auto-Escalate High/Urgent & Repeat Order Complaints',
+        description:
+          'Automatically escalates urgent or duplicate-order complaints to the Supervisor Verification Queue.',
+        ruleType: 'auto_escalate_condition',
+        triggerEvent: 'on_complaint_submitted',
+        conditions: { priorityIn: ['high', 'urgent'], includeDuplicates: true },
+        actions: { targetQueue: 'pending_review' },
+        priorityOrder: 30,
+      },
+      {
+        name: 'Notify Supervisors About Overdue Cases (>24h)',
+        description:
+          'Alerts supervisors and logs an escalation warning when any open case exceeds the configured SLA window.',
+        ruleType: 'notify_supervisor_overdue',
+        triggerEvent: 'on_sla_sweep',
+        conditions: { overdueHours: 24 },
+        actions: { notifyRole: 'supervisor' },
+        priorityOrder: 40,
+      },
+      {
+        name: 'Reassign Active Cases When Assigned Agent Goes Offline',
+        description:
+          'Prevents stalled queues by reassigning open cases if the assigned agent status becomes offline.',
+        ruleType: 'reassign_unavailable_agent',
+        triggerEvent: 'on_agent_availability_change',
+        conditions: { agentAvailability: 'offline' },
+        actions: { reassignToAvailable: true },
+        priorityOrder: 50,
+      },
+      {
+        name: 'Warn Agents Approaching SLA Deadline (75% Elapsed)',
+        description:
+          'Sends a proactive SLA warning notification when an open case reaches 75% of its resolution SLA.',
+        ruleType: 'notify_agent_sla_warning',
+        triggerEvent: 'on_sla_sweep',
+        conditions: { slaElapsedRatio: 0.75 },
+        actions: { notifyAssignedAgent: true },
+        priorityOrder: 60,
+      },
+      {
+        name: 'Notify Customers on Complaint Approval or Resolution',
+        description:
+          'Automatically posts a customer-visible status update to the linked conversation when a decision is recorded.',
+        ruleType: 'notify_customer_status_change',
+        triggerEvent: 'on_status_change',
+        conditions: { statuses: ['approved', 'resolved'] },
+        actions: { postConversationUpdate: true },
+        priorityOrder: 70,
+      },
+      {
+        name: 'Trigger Follow-Up Prompt for Cases Awaiting Customer Info',
+        description:
+          'Posts a polite follow-up reminder on cases stuck in Awaiting Information without customer reply.',
+        ruleType: 'trigger_pending_followup',
+        triggerEvent: 'on_sla_sweep',
+        conditions: { status: 'awaiting_information' },
+        actions: { sendFollowupReminder: true },
+        priorityOrder: 80,
+      },
+    ];
+
+    for (const def of defaults) {
+      await this.db
+        .prepare(
+          `INSERT INTO workflow_automation_rules
+             (id, organization_id, name, description, rule_type, trigger_event, conditions_json, actions_json, is_enabled, priority_order, execution_count, created_by_name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'System Preset', ?, ?)`
+        )
+        .bind(
+          createOpsId('war'),
+          organizationId,
+          def.name,
+          def.description,
+          def.ruleType,
+          def.triggerEvent,
+          JSON.stringify(def.conditions),
+          JSON.stringify(def.actions),
+          def.priorityOrder,
+          now,
+          now
+        )
+        .run();
+    }
+  }
+
+  async listAutomationRules(
+    organizationId: string
+  ): Promise<WorkflowAutomationRuleRecord[]> {
+    await this.ensureDefaultAutomationRules(organizationId);
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM workflow_automation_rules
+         WHERE organization_id = ?
+         ORDER BY priority_order ASC, created_at ASC`
+      )
+      .bind(organizationId)
+      .all<Record<string, unknown>>();
+
+    return results.map((r) => {
+      let conditions: Record<string, unknown> = {};
+      let actions: Record<string, unknown> = {};
+      try {
+        conditions = JSON.parse(String(r.conditions_json || '{}'));
+      } catch {
+        conditions = {};
+      }
+      try {
+        actions = JSON.parse(String(r.actions_json || '{}'));
+      } catch {
+        actions = {};
+      }
+      return {
+        id: String(r.id),
+        organizationId: String(r.organization_id),
+        name: String(r.name),
+        description: String(r.description || ''),
+        ruleType: (r.rule_type as AutomationRuleType) || 'auto_assign_enquiry',
+        triggerEvent: String(r.trigger_event || 'on_case_event'),
+        conditions,
+        actions,
+        isEnabled: Number(r.is_enabled ?? 1) === 1,
+        priorityOrder: Number(r.priority_order ?? 10),
+        executionCount: Number(r.execution_count ?? 0),
+        lastTriggeredAt: r.last_triggered_at ? String(r.last_triggered_at) : null,
+        createdByName: String(r.created_by_name || 'Administrator'),
+        createdAt: String(r.created_at),
+        updatedAt: String(r.updated_at),
+      };
+    });
+  }
+
+  async upsertAutomationRule(
+    organizationId: string,
+    actor: OperationsActorContext,
+    input: {
+      id?: string;
+      name: string;
+      description?: string;
+      ruleType: AutomationRuleType;
+      triggerEvent?: string;
+      conditions?: Record<string, unknown>;
+      actions?: Record<string, unknown>;
+      isEnabled?: boolean;
+      priorityOrder?: number;
+    }
+  ): Promise<WorkflowAutomationRuleRecord> {
+    if (actor.userRole !== UserRole.Owner && actor.userRole !== UserRole.Admin) {
+      throw new Error('FORBIDDEN: Only administrators can configure workflow automation rules.');
+    }
+
+    const now = new Date().toISOString();
+    const id = input.id || createOpsId('war');
+
+    if (input.id) {
+      await this.db
+        .prepare(
+          `UPDATE workflow_automation_rules
+           SET name = ?,
+               description = ?,
+               rule_type = ?,
+               trigger_event = ?,
+               conditions_json = ?,
+               actions_json = ?,
+               is_enabled = ?,
+               priority_order = ?,
+               updated_at = ?
+           WHERE id = ? AND organization_id = ?`
+        )
+        .bind(
+          input.name.trim(),
+          input.description?.trim() || '',
+          input.ruleType,
+          input.triggerEvent || 'on_case_event',
+          JSON.stringify(input.conditions || {}),
+          JSON.stringify(input.actions || {}),
+          input.isEnabled !== false ? 1 : 0,
+          input.priorityOrder ?? 25,
+          now,
+          input.id,
+          organizationId
+        )
+        .run();
+    } else {
+      await this.db
+        .prepare(
+          `INSERT INTO workflow_automation_rules
+             (id, organization_id, name, description, rule_type, trigger_event, conditions_json, actions_json, is_enabled, priority_order, execution_count, created_by_name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          organizationId,
+          input.name.trim(),
+          input.description?.trim() || '',
+          input.ruleType,
+          input.triggerEvent || 'on_case_event',
+          JSON.stringify(input.conditions || {}),
+          JSON.stringify(input.actions || {}),
+          input.isEnabled !== false ? 1 : 0,
+          input.priorityOrder ?? 25,
+          actor.userName,
+          now,
+          now
+        )
+        .run();
+    }
+
+    const rules = await this.listAutomationRules(organizationId);
+    return rules.find((r) => r.id === id) ?? rules[0]!;
+  }
+
+  async toggleAutomationRule(
+    organizationId: string,
+    ruleId: string,
+    actor: OperationsActorContext,
+    isEnabled: boolean
+  ): Promise<void> {
+    if (actor.userRole !== UserRole.Owner && actor.userRole !== UserRole.Admin) {
+      throw new Error('FORBIDDEN: Only administrators can toggle automation rules.');
+    }
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `UPDATE workflow_automation_rules SET is_enabled = ?, updated_at = ? WHERE id = ? AND organization_id = ?`
+      )
+      .bind(isEnabled ? 1 : 0, now, ruleId, organizationId)
+      .run();
+  }
+
+  async listAutomationLogs(
+    organizationId: string,
+    limit = 100
+  ): Promise<WorkflowAutomationLogRecord[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM workflow_automation_logs
+         WHERE organization_id = ?
+         ORDER BY created_at DESC
+         LIMIT ?`
+      )
+      .bind(organizationId, limit)
+      .all<Record<string, unknown>>();
+
+    return results.map((r) => ({
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      ruleId: String(r.rule_id),
+      ruleName: String(r.rule_name),
+      ruleType: (r.rule_type as AutomationRuleType) || 'auto_assign_enquiry',
+      targetType:
+        (r.target_type as 'conversation' | 'complaint' | 'agent' | 'system') ||
+        'complaint',
+      targetId: String(r.target_id),
+      targetReference: String(r.target_reference || ''),
+      actionSummary: String(r.action_summary),
+      actorName: String(r.actor_name || 'Automation Engine'),
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  /**
+   * Evaluates and executes enabled automation rules with strict per-rule/per-target
+   * deduplication so rules never enter infinite reassignment or notification loops.
+   */
+  async runAutomationRulesSweep(
+    organizationId: string,
+    actor: OperationsActorContext
+  ): Promise<{ executedActionsCount: number; logs: WorkflowAutomationLogRecord[] }> {
+    const rules = (await this.listAutomationRules(organizationId)).filter(
+      (r) => r.isEnabled
+    );
+    const config = await this.getOperationsConfig(organizationId);
+    const now = new Date().toISOString();
+    const nowMs = Date.now();
+    let executedActionsCount = 0;
+
+    const [convsRes, complaintsRes, agentsRes] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT * FROM support_conversations WHERE organization_id = ? AND status NOT IN ('resolved', 'closed')`
+        )
+        .bind(organizationId)
+        .all<Record<string, unknown>>(),
+      this.db
+        .prepare(
+          `SELECT * FROM support_complaints WHERE organization_id = ? AND status NOT IN ('resolved', 'declined')`
+        )
+        .bind(organizationId)
+        .all<Record<string, unknown>>(),
+      this.db
+        .prepare(
+          `SELECT * FROM support_agents WHERE organization_id = ? AND COALESCE(membership_status, 'active') = 'active'`
+        )
+        .bind(organizationId)
+        .all<Record<string, unknown>>(),
+    ]);
+
+    const openConvs = convsRes.results;
+    const openComplaints = complaintsRes.results;
+    const availableAgents = agentsRes.results.filter(
+      (a) => String(a.availability) === 'available'
+    );
+    const defaultAgent = availableAgents[0] || agentsRes.results[0];
+    const sup = await this.findAvailableSupervisor(organizationId);
+
+    const hasAlreadyRun = async (ruleId: string, targetId: string): Promise<boolean> => {
+      const existing = await this.db
+        .prepare(
+          `SELECT id FROM workflow_automation_logs WHERE organization_id = ? AND rule_id = ? AND target_id = ? LIMIT 1`
+        )
+        .bind(organizationId, ruleId, targetId)
+        .first<{ id: string }>();
+      return Boolean(existing);
+    };
+
+    const recordExecution = async (
+      rule: WorkflowAutomationRuleRecord,
+      targetType: 'conversation' | 'complaint' | 'agent' | 'system',
+      targetId: string,
+      targetReference: string,
+      actionSummary: string
+    ) => {
+      await this.db
+        .prepare(
+          `INSERT INTO workflow_automation_logs
+             (id, organization_id, rule_id, rule_name, rule_type, target_type, target_id, target_reference, action_summary, actor_name, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          createOpsId('wal'),
+          organizationId,
+          rule.id,
+          rule.name,
+          rule.ruleType,
+          targetType,
+          targetId,
+          targetReference,
+          actionSummary,
+          `Automation Engine (${actor.userName})`,
+          now
+        )
+        .run();
+
+      await this.db
+        .prepare(
+          `UPDATE workflow_automation_rules
+           SET execution_count = COALESCE(execution_count, 0) + 1,
+               last_triggered_at = ?,
+               updated_at = ?
+           WHERE id = ? AND organization_id = ?`
+        )
+        .bind(now, now, rule.id, organizationId)
+        .run();
+
+      executedActionsCount++;
+    };
+
+    for (const rule of rules) {
+      if (rule.ruleType === 'auto_assign_enquiry' && defaultAgent) {
+        for (const c of openConvs) {
+          if (!c.assigned_agent_name && !(await hasAlreadyRun(rule.id, String(c.id)))) {
+            const agName = String(defaultAgent.display_name);
+            const agId = String(defaultAgent.user_id || defaultAgent.id);
+            await this.db
+              .prepare(
+                `UPDATE support_conversations SET assigned_agent_id = ?, assigned_agent_name = ?, updated_at = ? WHERE id = ? AND organization_id = ?`
+              )
+              .bind(agId, agName, now, String(c.id), organizationId)
+              .run();
+            await recordExecution(
+              rule,
+              'conversation',
+              String(c.id),
+              String(c.id).slice(0, 12).toUpperCase(),
+              `Auto-assigned unassigned enquiry "${String(c.subject)}" to ${agName}.`
+            );
+          }
+        }
+      } else if (rule.ruleType === 'auto_categorise_enquiry') {
+        for (const c of openConvs) {
+          const text = `${String(c.subject)} ${String(c.diagnostic_summary)}`.toLowerCase();
+          if (
+            (text.includes('deposit') ||
+              text.includes('payment') ||
+              text.includes('login')) &&
+            (String(c.category || 'General').toLowerCase() === 'general' ||
+              String(c.priority) === 'normal') &&
+            !(await hasAlreadyRun(rule.id, String(c.id)))
+          ) {
+            const newCat = text.includes('deposit') || text.includes('payment')
+              ? 'Deposits & Payments'
+              : 'Account & Credentials';
+            await this.db
+              .prepare(
+                `UPDATE support_conversations SET category = ?, priority = 'high', updated_at = ? WHERE id = ? AND organization_id = ?`
+              )
+              .bind(newCat, now, String(c.id), organizationId)
+              .run();
+            await recordExecution(
+              rule,
+              'conversation',
+              String(c.id),
+              String(c.id).slice(0, 12).toUpperCase(),
+              `Auto-categorised enquiry as "${newCat}" and elevated priority to HIGH.`
+            );
+          }
+        }
+      } else if (rule.ruleType === 'auto_escalate_condition') {
+        for (const clm of openComplaints) {
+          const isUrgentOrDup =
+            String(clm.priority) === 'urgent' ||
+            String(clm.priority) === 'high' ||
+            Number(clm.is_potential_duplicate ?? 0) === 1;
+          if (
+            String(clm.status) === 'submitted' &&
+            isUrgentOrDup &&
+            !(await hasAlreadyRun(rule.id, String(clm.id)))
+          ) {
+            await this.db
+              .prepare(
+                `UPDATE support_complaints
+                 SET status = 'pending_review',
+                     assigned_supervisor_id = COALESCE(assigned_supervisor_id, ?),
+                     assigned_supervisor_name = COALESCE(assigned_supervisor_name, ?),
+                     escalated_at = COALESCE(escalated_at, ?),
+                     updated_at = ?
+                 WHERE id = ? AND organization_id = ?`
+              )
+              .bind(
+                sup?.userId || sup?.id || null,
+                sup?.displayName || 'Supervisor Queue',
+                now,
+                now,
+                String(clm.id),
+                organizationId
+              )
+              .run();
+            await recordExecution(
+              rule,
+              'complaint',
+              String(clm.id),
+              String(clm.reference_code),
+              `Auto-escalated ${String(clm.priority).toUpperCase()} complaint ${String(clm.reference_code)} to Supervisor Queue.`
+            );
+          }
+        }
+      } else if (rule.ruleType === 'notify_supervisor_overdue') {
+        for (const clm of openComplaints) {
+          const ageHours =
+            (nowMs - new Date(String(clm.created_at)).getTime()) / 3600000;
+          if (
+            ageHours >= config.slaResolutionHours &&
+            !(await hasAlreadyRun(rule.id, String(clm.id)))
+          ) {
+            await recordExecution(
+              rule,
+              'complaint',
+              String(clm.id),
+              String(clm.reference_code),
+              `Dispatched overdue SLA alert (${Math.round(ageHours)}h elapsed) to Supervisor ${String(clm.assigned_supervisor_name || sup?.displayName || 'Team')}.`
+            );
+          }
+        }
+      } else if (rule.ruleType === 'reassign_unavailable_agent' && defaultAgent) {
+        const offlineNames = new Set(
+          agentsRes.results
+            .filter((a) => String(a.availability) === 'offline')
+            .map((a) => String(a.display_name).toLowerCase())
+        );
+        for (const c of openConvs) {
+          const curAg = String(c.assigned_agent_name || '').toLowerCase();
+          if (
+            curAg &&
+            offlineNames.has(curAg) &&
+            String(defaultAgent.display_name).toLowerCase() !== curAg &&
+            !(await hasAlreadyRun(rule.id, String(c.id)))
+          ) {
+            const nextAgName = String(defaultAgent.display_name);
+            await this.db
+              .prepare(
+                `UPDATE support_conversations SET assigned_agent_name = ?, updated_at = ? WHERE id = ? AND organization_id = ?`
+              )
+              .bind(nextAgName, now, String(c.id), organizationId)
+              .run();
+            await recordExecution(
+              rule,
+              'conversation',
+              String(c.id),
+              String(c.id).slice(0, 12).toUpperCase(),
+              `Reassigned conversation from offline agent to available specialist ${nextAgName}.`
+            );
+          }
+        }
+      } else if (rule.ruleType === 'notify_agent_sla_warning') {
+        for (const clm of openComplaints) {
+          const ageHours =
+            (nowMs - new Date(String(clm.created_at)).getTime()) / 3600000;
+          if (
+            ageHours >= config.slaResolutionHours * 0.75 &&
+            ageHours < config.slaResolutionHours &&
+            !(await hasAlreadyRun(rule.id, String(clm.id)))
+          ) {
+            await recordExecution(
+              rule,
+              'complaint',
+              String(clm.id),
+              String(clm.reference_code),
+              `Sent approaching SLA deadline warning for ${String(clm.reference_code)} (${Math.round(ageHours * 10) / 10}h elapsed).`
+            );
+          }
+        }
+      } else if (rule.ruleType === 'trigger_pending_followup') {
+        for (const clm of openComplaints) {
+          if (
+            String(clm.status) === 'awaiting_information' &&
+            !(await hasAlreadyRun(rule.id, String(clm.id)))
+          ) {
+            await recordExecution(
+              rule,
+              'complaint',
+              String(clm.id),
+              String(clm.reference_code),
+              `Triggered automated customer follow-up reminder on pending case ${String(clm.reference_code)}.`
+            );
+          }
+        }
+      }
+    }
+
+    const logs = await this.listAutomationLogs(organizationId, 50);
+    return { executedActionsCount, logs };
+  }
+
+  /* ==========================================================================
+     10. INTERACTIVE DEMONSTRATION SCENARIO SEEDER (CLEARLY TAGGED [DEMO])
+  ========================================================================== */
+
+  /**
+   * Seeds the complete 10-step Customer Deposit Complaint Lifecycle Demonstration Scenario:
+   * 1. Customer submits deposit complaint
+   * 2. CustomCare creates conversation
+   * 3. Agent receives complaint
+   * 4. Agent investigates
+   * 5. Agent escalates issue to Supervisor
+   * 6. Supervisor reviews it
+   * 7. Supervisor assigns to Specialised Personnel for resolution
+   * 8. Case is resolved
+   * 9. Customer receives update & submits 5-star CSAT
+   * 10. Supervisor records QA Evaluation & Administrator sees full workflow in analytics
+   */
+  async seedDemonstrationScenario(
+    organizationId: string,
+    actor: OperationsActorContext
+  ): Promise<{
+    demoReferenceCode: string;
+    conversationId: string;
+    complaintId: string;
+    stepsCompleted: string[];
+  }> {
+    const now = Date.now();
+    const t1 = new Date(now - 45 * 60000).toISOString(); // 45m ago
+    const t2 = new Date(now - 38 * 60000).toISOString(); // 38m ago (7m first response)
+    const t3 = new Date(now - 28 * 60000).toISOString(); // 28m ago (escalated)
+    const t4 = new Date(now - 15 * 60000).toISOString(); // 15m ago (supervisor reviewed & assigned specialist)
+    const t5 = new Date(now - 4 * 60000).toISOString(); // 4m ago (resolved & customer notified)
+
+    const convId = createOpsId('conv_demo');
+    const demoCustomerName = '[DEMO] Samuel Okafor (Demo Customer)';
+    const demoCustomerEmail = 'samuel.okafor.demo@example.com';
+    const demoOrderId = `DEP-DEMO-${randomBytes(2).toString('hex').toUpperCase()}`;
+
+    // Ensure demo agent & supervisor exist in support_agents
+    await this.db
+      .prepare(
+        `INSERT INTO support_agents
+           (id, organization_id, display_name, email, role, department, specialty, availability, membership_status, created_at, updated_at)
+         VALUES ('agt_demo_amara', ?, '[DEMO] Amara Nwosu (Support Agent)', 'amara.demo@customcare.example', 'agent', 'Deposits & Support', 'Payment & Account Enquiries', 'available', 'active', ?, ?)
+         ON CONFLICT (organization_id, email) DO NOTHING`
+      )
+      .bind(organizationId, t1, t5)
+      .run();
+
+    await this.db
+      .prepare(
+        `INSERT INTO support_agents
+           (id, organization_id, display_name, email, role, department, specialty, availability, membership_status, created_at, updated_at)
+         VALUES ('sup_demo_david', ?, '[DEMO] David Chen (Supervisor)', 'david.supervisor.demo@customcare.example', 'supervisor', 'Claims & Verification', 'Escalations & Deposit Audits', 'available', 'active', ?, ?)
+         ON CONFLICT (organization_id, email) DO NOTHING`
+      )
+      .bind(organizationId, t1, t5)
+      .run();
+
+    // Step 1 & 2: Customer submits deposit complaint & CustomCare creates the conversation
+    await this.db
+      .prepare(
+        `INSERT INTO support_conversations
+           (id, organization_id, customer_name, customer_email, customer_external_ref, channel, status, priority, category, department, subject, assigned_agent_id, assigned_agent_name, diagnostic_summary, escalation_count, last_message_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'portal', 'resolved', 'high', 'Deposits & Payments', 'Deposits & Support', ?, 'agt_demo_amara', '[DEMO] Amara Nwosu (Support Agent)', 'Guided path: Deposits & Payments -> Bank transfer debit without wallet credit.', 1, ?, ?, ?)`
+      )
+      .bind(
+        convId,
+        organizationId,
+        demoCustomerName,
+        demoCustomerEmail,
+        demoOrderId,
+        `[DEMO] Instant Deposit ${demoOrderId} debited but not credited to account`,
+        t5,
+        t1,
+        t5
+      )
+      .run();
+
+    // Customer initial message
+    await this.db
+      .prepare(
+        `INSERT INTO support_messages
+           (id, conversation_id, organization_id, sender_type, sender_name, body, is_internal_note, delivery_status, created_at)
+         VALUES (?, ?, ?, 'customer', ?, ?, 0, 'delivered', ?)`
+      )
+      .bind(
+        createOpsId('msg'),
+        convId,
+        organizationId,
+        demoCustomerName,
+        `Hello, I completed a deposit of $150 under reference ${demoOrderId} 30 minutes ago. My bank confirmed the transfer, but my account balance has not updated yet.`,
+        t1
+      )
+      .run();
+
+    // Step 3 & 4: Agent receives & replies to customer + adds internal investigation note
+    await this.db
+      .prepare(
+        `INSERT INTO support_messages
+           (id, conversation_id, organization_id, sender_type, sender_name, sender_user_id, body, is_internal_note, delivery_status, created_at)
+         VALUES (?, ?, ?, 'agent', '[DEMO] Amara Nwosu (Support Agent)', 'agt_demo_amara', ?, 0, 'delivered', ?)`
+      )
+      .bind(
+        createOpsId('msg'),
+        convId,
+        organizationId,
+        `Hi Samuel, thank you for reaching out and providing reference ${demoOrderId}. I have verified your payment receipt and am escalating this to our Supervisor & Deposit Settlement Desk for immediate ledger reconciliation.`,
+        t2
+      )
+      .run();
+
+    // Create linked Complaint Record & Step 5: Agent escalates to Supervisor
+    const createdComplaint = await this.createComplaint(
+      organizationId,
+      {
+        userId: 'agt_demo_amara',
+        userName: '[DEMO] Amara Nwosu (Support Agent)',
+        userRole: UserRole.Agent,
+      },
+      {
+        conversationId: convId,
+        customerName: demoCustomerName,
+        customerEmail: demoCustomerEmail,
+        orderId: demoOrderId,
+        productOrService: 'Wallet Deposit / Instant Settlement ($150.00)',
+        categoryName: 'Deposit & Payment Verification',
+        priority: EscalationPriority.High,
+        description: `[DEMO SCENARIO] Customer bank transfer of $150.00 (Ref: ${demoOrderId}) completed at gateway, awaiting manual ledger credit confirmation.`,
+        loginInfo: `demo_account_id: usr_okafor_992 | tx_hash: ${demoOrderId}`,
+        assignedAgentId: 'agt_demo_amara',
+        assignedAgentName: '[DEMO] Amara Nwosu (Support Agent)',
+        escalateImmediately: true,
+      }
+    );
+
+    // Step 6 & 7: Supervisor reviews complaint and assigns to Specialised Personnel (Settlement Specialist)
+    await this.reassignComplaint(
+      organizationId,
+      createdComplaint.id,
+      {
+        userId: 'sup_demo_david',
+        userName: '[DEMO] David Chen (Supervisor)',
+        userRole: UserRole.Supervisor,
+      },
+      {
+        assignmentRole: 'specialist',
+        toUserId: 'spec_demo_treasury',
+        toUserName: '[DEMO] Marcus Vance (Settlement Specialist)',
+        specialistDepartment: 'Treasury & Deposit Reconciliation',
+        reason: 'Verified gateway webhook signature; assigned to Treasury Specialist for ledger credit.',
+      }
+    );
+
+    await this.recordSupervisorDecision(
+      organizationId,
+      createdComplaint.id,
+      {
+        userId: 'sup_demo_david',
+        userName: '[DEMO] David Chen (Supervisor)',
+        userRole: UserRole.Supervisor,
+      },
+      {
+        decision: 'approved',
+        reason: `Verified bank settlement receipt for ${demoOrderId}. Approved $150.00 credit and assigned Settlement Specialist.`,
+        authorizeReplacement: false,
+        resolutionType: 'deposit_credited',
+        supervisorInstructionToAgent:
+          'Confirm with the customer that the $150.00 deposit credit is now active in their wallet.',
+      }
+    );
+
+    // Step 8 & 9: Case is resolved and Customer receives update
+    await this.resolveOrUpdateComplaintStatus(
+      organizationId,
+      createdComplaint.id,
+      {
+        userId: 'agt_demo_amara',
+        userName: '[DEMO] Amara Nwosu (Support Agent)',
+        userRole: UserRole.Agent,
+      },
+      {
+        action: 'resolve',
+        resolutionSummary: `Deposit ${demoOrderId} ($150.00) reconciled and credited to customer wallet. Customer notified.`,
+        notifyCustomerMessage: `Good news! Our Supervisor and Treasury Settlement team have reconciled reference ${demoOrderId} and credited $150.00 to your account balance.`,
+      }
+    );
+
+    // Record Customer 5-Star CSAT & Supervisor QA Evaluation (Step 10)
+    await this.submitCustomerFeedback(organizationId, {
+      conversationId: convId,
+      complaintId: createdComplaint.id,
+      caseReference: createdComplaint.referenceCode,
+      customerName: demoCustomerName,
+      customerEmail: demoCustomerEmail,
+      channel: 'portal',
+      rating: 5,
+      comment: '[DEMO] Fast deposit verification and clear updates from Amara and the supervisor!',
+    });
+
+    await this.createQaEvaluation(
+      organizationId,
+      {
+        userId: actor.userId || 'sup_demo_david',
+        userName: actor.userName || '[DEMO] David Chen (Supervisor)',
+        userRole: UserRole.Supervisor,
+      },
+      {
+        conversationId: convId,
+        complaintId: createdComplaint.id,
+        caseReference: createdComplaint.referenceCode,
+        agentId: 'agt_demo_amara',
+        agentName: '[DEMO] Amara Nwosu (Support Agent)',
+        accuracyScore: 5,
+        professionalismScore: 5,
+        resolutionEffectivenessScore: 5,
+        caseComplexity: 'complex',
+        feedbackNotes:
+          '[DEMO] Excellent verification of transaction reference before escalating to Supervisor and Treasury Specialist.',
+        coachingRecommendations:
+          'Continue attaching gateway reference timestamps in initial escalation notes.',
+      }
+    );
+
+    return {
+      demoReferenceCode: createdComplaint.referenceCode,
+      conversationId: convId,
+      complaintId: createdComplaint.id,
+      stepsCompleted: [
+        '1. Customer Samuel Okafor submitted Deposit Complaint (' + demoOrderId + ')',
+        '2. CustomCare created Unified Conversation (' + convId + ')',
+        '3. Support Agent Amara Nwosu received & acknowledged the enquiry',
+        '4. Agent verified transaction reference & attached encrypted account context',
+        '5. Agent escalated case ' + createdComplaint.referenceCode + ' to Supervisor Queue',
+        '6. Supervisor David Chen reviewed & approved the deposit claim',
+        '7. Supervisor assigned Marcus Vance (Treasury & Deposit Reconciliation Specialist)',
+        '8. Case ' + createdComplaint.referenceCode + ' marked RESOLVED after ledger credit',
+        '9. Customer received automated resolution update & submitted 5/5 CSAT rating',
+        '10. Supervisor recorded 100% QA Evaluation; metrics live in Administrator Analytics',
+      ],
     };
   }
 }

@@ -187,6 +187,18 @@ export function ClaimsAndSupervisorManager({
   const [decisionReason, setDecisionReason] = useState('');
   const [authorizeReplacementCheck, setAuthorizeReplacementCheck] = useState(true);
 
+  // Specialised Personnel & Reassignment state
+  const [routingTargetRole, setRoutingTargetRole] = useState<'specialist' | 'agent' | 'supervisor'>(
+    'specialist',
+  );
+  const [specialistName, setSpecialistName] = useState('Adaeze Okafor (Treasury Specialist)');
+  const [specialistDepartment, setSpecialistDepartment] = useState(
+    'Treasury & Deposit Reconciliation',
+  );
+  const [reassignAgentId, setReassignAgentId] = useState('');
+  const [reassignSupervisorId, setReassignSupervisorId] = useState('');
+  const [routingReason, setRoutingReason] = useState('');
+
   // Replacement Allocation state
   const [selectedReplacementItemId, setSelectedReplacementItemId] = useState('');
   const [deliveryNotes, setDeliveryNotes] = useState('');
@@ -861,7 +873,7 @@ export function ClaimsAndSupervisorManager({
                 )}
 
                 {/* Metadata Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-1 text-xs">
                   <div className="bg-white p-2.5 rounded-xl border border-slate-200/80">
                     <div className="text-[10px] text-slate-400 uppercase font-semibold">
                       Customer
@@ -875,14 +887,14 @@ export function ClaimsAndSupervisorManager({
                   </div>
                   <div className="bg-white p-2.5 rounded-xl border border-slate-200/80">
                     <div className="text-[10px] text-slate-400 uppercase font-semibold">
-                      Order ID
+                      Order ID &amp; SLA
                     </div>
                     <div className="font-mono font-bold text-slate-800">
                       {selectedComplaintDetail.orderId || 'Not specified'}
                     </div>
-                    {selectedComplaintDetail.conversationId && (
-                      <div className="text-[10px] text-indigo-600 font-medium truncate">
-                        Linked Conv: {selectedComplaintDetail.conversationId.slice(0, 10)}...
+                    {selectedComplaintDetail.slaDeadlineAt && (
+                      <div className="text-[10px] text-amber-700 font-medium truncate">
+                        SLA: {new Date(selectedComplaintDetail.slaDeadlineAt).toLocaleString()}
                       </div>
                     )}
                   </div>
@@ -901,6 +913,19 @@ export function ClaimsAndSupervisorManager({
                     <div className="font-semibold text-slate-800 truncate">
                       {selectedComplaintDetail.assignedSupervisorName || 'Unassigned'}
                     </div>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200/80">
+                    <div className="text-[10px] text-slate-400 uppercase font-semibold">
+                      Specialised Personnel
+                    </div>
+                    <div className="font-semibold text-indigo-800 truncate">
+                      {selectedComplaintDetail.assignedSpecialistName || 'Not routed'}
+                    </div>
+                    {selectedComplaintDetail.assignedSpecialistDepartment && (
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {selectedComplaintDetail.assignedSpecialistDepartment}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1063,113 +1088,334 @@ export function ClaimsAndSupervisorManager({
                   </div>
                 )}
 
-                {/* 2. Supervisor Decision Panel (Role-gated) */}
+                {/* 2. Supervisor Decision Panel & Specialised Personnel Routing (Role-gated) */}
                 {canApproveOrDecline ? (
-                  <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200/80 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                        <ShieldAlert className="w-4 h-4 text-amber-600" />
-                        Supervisor Verification &amp; Decision
-                      </h4>
-                      {selectedComplaintDetail.status === 'pending_review' && (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                          <ShieldAlert className="w-4 h-4 text-amber-600" />
+                          Supervisor Verification &amp; Official Decision
+                        </h4>
+                        {selectedComplaintDetail.status === 'pending_review' && (
+                          <button
+                            type="button"
+                            disabled={submittingAction}
+                            onClick={() =>
+                              void handleClaimAction(
+                                {
+                                  action: 'start_investigation',
+                                  note: 'Supervisor started active investigation.',
+                                },
+                                'Moved case to In Progress queue.',
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[11px] font-semibold"
+                          >
+                            Mark In Progress
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDecisionType('approve')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                            decisionType === 'approve'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Approve Claim
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDecisionType('decline')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                            decisionType === 'decline'
+                              ? 'bg-rose-600 text-white border-rose-600'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Decline Claim
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDecisionType('request_info')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                            decisionType === 'request_info'
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Request Missing Information
+                        </button>
+                      </div>
+
+                      {decisionType === 'approve' && (
+                        <label className="flex items-center gap-2 text-xs text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={authorizeReplacementCheck}
+                            onChange={(e) => setAuthorizeReplacementCheck(e.target.checked)}
+                            className="rounded border-slate-300"
+                          />
+                          Authorize Replacement Inventory Fulfilment (moves to Awaiting Replacement)
+                        </label>
+                      )}
+
+                      <textarea
+                        rows={2}
+                        value={decisionReason}
+                        onChange={(e) => setDecisionReason(e.target.value)}
+                        placeholder={
+                          decisionType === 'request_info'
+                            ? 'Specify what additional screenshot, order proof, or detail is required...'
+                            : 'Mandatory decision reason (recorded in supervisor audit trail)...'
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs"
+                      />
+
+                      <button
+                        type="button"
+                        disabled={submittingAction || !decisionReason.trim()}
+                        onClick={() => {
+                          void handleClaimAction(
+                            {
+                              action: decisionType,
+                              reason: decisionReason.trim(),
+                              authorizeReplacement:
+                                decisionType === 'approve' ? authorizeReplacementCheck : false,
+                            },
+                            `Recorded supervisor decision: ${decisionType.toUpperCase()}`,
+                          );
+                          setDecisionReason('');
+                        }}
+                        className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-semibold"
+                      >
+                        Record Official Decision
+                      </button>
+                    </div>
+
+                    {/* Multi-Tier Routing: Assign to Specialised Personnel / Return to Agent / Reassign Supervisor */}
+                    <div className="p-4 rounded-xl bg-indigo-50/40 border border-indigo-200/80 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                            <Layers className="w-4 h-4 text-indigo-600" />
+                            Multi-Tier Case Routing (Customer → Agent → Supervisor → Specialised Personnel)
+                          </h4>
+                          <p className="text-[11px] text-slate-600">
+                            Route case to Specialised Personnel (e.g. Treasury / Tier-3 Technical), return to Support Agent, or reassign Supervisor.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRoutingTargetRole('specialist')}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                            routingTargetRole === 'specialist'
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Assign to Specialised Personnel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRoutingTargetRole('agent')}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                            routingTargetRole === 'agent'
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Return to Support Agent
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRoutingTargetRole('supervisor')}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                            routingTargetRole === 'supervisor'
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Reassign Supervisor
+                        </button>
+                      </div>
+
+                      {routingTargetRole === 'specialist' ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <input
+                            type="text"
+                            value={specialistName}
+                            onChange={(e) => setSpecialistName(e.target.value)}
+                            placeholder="Specialist Name (e.g. Adaeze Okafor)..."
+                            className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs"
+                          />
+                          <select
+                            value={specialistDepartment}
+                            onChange={(e) => setSpecialistDepartment(e.target.value)}
+                            className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs"
+                          >
+                            <option value="Treasury & Deposit Reconciliation">
+                              Treasury &amp; Deposit Reconciliation
+                            </option>
+                            <option value="Tier-3 Technical Engineering">
+                              Tier-3 Technical Engineering
+                            </option>
+                            <option value="Account & Security Verification">
+                              Account &amp; Security Verification
+                            </option>
+                            <option value="Billing & Fulfilment Operations">
+                              Billing &amp; Fulfilment Operations
+                            </option>
+                          </select>
+                        </div>
+                      ) : routingTargetRole === 'agent' ? (
+                        <select
+                          value={reassignAgentId}
+                          onChange={(e) => setReassignAgentId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs"
+                        >
+                          <option value="">
+                            {selectedComplaintDetail.assignedAgentName
+                              ? `Return to ${selectedComplaintDetail.assignedAgentName}`
+                              : '-- Select Support Agent --'}
+                          </option>
+                          {(workspaceData?.agents ?? []).map((ag) => (
+                            <option key={ag.id} value={ag.userId || ag.id}>
+                              {ag.displayName} ({ag.role})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <select
+                          value={reassignSupervisorId}
+                          onChange={(e) => setReassignSupervisorId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs"
+                        >
+                          <option value="">-- Select Target Supervisor --</option>
+                          {(workspaceData?.supervisors ?? []).map((sup) => (
+                            <option key={sup.id} value={sup.userId || sup.id}>
+                              {sup.displayName} ({sup.role})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={routingReason}
+                          onChange={(e) => setRoutingReason(e.target.value)}
+                          placeholder="Routing instruction / verification note..."
+                          className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs"
+                        />
                         <button
                           type="button"
                           disabled={submittingAction}
-                          onClick={() =>
-                            void handleClaimAction(
-                              {
-                                action: 'start_investigation',
-                                note: 'Supervisor started active investigation.',
-                              },
-                              'Moved case to In Progress queue.',
-                            )
-                          }
-                          className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[11px] font-semibold"
+                          onClick={() => {
+                            if (routingTargetRole === 'specialist') {
+                              if (!specialistName.trim()) return;
+                              void handleClaimAction(
+                                {
+                                  action: 'reassign',
+                                  assignmentRole: 'specialist',
+                                  toUserId: `specialist-${specialistName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+                                  toUserName: specialistName.trim(),
+                                  specialistDepartment,
+                                  reason:
+                                    routingReason.trim() ||
+                                    `Routed to Specialised Personnel (${specialistDepartment}) for verification.`,
+                                },
+                                `Assigned case to ${specialistName.trim()} (${specialistDepartment}).`,
+                              );
+                            } else if (routingTargetRole === 'agent') {
+                              const ag = workspaceData?.agents.find(
+                                (a) => (a.userId || a.id) === reassignAgentId,
+                              );
+                              const targetName =
+                                ag?.displayName ||
+                                selectedComplaintDetail.assignedAgentName ||
+                                'Support Agent';
+                              const targetId =
+                                ag?.userId ||
+                                ag?.id ||
+                                selectedComplaintDetail.assignedAgentId ||
+                                targetName;
+                              void handleClaimAction(
+                                {
+                                  action: 'reassign',
+                                  assignmentRole: 'agent',
+                                  toUserId: targetId,
+                                  toUserName: targetName,
+                                  reason:
+                                    routingReason.trim() ||
+                                    'Returned case to Support Agent with supervisor instructions.',
+                                },
+                                `Returned case to Support Agent: ${targetName}.`,
+                              );
+                            } else {
+                              const sup = workspaceData?.supervisors.find(
+                                (s) => (s.userId || s.id) === reassignSupervisorId,
+                              );
+                              if (!sup) return;
+                              void handleClaimAction(
+                                {
+                                  action: 'reassign',
+                                  assignmentRole: 'supervisor',
+                                  toUserId: sup.userId || sup.id,
+                                  toUserName: sup.displayName,
+                                  reason:
+                                    routingReason.trim() || 'Reassigned to another supervisor.',
+                                },
+                                `Reassigned case to Supervisor: ${sup.displayName}.`,
+                              );
+                            }
+                            setRoutingReason('');
+                          }}
+                          className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shrink-0"
                         >
-                          Mark In Progress
+                          Execute Routing Handoff
                         </button>
+                      </div>
+
+                      {(selectedComplaintDetail.assignmentHistory ?? []).length > 0 && (
+                        <div className="pt-2 border-t border-indigo-200/60 space-y-1">
+                          <div className="text-[10px] font-bold uppercase text-indigo-900">
+                            Escalation &amp; Routing History
+                          </div>
+                          {(selectedComplaintDetail.assignmentHistory ?? [])
+                            .slice(0, 5)
+                            .map((h) => (
+                              <div
+                                key={h.id}
+                                className="text-[11px] text-slate-700 flex items-center justify-between gap-2 bg-white/80 px-2.5 py-1 rounded border border-indigo-100"
+                              >
+                                <span>
+                                  <strong className="uppercase text-[10px] text-indigo-700">
+                                    [{h.assignmentRole}]
+                                  </strong>{' '}
+                                  {h.fromUserName ? `${h.fromUserName} → ` : ''}
+                                  <strong>{h.toUserName}</strong>
+                                  {h.reason ? ` — ${h.reason}` : ''}
+                                </span>
+                                <span className="text-[10px] text-slate-400 shrink-0">
+                                  {new Date(h.createdAt).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
                       )}
                     </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setDecisionType('approve')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                          decisionType === 'approve'
-                            ? 'bg-emerald-600 text-white border-emerald-600'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        Approve Claim
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDecisionType('decline')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                          decisionType === 'decline'
-                            ? 'bg-rose-600 text-white border-rose-600'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        Decline Claim
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDecisionType('request_info')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                          decisionType === 'request_info'
-                            ? 'bg-purple-600 text-white border-purple-600'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        Request Missing Information
-                      </button>
-                    </div>
-
-                    {decisionType === 'approve' && (
-                      <label className="flex items-center gap-2 text-xs text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={authorizeReplacementCheck}
-                          onChange={(e) => setAuthorizeReplacementCheck(e.target.checked)}
-                          className="rounded border-slate-300"
-                        />
-                        Authorize Replacement Inventory Fulfilment (moves to Awaiting Replacement)
-                      </label>
-                    )}
-
-                    <textarea
-                      rows={2}
-                      value={decisionReason}
-                      onChange={(e) => setDecisionReason(e.target.value)}
-                      placeholder={
-                        decisionType === 'request_info'
-                          ? 'Specify what additional screenshot, order proof, or detail is required...'
-                          : 'Mandatory decision reason (recorded in supervisor audit trail)...'
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs"
-                    />
-
-                    <button
-                      type="button"
-                      disabled={submittingAction || !decisionReason.trim()}
-                      onClick={() => {
-                        void handleClaimAction(
-                          {
-                            action: decisionType,
-                            reason: decisionReason.trim(),
-                            authorizeReplacement:
-                              decisionType === 'approve' ? authorizeReplacementCheck : false,
-                          },
-                          `Recorded supervisor decision: ${decisionType.toUpperCase()}`,
-                        );
-                        setDecisionReason('');
-                      }}
-                      className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-semibold"
-                    >
-                      Record Official Decision
-                    </button>
                   </div>
                 ) : (
                   <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-600 flex items-center gap-2">
