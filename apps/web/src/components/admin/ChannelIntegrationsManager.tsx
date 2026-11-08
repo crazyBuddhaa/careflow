@@ -1361,11 +1361,31 @@ export function ChannelIntegrationsManager({
                       {STATUS_BADGE_STYLES[portalIntegration.status].label}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs sm:text-sm text-slate-600">
-                    Your hosted portal at <code>/portal/{organizationSlug}</code> remains private
-                    until explicitly published. Businesses using only Telegram or the Website Widget
-                    can keep the portal unpublished.
-                  </p>
+                  {portalIntegration.status === 'active' ? (
+                    <p className="mt-1 text-xs sm:text-sm text-slate-600">
+                      Your hosted portal is live at{' '}
+                      <a
+                        href={`/portal/${organizationSlug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 font-mono font-semibold text-teal-700 underline decoration-teal-500/60 underline-offset-2 hover:text-teal-900 break-all"
+                      >
+                        <span>
+                          {portalIntegration.deepLinkUrl ||
+                            `https://getcustomcare.xyz/portal/${organizationSlug}`}
+                        </span>
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      </a>
+                      . Customers can visit this link to search your knowledge base, use guided
+                      troubleshooting, or escalate enquiries to your support team.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs sm:text-sm text-slate-600">
+                      Your hosted portal at <code>/portal/{organizationSlug}</code> remains private
+                      until explicitly published. Businesses using only Telegram or the Website
+                      Widget can keep the portal unpublished.
+                    </p>
+                  )}
                 </div>
 
                 {isAdminOrOwner && (
@@ -1390,6 +1410,53 @@ export function ChannelIntegrationsManager({
                   </div>
                 )}
               </div>
+
+              {portalIntegration.status === 'active' && (
+                <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Active Customer Portal URL
+                    </p>
+                    <a
+                      href={`/portal/${organizationSlug}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-0.5 text-xs sm:text-sm font-mono font-semibold text-teal-700 hover:text-teal-900 underline decoration-teal-500/60 underline-offset-2 break-all inline-flex items-center gap-1.5"
+                    >
+                      <span>
+                        {portalIntegration.deepLinkUrl ||
+                          `https://getcustomcare.xyz/portal/${organizationSlug}`}
+                      </span>
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                    </a>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        copyToClipboard(
+                          portalIntegration.deepLinkUrl ||
+                            `https://getcustomcare.xyz/portal/${organizationSlug}`,
+                          'Customer portal link'
+                        )
+                      }
+                      className="py-2 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Link</span>
+                    </button>
+                    <a
+                      href={`/portal/${organizationSlug}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="py-2 px-3.5 rounded-xl border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-900 text-xs font-bold inline-flex items-center gap-1.5"
+                    >
+                      <span>Open Portal</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
