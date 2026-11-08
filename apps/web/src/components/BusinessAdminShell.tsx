@@ -469,7 +469,7 @@ export function BusinessAdminShell() {
   const hasNoActiveWorkspace =
     activeSession?.organizationId === 'org_customcare_agent_hub' || workspaces.length === 0;
   const isPlatformAdminUser = Boolean(
-    activeSession?.isPlatformAdmin &&
+    activeSession?.isPlatformAdmin ||
       isRegisteredPlatformSuperAdminEmail(activeSession?.email)
   );
   // Only central admin has a mandatory 2fa setup; others are optional

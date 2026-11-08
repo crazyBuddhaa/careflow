@@ -87,12 +87,12 @@ export async function GET() {
 
     const repo = await getWorkspaceRepository();
     const isSuperAdmin =
+      Boolean(session.isPlatformAdmin) ||
       Boolean(
         session.identity?.email &&
           isRegisteredPlatformSuperAdminEmail(session.identity.email)
-      ) &&
-      (Boolean(session.isPlatformAdmin) ||
-        (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email)));
+      ) ||
+      (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email));
 
     if (!isSuperAdmin) {
       return jsonApiError(
@@ -156,12 +156,12 @@ export async function POST(request: Request) {
 
     const repo = await getWorkspaceRepository();
     const isSuperAdmin =
+      Boolean(session.isPlatformAdmin) ||
       Boolean(
         session.identity?.email &&
           isRegisteredPlatformSuperAdminEmail(session.identity.email)
-      ) &&
-      (Boolean(session.isPlatformAdmin) ||
-        (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email)));
+      ) ||
+      (await repo.isUserPlatformAdmin(session.identity.userId, session.identity.email));
 
     if (!isSuperAdmin) {
       return jsonApiError(

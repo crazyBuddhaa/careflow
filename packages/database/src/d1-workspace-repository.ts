@@ -3171,7 +3171,8 @@ export class D1WorkspaceRepository {
     }
 
     const isPersonalAccount = Number(userRow.is_personal_account ?? 1) === 1;
-    const isPlatformAdmin = isRegisteredPlatformSuperAdminEmail(email);
+    const isPlatformAdmin =
+      Boolean(userRow.is_platform_admin) || isRegisteredPlatformSuperAdminEmail(email);
 
     const workspaces = await this.getUserWorkspaces(userRow.id);
     if (workspaces.length === 0) {
@@ -3783,7 +3784,8 @@ export class D1WorkspaceRepository {
       fullName: u.full_name,
       accountType: ((u.account_type as AccountRegistrationMode) || 'business'),
       isPersonalAccount: Number(u.is_personal_account ?? 1) === 1,
-      isPlatformAdmin: isRegisteredPlatformSuperAdminEmail(u.email),
+      isPlatformAdmin:
+        Boolean(u.is_platform_admin) || isRegisteredPlatformSuperAdminEmail(u.email),
       emailVerified: Boolean(u.email_verified),
       mfaEnabled: Boolean(u.mfa_enabled),
       workspaceCount: Number(u.workspace_count ?? 0),

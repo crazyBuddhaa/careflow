@@ -289,7 +289,7 @@ export async function resolveServerAdminSession(): Promise<{
       accountType: dbValidated.user.accountType || 'business',
       isPersonalAccount: dbValidated.user.isPersonalAccount !== false,
       isPlatformAdmin: Boolean(
-        dbValidated.user.isPlatformAdmin &&
+        dbValidated.user.isPlatformAdmin ||
           isRegisteredPlatformSuperAdminEmail(dbValidated.user.email)
       ),
       department: dbValidated.activeMembership.department ?? '',
