@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS organizations (
   id TEXT PRIMARY KEY NOT NULL,
   slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
+  country TEXT NOT NULL DEFAULT 'United States',
+  industry TEXT NOT NULL DEFAULT 'Technology',
+  website TEXT NOT NULL DEFAULT '',
+  onboarding_status TEXT NOT NULL DEFAULT 'incomplete' CHECK (onboarding_status IN ('incomplete', 'ready_to_publish', 'published')),
+  onboarding_step INTEGER NOT NULL DEFAULT 1,
+  created_by_user_id TEXT,
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

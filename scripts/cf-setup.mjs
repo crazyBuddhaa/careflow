@@ -246,7 +246,7 @@ async function main() {
   );
 
   if (databaseId) {
-    console.log(`Applying remote D1 SQL migrations (0001..0007) to "${resolvedDbName}"...`);
+    console.log(`Applying remote D1 SQL migrations (0001..0008) to "${resolvedDbName}"...`);
     execSync(`npx wrangler d1 migrations apply ${resolvedDbName} --remote`, {
       stdio: 'inherit',
       env: { ...process.env, CI: 'true' },
@@ -275,7 +275,14 @@ async function main() {
       `ALTER TABLE support_agents ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'`,
       `ALTER TABLE auth_sessions ADD COLUMN agent_identity_id TEXT`,
       `ALTER TABLE auth_sessions ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'personal_account'`,
-      `UPDATE users SET is_platform_admin = 1 WHERE LOWER(email) IN ('asuracorps@gmail.com', 'oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`,
+      `ALTER TABLE support_complaints ADD COLUMN assigned_specialist_name TEXT`,
+      `ALTER TABLE support_complaints ADD COLUMN assigned_specialist_department TEXT`,
+      `ALTER TABLE support_complaints ADD COLUMN sla_deadline_at TEXT`,
+      `ALTER TABLE support_conversations ADD COLUMN department TEXT NOT NULL DEFAULT 'Support'`,
+      `ALTER TABLE support_conversations ADD COLUMN reopened_count INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE support_conversations ADD COLUMN sla_deadline_at TEXT`,
+      `UPDATE users SET is_platform_admin = 0 WHERE LOWER(email) NOT IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`,
+      `UPDATE users SET is_platform_admin = 1 WHERE LOWER(email) IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`,
     ];
     for (const sql of safeAlterColumns) {
       spawnSync(
