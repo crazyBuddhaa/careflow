@@ -125,8 +125,8 @@ async function main() {
     runGit(['init', '-b', branch]);
   }
 
-  const authorName = user.name || user.login || 'CareFlow Architect';
-  const authorEmail = user.email || 'asuracorps@gmail.com';
+  const authorName = user.name || user.login || 'CustomCare Architect';
+  const authorEmail = user.email || 'admin@getcustomcare.xyz';
   runGit(['config', 'user.name', authorName]);
   runGit(['config', 'user.email', authorEmail]);
 

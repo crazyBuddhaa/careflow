@@ -62,7 +62,7 @@ export default function PlatformAdminPage() {
   const [userVerifiedFilter, setUserVerifiedFilter] = useState<'all' | 'verified' | 'unverified'>('all');
   const [selectedMailTemplateKey, setSelectedMailTemplateKey] = useState<string>('email_verification');
   const [mailPreviewMode, setMailPreviewMode] = useState<'html' | 'text' | 'headers'>('html');
-  const [testEmailRecipient, setTestEmailRecipient] = useState('oluwafemiadekanmi76@gmail.com');
+  const [testEmailRecipient, setTestEmailRecipient] = useState('admin@getcustomcare.xyz');
 
   const showFeedback = useCallback((msg: string) => {
     setFeedback(msg);

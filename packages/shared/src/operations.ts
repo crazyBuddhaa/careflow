@@ -330,11 +330,11 @@ export interface AgentScorecardDto {
   weeklyHandled: number;
   monthlyHandled: number;
   weeklyTarget: number;
-  resolutionRatePercent: number;
-  escalationRatePercent: number;
+  resolutionRatePercent: number | null;
+  escalationRatePercent: number | null;
   reopenedCasesCount: number;
   pendingCasesCount: number;
-  slaCompliancePercent: number;
+  slaCompliancePercent: number | null;
   avgFirstResponseMinutes: number | null;
   avgResolutionHours: number | null;
   avgQaScore: number | null;
@@ -464,9 +464,9 @@ export interface DailyOperationsMetricsDto {
     replacementsDelivered: number;
     avgFirstResponseMinutes: number | null;
     avgResolutionHours: number | null;
-    slaCompliancePercent?: number;
-    resolutionRatePercent?: number;
-    escalationRatePercent?: number;
+    slaCompliancePercent?: number | null;
+    resolutionRatePercent?: number | null;
+    escalationRatePercent?: number | null;
     reopenedCount?: number;
     avgQaScore?: number | null;
     avgCsatScore?: number | null;

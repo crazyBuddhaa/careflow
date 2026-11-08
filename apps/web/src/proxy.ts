@@ -12,7 +12,7 @@ import { classifyTenantHostname } from '@careflow/support-engine';
  * Security: Organization resolution relies strictly on the HTTP Host header,
  * never on client-supplied body/query organization IDs.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Skip Next.js internals, API routes, static files, and explicit platform/admin paths

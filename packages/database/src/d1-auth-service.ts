@@ -1,6 +1,5 @@
 import {
   DEFAULT_PERMISSIONS_BY_ROLE,
-  DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS,
   isRegisteredPlatformSuperAdminEmail,
   UserRole,
   type AccountRegistrationMode,
@@ -830,7 +829,8 @@ export class D1AuthIdentityService {
 
     const isPersonalAccount = userRow.is_personal_account !== 0;
     const accountType = (userRow.account_type as AccountRegistrationMode) || 'business';
-    const isPlatformAdmin = isRegisteredPlatformSuperAdminEmail(userRow.email);
+    const isPlatformAdmin =
+      Boolean(userRow.is_platform_admin) || isRegisteredPlatformSuperAdminEmail(userRow.email);
 
     const workspaces = await this.getUserWorkspaces(userRow.id);
 
@@ -2480,7 +2480,8 @@ export class D1AuthIdentityService {
         mfaEnabled: Boolean(userRow.mfa_enabled),
         accountType: (userRow.account_type as AccountRegistrationMode) || 'agent',
         isPersonalAccount: true,
-        isPlatformAdmin: isRegisteredPlatformSuperAdminEmail(userRow.email),
+        isPlatformAdmin:
+          Boolean(userRow.is_platform_admin) || isRegisteredPlatformSuperAdminEmail(userRow.email),
         createdAt: userRow.created_at,
       },
       agentIdentity,
@@ -2856,7 +2857,9 @@ export class D1AuthIdentityService {
         envSource.TURNSTILE_SECRET_KEY.trim().length > 0
     );
 
-    const isPlatformAdmin = isRegisteredPlatformSuperAdminEmail(userRow.email);
+    const isPlatformAdmin =
+      Boolean(userRow.is_platform_admin) ||
+      isRegisteredPlatformSuperAdminEmail(userRow.email, envSource);
 
     // Only central admin has a mandatory 2fa setup; others are optional
     const mfaRequiredForRole = isPlatformAdmin;

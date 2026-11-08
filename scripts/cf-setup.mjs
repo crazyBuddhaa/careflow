@@ -281,8 +281,7 @@ async function main() {
       `ALTER TABLE support_conversations ADD COLUMN department TEXT NOT NULL DEFAULT 'Support'`,
       `ALTER TABLE support_conversations ADD COLUMN reopened_count INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE support_conversations ADD COLUMN sla_deadline_at TEXT`,
-      `UPDATE users SET is_platform_admin = 0 WHERE LOWER(email) NOT IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`,
-      `UPDATE users SET is_platform_admin = 1 WHERE LOWER(email) IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`,
+      `UPDATE users SET is_platform_admin = 1 WHERE LOWER(email) = 'admin@getcustomcare.xyz'`,
     ];
     for (const sql of safeAlterColumns) {
       spawnSync(

@@ -16,14 +16,121 @@ interface RouteContext {
   params: Promise<{ publicToken: string }>;
 }
 
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+function normalizeHostEntry(raw: string): string {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return '';
+  try {
+    if (trimmed.includes('://')) {
+      return new URL(trimmed).hostname.toLowerCase();
+    }
+  } catch {
+    // Fall through to manual strip
+  }
+  return trimmed
+    .replace(/^https?:\/\//, '')
+    .split('/')[0]!
+    .split(':')[0]!
+    .trim();
+}
 
-export async function OPTIONS() {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+function validateWidgetOrigin(
+  request: Request,
+  resolved: {
+    organizationSlug: string;
+    organizationWebsite: string;
+    verifiedHostnames: string[];
+    widgetConfig: { allowedOrigins?: string[] };
+  }
+): { allowed: boolean; allowOriginHeader: string } {
+  const originHeader = request.headers.get('origin')?.trim() || '';
+  let requestSelfOrigin = 'https://getcustomcare.xyz';
+  let requestSelfHost = 'getcustomcare.xyz';
+  try {
+    const reqUrl = new URL(request.url);
+    requestSelfOrigin = reqUrl.origin;
+    requestSelfHost = reqUrl.hostname.toLowerCase();
+  } catch {
+    // Use default
+  }
+
+  // Same-origin or server-to-server requests without an Origin header
+  if (!originHeader) {
+    return { allowed: true, allowOriginHeader: requestSelfOrigin };
+  }
+
+  let originHostname = '';
+  let normalizedOrigin = '';
+  try {
+    const parsedOrigin = new URL(originHeader);
+    originHostname = parsedOrigin.hostname.toLowerCase();
+    normalizedOrigin = parsedOrigin.origin;
+  } catch {
+    return { allowed: false, allowOriginHeader: requestSelfOrigin };
+  }
+
+  // Always allow same-host, CustomCare platform subdomains, and local development
+  if (
+    originHostname === requestSelfHost ||
+    originHostname === 'localhost' ||
+    originHostname === '127.0.0.1' ||
+    originHostname === 'getcustomcare.xyz' ||
+    originHostname.endsWith('.getcustomcare.xyz')
+  ) {
+    return { allowed: true, allowOriginHeader: normalizedOrigin };
+  }
+
+  const configuredPatterns = [
+    ...(Array.isArray(resolved.widgetConfig.allowedOrigins)
+      ? resolved.widgetConfig.allowedOrigins
+      : []),
+    resolved.organizationWebsite,
+    ...resolved.verifiedHostnames,
+  ]
+    .map(normalizeHostEntry)
+    .filter(Boolean);
+
+  for (const pattern of configuredPatterns) {
+    if (pattern === originHostname) {
+      return { allowed: true, allowOriginHeader: normalizedOrigin };
+    }
+    if (pattern.startsWith('*.') && originHostname.endsWith(pattern.slice(1))) {
+      return { allowed: true, allowOriginHeader: normalizedOrigin };
+    }
+    if (originHostname === `www.${pattern}` || `www.${originHostname}` === pattern) {
+      return { allowed: true, allowOriginHeader: normalizedOrigin };
+    }
+  }
+
+  return { allowed: false, allowOriginHeader: requestSelfOrigin };
+}
+
+function applyCorsHeaders(res: Response, allowOrigin: string): Response {
+  res.headers.set('Access-Control-Allow-Origin', allowOrigin);
+  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.headers.set('Vary', 'Origin');
+  return res;
+}
+
+export async function OPTIONS(request: Request, context: RouteContext) {
+  const { publicToken } = await context.params;
+  const channelService = await getChannelIntegrationService();
+  const resolved = await channelService.resolveActiveWidgetByPublicToken(publicToken);
+
+  if (!resolved) {
+    return new Response(null, { status: 404 });
+  }
+
+  const originCheck = validateWidgetOrigin(request, resolved);
+  if (!originCheck.allowed) {
+    return jsonApiError(
+      'ORIGIN_NOT_ALLOWED',
+      'Origin is not authorized for this widget token.',
+      403
+    );
+  }
+
+  return applyCorsHeaders(new Response(null, { status: 204 }), originCheck.allowOriginHeader);
 }
 
 export async function GET(request: Request, context: RouteContext) {
@@ -33,13 +140,20 @@ export async function GET(request: Request, context: RouteContext) {
     const resolved = await channelService.resolveActiveWidgetByPublicToken(publicToken);
 
     if (!resolved) {
-      const res = jsonApiError(
+      return jsonApiError(
         'NOT_FOUND',
         'Website chat widget is not active or token is invalid.',
         404
       );
-      Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-      return res;
+    }
+
+    const originCheck = validateWidgetOrigin(request, resolved);
+    if (!originCheck.allowed) {
+      return jsonApiError(
+        'ORIGIN_NOT_ALLOWED',
+        'Origin is not authorized for this widget token.',
+        403
+      );
     }
 
     const url = new URL(request.url);
@@ -66,17 +180,34 @@ export async function GET(request: Request, context: RouteContext) {
           }
         : null,
     });
-    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-    return res;
+    return applyCorsHeaders(res, originCheck.allowOriginHeader);
   } catch (err) {
-    const res = handleKnowledgeApiException(err);
-    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-    return res;
+    return handleKnowledgeApiException(err);
   }
 }
 
 export async function POST(request: Request, context: RouteContext) {
   try {
+    const { publicToken } = await context.params;
+    const channelService = await getChannelIntegrationService();
+    const resolved = await channelService.resolveActiveWidgetByPublicToken(publicToken);
+    if (!resolved) {
+      return jsonApiError(
+        'NOT_FOUND',
+        'Website chat widget is not active or token is invalid.',
+        404
+      );
+    }
+
+    const originCheck = validateWidgetOrigin(request, resolved);
+    if (!originCheck.allowed) {
+      return jsonApiError(
+        'ORIGIN_NOT_ALLOWED',
+        'Origin is not authorized for this widget token.',
+        403
+      );
+    }
+
     const { ipAddress } = extractRequestClientMeta(request);
     const authService = await getAuthIdentityService();
     const rateLimit = await authService.checkRateLimit('escalation', ipAddress);
@@ -86,32 +217,18 @@ export async function POST(request: Request, context: RouteContext) {
         'Too many widget messages. Please wait before sending another message.',
         429
       );
-      Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-      return res;
+      return applyCorsHeaders(res, originCheck.allowOriginHeader);
     }
 
-    const { publicToken } = await context.params;
     let rawBody: unknown;
     try {
       rawBody = await request.json();
     } catch {
       const res = jsonApiError('INVALID_JSON', 'Request body must be valid JSON.', 400);
-      Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-      return res;
+      return applyCorsHeaders(res, originCheck.allowOriginHeader);
     }
 
     const input = PublicWidgetMessageSchema.parse(rawBody);
-    const channelService = await getChannelIntegrationService();
-    const resolved = await channelService.resolveActiveWidgetByPublicToken(publicToken);
-    if (!resolved) {
-      const res = jsonApiError(
-        'NOT_FOUND',
-        'Website chat widget is not active or token is invalid.',
-        404
-      );
-      Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-      return res;
-    }
 
     const result = await channelService.handlePublicWidgetMessage({
       publicToken,
@@ -138,11 +255,8 @@ export async function POST(request: Request, context: RouteContext) {
         timestamp: m.createdAt,
       })),
     });
-    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-    return res;
+    return applyCorsHeaders(res, originCheck.allowOriginHeader);
   } catch (err) {
-    const res = handleKnowledgeApiException(err);
-    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
-    return res;
+    return handleKnowledgeApiException(err);
   }
 }

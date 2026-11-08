@@ -11,13 +11,13 @@ This document contains the 12 core technical, operational, integration, and comm
 
 CustomCare is a multi-tenant, multi-channel customer support and workforce operations platform built on a Cloudflare-first architecture:
 
-- **Application Layer (`apps/web`)**: Next.js 15 App Router serving Customer Support Portals, the Unified Agent & Supervisor Workspace, the Business Administrator Command Center, the Central Platform Super-Admin Console, and the Telegram Mini App (`/tg-app`).
-- **Embeddable Channel SDK (`apps/widget`)**: Lightweight, zero-dependency JavaScript widget that embeds into any external website via a single `<script>` tag and communicates with `/api/widget/[publicToken]`.
-- **Relational Data Layer (`packages/database` — Cloudflare D1 / SQLite)**:
+- **Application Layer (`apps/web`)**: Next.js 16 App Router serving Customer Support Portals, the Unified Agent & Supervisor Workspace, the Business Administrator Command Center, the Central Platform Super-Admin Console, and the Telegram Mini App (`/tg-app`).
+- **Embeddable Channel SDK (`apps/widget`)**: Lightweight, zero-dependency JavaScript widget that embeds into any external website via a single `<script>` tag and communicates with `/api/widget/[publicToken]` with per-token origin validation.
+- **Relational Data & Evidence Layer (`packages/database` — Cloudflare D1 / SQLite)**:
   - Enforces strict tenant isolation via mandatory `organization_id` foreign keys and SQLite `BEFORE INSERT / UPDATE` triggers.
   - Protects sensitive credentials (Telegram bot tokens, customer login credentials on claims, and replacement stock credentials) with **AES-256-GCM encryption at rest**.
-- **Storage Layer (`Cloudflare R2`)**: Stores conversation attachments and complaint evidence screenshots with tenant-scoped access controls.
-- **Messaging & Webhook Gateway**: Native Telegram Bot API integration supporting both Central Bot deep-linking (`@CustomCareBot`) and Dedicated Business Sub-Bots with idempotent webhook processing.
+  - Stores complaint evidence (`complaint_evidence.file_url_or_data` inline data URLs/links) and channel attachment metadata (`conversation_attachments` with Telegram `external_file_id` streamed via `/api/admin/attachments/[id]`) directly in Cloudflare D1 without requiring an external R2 bucket.
+- **Messaging & Webhook Gateway**: Native Telegram Bot API integration supporting both Central Bot deep-linking (`@getcustomcarebot`) and Dedicated Business Sub-Bots with idempotent webhook processing.
 
 ---
 
@@ -140,9 +140,8 @@ CustomCare supports two native Telegram operating modes that feed directly into 
 
 ## 9. Technical Requirements
 
-- **Runtime**: Node.js 22+ (local/container) or Cloudflare Workers / Pages runtime.
-- **Database**: Cloudflare D1 (SQLite 3.45+) with foreign keys and triggers enabled.
-- **Object Storage**: Cloudflare R2 bucket (`CAREFLOW_ATTACHMENTS_BUCKET`) for attachments.
+- **Runtime**: Node.js 22+ (local/container) or Cloudflare Workers runtime (`@opennextjs/cloudflare`).
+- **Database & Evidence Persistence**: Cloudflare D1 (`customcare-db`, SQLite 3.45+) with foreign keys and triggers enabled; stores relational tables, inline complaint evidence (`complaint_evidence`), and channel attachment metadata (`conversation_attachments`).
 - **Transactional Email**: Resend API (`RESEND_API_KEY`) for verification, invitations, and password resets.
 - **Bot Defense**: Cloudflare Turnstile (`NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`).
 
@@ -160,12 +159,11 @@ CustomCare supports two native Telegram operating modes that feed directly into 
 
 | Component | Service Tier | Estimated Monthly Cost (Startup / SMB) | Estimated Monthly Cost (Growth / Enterprise) |
 | :--- | :--- | :--- | :--- |
-| **Compute & Hosting** | Cloudflare Workers / Pages | $0 – $5 / month | $20 / month (Workers Paid) |
-| **Relational Database** | Cloudflare D1 | $0 (Free 5M rows read/day) | $5 – $15 / month |
-| **File & Evidence Storage** | Cloudflare R2 | $0 (Free 10 GB/month, zero egress) | $5 – $10 / month |
+| **Compute & Hosting** | Cloudflare Workers | $0 (Free Tier) – $5 / month (Workers Paid) | $5 / month base (Workers Paid, includes 10M requests) |
+| **Relational Database & Evidence** | Cloudflare D1 (`customcare-db`) | $0 (Free 5M rows read/day) | $0 – $5 / month (Included in Workers Paid + overage) |
 | **Transactional Email** | Resend | $0 (Free 3,000 emails/month) | $20 / month (50,000 emails) |
 | **Bot Defense & DNS/SSL** | Cloudflare Turnstile & DNS | $0 (Included) | $0 (Included) |
-| **Total Estimated Infrastructure** | — | **$0 – $5 / month** | **$50 – $65 / month** |
+| **Total Estimated Infrastructure** | — | **$0 – $5 / month** | **$25 – $30 / month** |
 
 ---
 

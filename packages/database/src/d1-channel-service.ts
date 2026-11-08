@@ -5017,6 +5017,8 @@ export class D1ChannelIntegrationService {
     organizationId: string;
     organizationSlug: string;
     organizationName: string;
+    organizationWebsite: string;
+    verifiedHostnames: string[];
     widgetConfig: WebWidgetChannelConfig;
     supportedTopics: string[];
   } | null> {
@@ -5026,7 +5028,7 @@ export class D1ChannelIntegrationService {
 
     const row = await this.db
       .prepare(
-        `SELECT ci.*, o.slug AS org_slug, o.name AS org_name, o.is_active AS org_active
+        `SELECT ci.*, o.slug AS org_slug, o.name AS org_name, o.website AS org_website, o.is_active AS org_active
          FROM channel_integrations ci
          JOIN organizations o ON o.id = ci.organization_id
          WHERE ci.channel = 'web_widget' AND ci.public_token = ?`
@@ -5036,6 +5038,7 @@ export class D1ChannelIntegrationService {
         DbChannelIntegrationRow & {
           org_slug: string;
           org_name: string;
+          org_website?: string | null;
           org_active: number;
         }
       >();
@@ -5059,6 +5062,10 @@ export class D1ChannelIntegrationService {
       organizationId: row.organization_id,
       organizationSlug: row.org_slug,
       organizationName: row.org_name,
+      organizationWebsite: String(row.org_website || '').trim(),
+      verifiedHostnames: Array.isArray(portalSettings.verifiedHostnames)
+        ? portalSettings.verifiedHostnames
+        : [],
       widgetConfig,
       supportedTopics: portalSettings.chatbot.supportedTopics,
     };

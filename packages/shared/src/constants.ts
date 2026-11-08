@@ -19,23 +19,41 @@ export const CUSTOMCARE_LOGO_FULL_URL =
   '/assets/aistudio/Black_White_Minimalist_Simple_Modern_Bold_Letter_Q_Atelier_Logo_20261104_000639_0000_84dc5aab.png';
 
 export const DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS = [
-  'oluwafemiadekanmi76@gmail.com',
   'admin@getcustomcare.xyz',
 ] as const;
 
-export function isRegisteredPlatformSuperAdminEmail(email?: string | null): boolean {
+export function getRegisteredPlatformSuperAdminEmails(
+  envSource?: Record<string, unknown>
+): string[] {
+  const allowed = new Set<string>(
+    DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS.map((email) => email.toLowerCase())
+  );
+  const envObj =
+    envSource ?? (typeof process !== 'undefined' ? process.env : undefined);
+  const rawList = [
+    envObj?.CAREFLOW_SUPER_ADMIN_EMAILS,
+    envObj?.CAREFLOW_PLATFORM_ADMIN_EMAILS,
+    envObj?.NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS,
+  ]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .join(',');
+
+  if (rawList) {
+    for (const part of rawList.split(',')) {
+      const cleaned = part.trim().toLowerCase();
+      if (cleaned) {
+        allowed.add(cleaned);
+      }
+    }
+  }
+  return Array.from(allowed);
+}
+
+export function isRegisteredPlatformSuperAdminEmail(
+  email?: string | null,
+  envSource?: Record<string, unknown>
+): boolean {
   if (!email || typeof email !== 'string') return false;
   const normalized = email.trim().toLowerCase();
-  if ((DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(normalized)) {
-    return true;
-  }
-  const envList =
-    (typeof process !== 'undefined' && process.env?.CAREFLOW_SUPER_ADMIN_EMAILS) || '';
-  if (envList) {
-    return envList
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .includes(normalized);
-  }
-  return false;
+  return getRegisteredPlatformSuperAdminEmails(envSource).includes(normalized);
 }

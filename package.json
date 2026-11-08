@@ -1,8 +1,8 @@
 {
   "name": "careflow",
   "private": true,
-  "version": "0.1.0",
-  "description": "CareFlow — Smarter Support. Better Experiences. Modular customer support platform.",
+  "version": "0.2.0",
+  "description": "CustomCare (CareFlow) — Smarter Support. Better Experiences. Multi-channel customer support & workforce management platform.",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -16,7 +16,7 @@
     "start": "NODE_OPTIONS='--disable-warning=ExperimentalWarning' next start apps/web -p 3000 -H 0.0.0.0",
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --disable-warning=ExperimentalWarning --import ./scripts/ts-test-loader.mjs --experimental-transform-types --test tests/knowledge-stage1.test.ts tests/onboarding-multi-business.test.ts tests/auth-security-system.test.ts tests/multichannel-support-os.test.ts tests/security/agent-invitations-and-roles.test.ts tests/operations-claims-inventory.test.ts",
+    "test": "node --disable-warning=ExperimentalWarning --import ./scripts/ts-test-loader.mjs --experimental-transform-types --test tests/knowledge-stage1.test.ts tests/onboarding-multi-business.test.ts tests/auth-security-system.test.ts tests/multichannel-support-os.test.ts tests/security/agent-invitations-and-roles.test.ts tests/operations-claims-inventory.test.ts tests/e2e-portal-widget-telegram.test.ts",
     "push": "node scripts/git-push.mjs",
     "clean": "rm -rf apps/web/.next apps/web/.open-next dist"
   },

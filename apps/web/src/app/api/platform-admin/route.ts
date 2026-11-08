@@ -196,7 +196,7 @@ export async function POST(request: Request) {
       const targetEmail =
         action.recipientEmail?.trim().toLowerCase() ||
         session.identity.email ||
-        'oluwafemiadekanmi76@gmail.com';
+        'admin@getcustomcare.xyz';
 
       const delivery = await sendTransactionalEmail(
         {

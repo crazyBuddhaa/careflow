@@ -41,6 +41,10 @@ function resolveCandidateFile(basePath) {
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === 'next/headers' || specifier === 'next/server') {
+      return nextResolve(`${specifier}.js`, context);
+    }
+
     if (EXACT_ALIASES.has(specifier)) {
       return {
         url: pathToFileURL(EXACT_ALIASES.get(specifier)).href,

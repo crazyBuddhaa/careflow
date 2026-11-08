@@ -1,3 +1,4 @@
+import { getRegisteredPlatformSuperAdminEmails } from '@careflow/shared';
 import {
   KNOWLEDGE_D1_SCHEMA_STATEMENTS,
   type D1DatabaseLike,
@@ -429,22 +430,18 @@ export async function bootstrapKnowledgeD1Schema(db: D1DatabaseLike): Promise<vo
     .bind(now, now)
     .run();
 
-  // Ensure platform super-admin privileges are strictly limited to registered admin accounts
-  await db
-    .prepare(
-      `UPDATE users
-       SET is_platform_admin = 0
-       WHERE LOWER(email) NOT IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `UPDATE users
-       SET is_platform_admin = 1
-       WHERE LOWER(email) IN ('oluwafemiadekanmi76@gmail.com', 'admin@getcustomcare.xyz')`
-    )
-    .run();
+  // Ensure configured platform super-admin accounts (role account + CAREFLOW_SUPER_ADMIN_EMAILS) are promoted
+  const configuredSuperAdmins = getRegisteredPlatformSuperAdminEmails();
+  for (const adminEmail of configuredSuperAdmins) {
+    await db
+      .prepare(
+        `UPDATE users
+         SET is_platform_admin = 1
+         WHERE LOWER(email) = ?`
+      )
+      .bind(adminEmail.toLowerCase())
+      .run();
+  }
 
   for (const org of DEFAULT_TENANTS) {
     await db

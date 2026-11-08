@@ -961,7 +961,10 @@ export function OperationsAnalyticsAndReportsManager({
                 SLA Compliance
               </div>
               <div className="text-2xl font-bold text-emerald-700 mt-1">
-                {metrics.overview.slaCompliancePercentage ?? 100}%
+                {metrics.overview.slaCompliancePercentage !== null &&
+                metrics.overview.slaCompliancePercentage !== undefined
+                  ? `${metrics.overview.slaCompliancePercentage}%`
+                  : '—'}
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
                 {metrics.overview.escalatedCasesCount ?? 0} escalated
@@ -1632,16 +1635,16 @@ export function OperationsAnalyticsAndReportsManager({
                           {sc.weeklyTarget * 4}
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
-                          {sc.resolutionRatePercent}%
+                          {sc.resolutionRatePercent !== null ? `${sc.resolutionRatePercent}%` : '—'}
                         </td>
                         <td className="py-2.5 px-3 font-mono text-amber-700">
-                          {sc.escalationRatePercent}%
+                          {sc.escalationRatePercent !== null ? `${sc.escalationRatePercent}%` : '—'}
                         </td>
                         <td className="py-2.5 px-3 font-mono text-rose-700">
                           {sc.reopenedCasesCount}
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-emerald-800">
-                          {sc.slaCompliancePercent}%
+                          {sc.slaCompliancePercent !== null ? `${sc.slaCompliancePercent}%` : '—'}
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-indigo-800">
                           {sc.avgQaScore !== null

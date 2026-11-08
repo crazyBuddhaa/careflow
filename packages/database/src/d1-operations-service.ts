@@ -3459,6 +3459,36 @@ export class D1OperationsManagementService {
           String(i.issued_by_name || '').toLowerCase() === agNameLower
       ).length;
 
+      const agentAssignedOrCreatedComplaints = allComplaints.filter(
+        (c) =>
+          (agUserId &&
+            (String(c.assigned_agent_id) === agUserId ||
+              String(c.created_by_user_id) === agUserId)) ||
+          String(c.assigned_agent_id || '') === agId ||
+          String(c.assigned_agent_name || '').toLowerCase() === agNameLower ||
+          String(c.created_by_name || '').toLowerCase() === agNameLower
+      );
+
+      const agentResHours: number[] = [];
+      for (const c of assignedConvs) {
+        if (String(c.status) === 'resolved' || String(c.status) === 'closed') {
+          const hrs =
+            (new Date(String(c.updated_at)).getTime() -
+              new Date(String(c.created_at)).getTime()) /
+            3600000;
+          if (hrs >= 0 && hrs < 24 * 90) agentResHours.push(hrs);
+        }
+      }
+      for (const clm of agentAssignedOrCreatedComplaints) {
+        if (String(clm.status) === 'resolved' && clm.resolved_at) {
+          const hrs =
+            (new Date(String(clm.resolved_at)).getTime() -
+              new Date(String(clm.created_at)).getTime()) /
+            3600000;
+          if (hrs >= 0 && hrs < 24 * 90) agentResHours.push(hrs);
+        }
+      }
+
       return {
         agentId: agId,
         userId: agUserId,
@@ -3485,7 +3515,12 @@ export class D1OperationsManagementService {
                 (agentRespMinutes.reduce((a, b) => a + b, 0) / agentRespMinutes.length) * 10
               ) / 10
             : null,
-        avgResolutionHours,
+        avgResolutionHours:
+          agentResHours.length > 0
+            ? Math.round(
+                (agentResHours.reduce((a, b) => a + b, 0) / agentResHours.length) * 10
+              ) / 10
+            : null,
       };
     });
 
@@ -3827,17 +3862,28 @@ export class D1OperationsManagementService {
         Boolean(c.assigned_specialist_name)
     ).length;
 
-    // Customer Satisfaction (CSAT) & QA Evaluations lookup
+    // Customer Satisfaction (CSAT) & QA Evaluations lookup (attributed per handling agent)
     let csatScore: number | null = null;
     const qaByAgent = new Map<string, number[]>();
+    let rawCsatRows: Array<{
+      conversation_id: string | null;
+      complaint_id: string | null;
+      case_reference: string | null;
+      rating: number;
+    }> = [];
     try {
       const [csatRows, qaRows] = await Promise.all([
         this.db
           .prepare(
-            `SELECT rating FROM customer_feedback_ratings WHERE organization_id = ?`
+            `SELECT conversation_id, complaint_id, case_reference, rating FROM customer_feedback_ratings WHERE organization_id = ?`
           )
           .bind(organizationId)
-          .all<{ rating: number }>(),
+          .all<{
+            conversation_id: string | null;
+            complaint_id: string | null;
+            case_reference: string | null;
+            rating: number;
+          }>(),
         this.db
           .prepare(
             `SELECT agent_id, agent_name, overall_score FROM qa_evaluations WHERE organization_id = ?`
@@ -3846,42 +3892,174 @@ export class D1OperationsManagementService {
           .all<{ agent_id: string; agent_name: string; overall_score: number }>(),
       ]);
 
-      if (csatRows.results.length > 0) {
-        const sum = csatRows.results.reduce((acc, r) => acc + Number(r.rating ?? 5), 0);
-        csatScore = Math.round((sum / csatRows.results.length) * 10) / 10;
+      rawCsatRows = csatRows.results;
+      if (rawCsatRows.length > 0) {
+        const sum = rawCsatRows.reduce((acc, r) => acc + Number(r.rating ?? 5), 0);
+        csatScore = Math.round((sum / rawCsatRows.length) * 10) / 10;
       }
 
       for (const q of qaRows.results) {
-        const key = String(q.agent_name || q.agent_id).toLowerCase();
-        const arr = qaByAgent.get(key) || [];
-        arr.push(Number(q.overall_score ?? 100));
-        qaByAgent.set(key, arr);
+        const nameKey = String(q.agent_name || '').toLowerCase();
+        const idKey = String(q.agent_id || '').toLowerCase();
+        if (nameKey) {
+          const arr = qaByAgent.get(nameKey) || [];
+          arr.push(Number(q.overall_score ?? 100));
+          qaByAgent.set(nameKey, arr);
+        }
+        if (idKey && idKey !== nameKey) {
+          const arr = qaByAgent.get(idKey) || [];
+          arr.push(Number(q.overall_score ?? 100));
+          qaByAgent.set(idKey, arr);
+        }
       }
     } catch {
       // Tables not yet queried
     }
 
-    // Attach QA and SLA/Resolution rates to agentPerformance
+    // Attach QA, handling-agent CSAT, and real SLA/Resolution rates to agentPerformance
     for (const ag of agentPerformance) {
-      const qaArr = qaByAgent.get(ag.displayName.toLowerCase()) || [];
+      const agNameLower = ag.displayName.toLowerCase();
+      const agIdLower = ag.agentId.toLowerCase();
+      const agUserIdLower = (ag.userId || '').toLowerCase();
+
+      const qaArr =
+        qaByAgent.get(agNameLower) ||
+        qaByAgent.get(agIdLower) ||
+        (agUserIdLower ? qaByAgent.get(agUserIdLower) : undefined) ||
+        [];
       ag.avgQaScore =
         qaArr.length > 0
           ? Math.round((qaArr.reduce((a, b) => a + b, 0) / qaArr.length) * 10) / 10
           : null;
-      ag.avgCsatScore = csatScore;
-      ag.resolutionRatePercent =
-        ag.assignedConversations > 0
-          ? Math.round((ag.conversationsResolved / ag.assignedConversations) * 100)
-          : 100;
-      ag.escalationRatePercent =
-        ag.assignedConversations > 0
-          ? Math.round((ag.casesEscalated / ag.assignedConversations) * 100)
-          : 0;
-      ag.slaCompliancePercent =
-        ag.avgFirstResponseMinutes !== null &&
-        ag.avgFirstResponseMinutes > config.slaFirstResponseMinutes
-          ? 82
-          : 98;
+
+      // Attribute CSAT strictly to the handling agent of the linked conversation or complaint
+      const agentCsatRatings: number[] = [];
+      for (const fb of rawCsatRows) {
+        const matchedComplaint = allComplaints.find(
+          (c) =>
+            (fb.complaint_id && String(c.id) === String(fb.complaint_id)) ||
+            (fb.case_reference &&
+              String(c.reference_code).toLowerCase() ===
+                String(fb.case_reference).toLowerCase())
+        );
+        const targetConvId =
+          fb.conversation_id ||
+          (matchedComplaint?.conversation_id
+            ? String(matchedComplaint.conversation_id)
+            : null);
+        const matchedConv = targetConvId
+          ? allConvs.find((c) => String(c.id) === String(targetConvId))
+          : undefined;
+
+        let handledByThisAgent = false;
+        if (matchedComplaint) {
+          const cAgentId = String(matchedComplaint.assigned_agent_id || '').toLowerCase();
+          const cAgentName = String(matchedComplaint.assigned_agent_name || '').toLowerCase();
+          const cCreatorId = String(matchedComplaint.created_by_user_id || '').toLowerCase();
+          const cCreatorName = String(matchedComplaint.created_by_name || '').toLowerCase();
+          if (
+            (cAgentId && (cAgentId === agIdLower || (agUserIdLower && cAgentId === agUserIdLower))) ||
+            (cAgentName && cAgentName === agNameLower) ||
+            (!cAgentName &&
+              !cAgentId &&
+              ((cCreatorId &&
+                (cCreatorId === agIdLower || (agUserIdLower && cCreatorId === agUserIdLower))) ||
+                cCreatorName === agNameLower))
+          ) {
+            handledByThisAgent = true;
+          }
+        }
+        if (!handledByThisAgent && matchedConv) {
+          const convAgentId = String(matchedConv.assigned_agent_id || '').toLowerCase();
+          const convAgentName = String(matchedConv.assigned_agent_name || '').toLowerCase();
+          if (
+            (convAgentId &&
+              (convAgentId === agIdLower || (agUserIdLower && convAgentId === agUserIdLower))) ||
+            (convAgentName && convAgentName === agNameLower)
+          ) {
+            handledByThisAgent = true;
+          }
+        }
+        if (handledByThisAgent) {
+          agentCsatRatings.push(Number(fb.rating ?? 5));
+        }
+      }
+
+      ag.avgCsatScore =
+        agentCsatRatings.length > 0
+          ? Math.round(
+              (agentCsatRatings.reduce((a, b) => a + b, 0) / agentCsatRatings.length) * 10
+            ) / 10
+          : null;
+
+      // Calculate SLA, Resolution Rate & Escalation Rate only when the agent has actual case activity
+      const agentComplaints = allComplaints.filter((c) => {
+        const cAgentId = String(c.assigned_agent_id || '').toLowerCase();
+        const cAgentName = String(c.assigned_agent_name || '').toLowerCase();
+        const cCreatorId = String(c.created_by_user_id || '').toLowerCase();
+        const cCreatorName = String(c.created_by_name || '').toLowerCase();
+        return (
+          (cAgentId && (cAgentId === agIdLower || (agUserIdLower && cAgentId === agUserIdLower))) ||
+          (cAgentName && cAgentName === agNameLower) ||
+          (cCreatorId &&
+            (cCreatorId === agIdLower || (agUserIdLower && cCreatorId === agUserIdLower))) ||
+          (cCreatorName && cCreatorName === agNameLower)
+        );
+      });
+
+      const hasAnyCaseActivity =
+        ag.assignedConversations > 0 ||
+        ag.conversationsHandled > 0 ||
+        agentComplaints.length > 0;
+
+      if (!hasAnyCaseActivity) {
+        ag.resolutionRatePercent = null;
+        ag.escalationRatePercent = null;
+        ag.slaCompliancePercent = null;
+      } else {
+        const resolvedClaimsCount = agentComplaints.filter(
+          (c) => String(c.status) === 'resolved'
+        ).length;
+        const totalTrackedCases =
+          ag.assignedConversations > 0
+            ? ag.assignedConversations
+            : ag.conversationsHandled > 0
+              ? ag.conversationsHandled
+              : agentComplaints.length;
+        const totalResolvedCases =
+          ag.assignedConversations > 0 || ag.conversationsHandled > 0
+            ? ag.conversationsResolved
+            : resolvedClaimsCount;
+
+        ag.resolutionRatePercent = Math.min(
+          100,
+          Math.round((totalResolvedCases / Math.max(1, totalTrackedCases)) * 100)
+        );
+        ag.escalationRatePercent = Math.min(
+          100,
+          Math.round((ag.casesEscalated / Math.max(1, totalTrackedCases)) * 100)
+        );
+
+        const agentBacklogRecords = backlogRecords.filter(
+          (r) =>
+            (r.assignedAgentName && r.assignedAgentName.toLowerCase() === agNameLower) ||
+            r.assignedTo.toLowerCase() === agNameLower
+        );
+        const agentOverdueCount = agentBacklogRecords.filter((r) => r.isOverdue24h).length;
+        const slaDenom = Math.max(
+          1,
+          ag.assignedConversations + agentComplaints.length
+        );
+        const baseSla = Math.max(
+          0,
+          Math.round(((slaDenom - agentOverdueCount) / slaDenom) * 100)
+        );
+        ag.slaCompliancePercent =
+          ag.avgFirstResponseMinutes !== null &&
+          ag.avgFirstResponseMinutes > config.slaFirstResponseMinutes
+            ? Math.min(baseSla, 85)
+            : baseSla;
+      }
     }
 
     // Channel Analytics breakdown
@@ -3951,7 +4129,7 @@ export class D1OperationsManagementService {
     const slaCompliancePercentage =
       totalCasesForSla > 0
         ? Math.max(0, Math.round(((totalCasesForSla - overdueTotal) / totalCasesForSla) * 100))
-        : 100;
+        : null;
 
     return {
       dateRange: {
@@ -4340,21 +4518,13 @@ export class D1OperationsManagementService {
   }
 
   async getAgentScorecards(organizationId: string): Promise<AgentScorecardDto[]> {
-    const [dailyMetrics, weeklyMetrics, monthlyMetrics, qaEvals, feedbacks] =
+    const [dailyMetrics, weeklyMetrics, monthlyMetrics, qaEvals] =
       await Promise.all([
         this.getOperationsDashboardMetrics(organizationId, { preset: 'today' }),
         this.getOperationsDashboardMetrics(organizationId, { preset: 'last_7_days' }),
         this.getOperationsDashboardMetrics(organizationId, { preset: 'last_30_days' }),
         this.listQaEvaluations(organizationId),
-        this.listCustomerFeedback(organizationId),
       ]);
-
-    const avgCsat =
-      feedbacks.length > 0
-        ? Math.round(
-            (feedbacks.reduce((s, f) => s + f.rating, 0) / feedbacks.length) * 10
-          ) / 10
-        : null;
 
     return monthlyMetrics.agentPerformance.map((ag) => {
       const dailyAg = dailyMetrics.agentPerformance.find(
@@ -4367,6 +4537,7 @@ export class D1OperationsManagementService {
       const agentEvals = qaEvals.filter(
         (q) =>
           q.agentId === ag.agentId ||
+          (ag.userId && q.agentId === ag.userId) ||
           q.agentName.toLowerCase() === ag.displayName.toLowerCase()
       );
       const avgQaScore =
@@ -4401,16 +4572,16 @@ export class D1OperationsManagementService {
         weeklyHandled: weeklyAg?.conversationsHandled ?? 0,
         monthlyHandled: ag.conversationsHandled,
         weeklyTarget: 25,
-        resolutionRatePercent: ag.resolutionRatePercent ?? 100,
-        escalationRatePercent: ag.escalationRatePercent ?? 0,
+        resolutionRatePercent: ag.resolutionRatePercent ?? null,
+        escalationRatePercent: ag.escalationRatePercent ?? null,
         reopenedCasesCount: ag.reopenedCount ?? 0,
         pendingCasesCount: ag.openTickets,
-        slaCompliancePercent: ag.slaCompliancePercent ?? 98,
+        slaCompliancePercent: ag.slaCompliancePercent ?? null,
         avgFirstResponseMinutes: ag.avgFirstResponseMinutes,
         avgResolutionHours: ag.avgResolutionHours,
         avgQaScore,
         qaEvaluationsCount: agentEvals.length,
-        avgCsatScore: avgCsat,
+        avgCsatScore: ag.avgCsatScore ?? null,
         workloadComplexityScore,
       };
     });

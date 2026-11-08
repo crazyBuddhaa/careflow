@@ -2,7 +2,7 @@ import type { BusinessPortalConfig } from '@careflow/shared';
 import {
   DEFAULT_PORTAL_TEMPLATE_PRESET,
   NORTHSTAR_COMMERCE_PRESET,
-} from '@careflow/database/d1';
+} from '@careflow/database/d1-portal-presets';
 import {
   classifyTenantHostname,
   type BusinessPortalRegistryPort,

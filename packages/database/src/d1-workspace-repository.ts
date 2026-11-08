@@ -1,7 +1,6 @@
 import {
   ConversationStatus,
   DEFAULT_PERMISSIONS_BY_ROLE,
-  DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS,
   isRegisteredPlatformSuperAdminEmail,
   EscalationPriority,
   MessageSenderType,
@@ -2808,7 +2807,7 @@ export class D1WorkspaceRepository {
     const userId = existingUser?.id ?? `usr_${Math.random().toString(36).slice(2, 10)}`;
     const passwordHash = hashPassword(input.password);
     const initialVerifiedFlag = input.requireEmailVerification ? 0 : 1;
-    const isSuperAdmin = (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email) ? 1 : 0;
+    const isSuperAdmin = isRegisteredPlatformSuperAdminEmail(email) ? 1 : 0;
 
     if (existingUser) {
       await this.db
@@ -3038,7 +3037,7 @@ export class D1WorkspaceRepository {
     const userId = existingUser?.id ?? `usr_${Math.random().toString(36).slice(2, 10)}`;
     const passwordHash = hashPassword(input.password);
     const initialVerifiedFlag = input.requireEmailVerification ? 0 : 1;
-    const isSuperAdmin = (DEFAULT_PLATFORM_SUPER_ADMIN_EMAILS as readonly string[]).includes(email) ? 1 : 0;
+    const isSuperAdmin = isRegisteredPlatformSuperAdminEmail(email) ? 1 : 0;
 
     if (existingUser) {
       await this.db
@@ -3538,9 +3537,6 @@ export class D1WorkspaceRepository {
    * ------------------------------------------------------------------------- */
 
   async isUserPlatformAdmin(userId: string, email?: string): Promise<boolean> {
-    if (email && !isRegisteredPlatformSuperAdminEmail(email)) {
-      return false;
-    }
     if (email && isRegisteredPlatformSuperAdminEmail(email)) {
       return true;
     }
@@ -3549,7 +3545,7 @@ export class D1WorkspaceRepository {
       .bind(userId)
       .first<{ email: string; is_platform_admin: number }>();
     if (!row) return false;
-    return isRegisteredPlatformSuperAdminEmail(row.email);
+    return Boolean(row.is_platform_admin) || isRegisteredPlatformSuperAdminEmail(row.email);
   }
 
   async getPlatformAdminOverview(params: {

@@ -11,10 +11,10 @@
 
 ### 1. Project Structure & Application Architecture
 CustomCare is organized as a modular TypeScript workspace monorepo (`pnpm` / `npm` workspaces):
-- `apps/web`: Next.js 15 App Router application serving the Customer Support Portals (`/portal/[businessSlug]`), Business & Agent Operations Shell (`/admin`), Central Platform Super-Admin Console (`/platform-admin`), 7-Step Business Onboarding Flow (`/onboarding`), Unified Login & 2FA Gate (`/login`), Agent Invitation Acceptance Flow (`/invite/[token]`), and Telegram Mini App (`/tg-app`).
+- `apps/web`: Next.js 16 App Router application serving the Customer Support Portals (`/portal/[businessSlug]`), Business & Agent Operations Shell (`/admin`), Central Platform Super-Admin Console (`/platform-admin`), 7-Step Business Onboarding Flow (`/onboarding`), Unified Login & 2FA Gate (`/login`), Agent Invitation Acceptance Flow (`/invite/[token]`), and Telegram Mini App (`/tg-app`).
 - `apps/widget`: Embeddable JavaScript customer support widget targeting the `/api/widget/[publicToken]` runtime endpoint.
 - `packages/shared`: Canonical TypeScript domain types, constants, role definitions, portal presets, and operational DTOs (`operations.ts`, `portal.ts`, `knowledge.ts`, `types.ts`).
-- `packages/database`: Cloudflare D1 / Node SQLite (`node:sqlite`) database adapter (`d1.ts`, `sqlite-d1-adapter.ts`), schema bootstrapper (`d1-bootstrap.ts`), authentication & session service (`d1-auth-service.ts`), multi-channel engine (`d1-channel-service.ts`), knowledge base repository (`d1-knowledge-repository.ts`), workspace repository (`d1-workspace-repository.ts`), and operations/claims/inventory/analytics engine (`d1-operations-service.ts`).
+- `packages/database`: Cloudflare D1 / Node SQLite (`node:sqlite`) database adapter (`d1.ts`, `sqlite-d1-adapter.ts`), client-safe portal presets (`d1-portal-presets.ts`), schema bootstrapper (`d1-bootstrap.ts`), authentication & session service (`d1-auth-service.ts`), multi-channel engine (`d1-channel-service.ts`), knowledge base repository (`d1-knowledge-repository.ts`), workspace repository (`d1-workspace-repository.ts`), and operations/claims/inventory/analytics engine (`d1-operations-service.ts`).
 - `packages/support-engine`: Portable domain modules for conversations, messages, smart troubleshooting, human escalation, knowledge base importing, and Telegram webhook normalization.
 - `packages/validation`: Zod runtime validation schemas for API payloads, workspace settings, knowledge base records, and environment variables.
 - `cloudflare/d1/migrations`: Sequential SQL migrations (`0001` through `0008`) enforcing foreign keys and cross-tenant isolation triggers.
@@ -22,7 +22,7 @@ CustomCare is organized as a modular TypeScript workspace monorepo (`pnpm` / `np
 ### 2. Backend APIs & Services
 All backend APIs are implemented as server-side Route Handlers under `apps/web/src/app/api/`:
 - **Authentication & Identity (`/api/auth/*`)**: Registration (`business` vs `agent` account separation), scrypt password hashing, email verification, password reset, TOTP 2FA enrollment/challenge/recovery codes, session management, workspace switching, and single-use invitation tokens.
-- **Workspace & Multi-Channel Operations (`/api/admin/*`)**: Unified conversations inbox, message & internal note dispatch, attachment streaming, saved replies, AI & Knowledge Copilot (`/api/workspace/conversations/[id]/copilot`), customer directory, agent roster, Claims & Resolution (`/api/admin/claims`), Replacement Inventory (`/api/admin/inventory`), Operations Dashboard & Closing Reports (`/api/admin/operations/dashboard`), QA Evaluations & Scorecards (`/api/admin/operations/qa`), and Workflow Automation (`/api/admin/operations/automation`).
+- **Workspace & Multi-Channel Operations (`/api/admin/*`)**: Unified conversations inbox, message & internal note dispatch, attachment streaming (`/api/admin/attachments/[id]`), saved replies, AI & Knowledge Copilot (`/api/workspace/conversations/[id]/copilot`), customer directory, agent roster, Claims & Resolution (`/api/admin/claims` and `/api/admin/claims/[id]`), Replacement Inventory (`/api/admin/inventory`), and Operations Dashboard, Closing Reports, QA Evaluations, Agent Scorecards, CSAT & Workflow Automation (`/api/admin/operations/dashboard` via `GET` and action-dispatched `POST` actions: `create_qa_evaluation`, `upsert_automation_rule`, `toggle_automation_rule`, `run_automation_sweep`, `submit_csat_feedback`, `seed_demo_scenario`).
 - **Customer & External Channels**:
   - Website Widget API (`/api/widget/[publicToken]`)
   - Customer Portal Assistant, Escalation & Complaint APIs (`/api/portal/[businessSlug]/*`)
@@ -35,7 +35,7 @@ All backend APIs are implemented as server-side Route Handlers under `apps/web/s
 - **Encryption at Rest**: Sensitive channel bot tokens, customer-supplied complaint login credentials, and replacement inventory credentials are encrypted using AES-256-GCM (`encryptIntegrationCredentials` / `decryptIntegrationCredentials`) before storage.
 
 ### 4. Authentication, Authorization & Multi-Tenant Isolation
-- **Role Hierarchy**: `customer` < `viewer` < `agent` < `supervisor` < `admin` < `owner`, plus `Platform Super Admin` restricted strictly to registered platform administrator accounts (`oluwafemiadekanmi76@gmail.com` and `admin@getcustomcare.xyz`).
+- **Role Hierarchy**: `customer` < `viewer` < `agent` < `supervisor` < `admin` < `owner`, plus `Platform Super Admin` restricted strictly to the platform role account (`admin@getcustomcare.xyz`) and accounts configured via `CAREFLOW_SUPER_ADMIN_EMAILS`.
 - **2FA Policy**: Mandatory TOTP 2FA setup is enforced strictly for Central Platform Super Admins; optional self-service 2FA is available for all business owners, admins, supervisors, and agents.
 - **Business vs. Agent Independence**: Registering a Support Agent account creates a standalone personal agent identity (`org_customcare_agent_hub` holding context) and displays *"Get an Invite to start working"* until invited to a business workspace—never forcing agents to create a business account.
 

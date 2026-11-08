@@ -1,9 +1,9 @@
-# CareFlow
+# CustomCare (`getcustomcare.xyz`)
 
 **Smarter Support. Better Experiences.**  
-**Version:** `0.1.0` | **Initial Client:** `UltimateTechApp`
+**Version:** `0.2.0` | **Runtime:** `Next.js 16.4.3 + Cloudflare Workers + Cloudflare D1 (SQLite)`
 
-CareFlow is a modular, portable customer support platform designed to reduce repetitive enquiries through deterministic self-service flows, centralize product knowledge, and streamline human escalation across web and messaging channels.
+CustomCare is a multi-tenant, multi-channel customer support, claims verification, replacement inventory, and workforce operations platform built on Next.js 16 (App Router) and Cloudflare D1 (`SQLite`).
 
 ---
 
@@ -12,27 +12,25 @@ CareFlow is a modular, portable customer support platform designed to reduce rep
 ```text
 careflow/
   apps/
-    web/                 # Next.js (App Router) web application & REST Route Handlers
-    widget/              # Embeddable customer support widget SDK scaffold
+    web/                 # Next.js 16 (App Router) web application, portals, workspaces & API Route Handlers
+    widget/              # Embeddable customer support widget SDK targeting /api/widget/[publicToken]
   packages/
-    database/            # Supabase browser/server client factories, Realtime & Storage ports
-    shared/              # Domain types, enums, API contracts, and platform constants
+    database/            # Cloudflare D1 / Node SQLite repositories, auth, channels, claims, inventory & analytics
+    shared/              # Canonical TypeScript domain types, enums, API contracts, and platform constants
     validation/          # Zod schemas for environment variables and REST API payloads
-    support-engine/      # Portable service interfaces for all 9 core support domain modules
+    support-engine/      # Portable domain services for conversations, troubleshooting, and channel routing
   cloudflare/
-    d1/migrations/       # Cloudflare D1 (SQLite) migrations for multi-tenant Knowledge Base
-  supabase/
-    config.toml          # Legacy Supabase CLI configuration
-    migrations/          # Legacy PostgreSQL migrations
-    seed.sql/            # Initial development seed scripts
+    d1/migrations/       # Sequential Cloudflare D1 (SQLite) migrations (0001 through 0008)
   docs/
-    ARCHITECTURE.md      # Modular architecture, portability, channels, and security design
-    DATABASE.md          # Database schema, tenant isolation, and D1/SQLite persistence
-    API.md               # REST API Route Handlers, envelope convention, and Zod validation
-    DEVELOPMENT.md       # Local workflow & Cloudflare Workers + D1 deployment guide
-  .env.example           # Required & optional environment variables template
+    PLATFORM_AUDIT_AND_ROADMAP.md        # 20-Point Repository Audit Matrix, Health Report & Backlog
+    COMMERCIAL_AND_TECHNICAL_HANDBOOK.md # 12-Part Technical, Operational & Commercial Readiness Suite
+    ARCHITECTURE.md                      # 6-Module System Architecture & Multi-Tenant Isolation Blueprint
+    DATABASE.md                          # Cloudflare D1 Schema, Triggers, and AES-256-GCM Credential Vault
+    API.md                               # REST API Route Handlers, Envelope Convention, and Zod Validation
+    DEVELOPMENT.md                       # Local Development Workflow & Cloudflare Workers + D1 Deployment Guide
+  .env.example           # Environment variables template
   pnpm-workspace.yaml    # Monorepo workspace declaration
-  wrangler.jsonc         # Cloudflare Workers + OpenNext monorepo deployment configuration
+  wrangler.jsonc         # Cloudflare Workers + OpenNext + D1 deployment configuration
 ```
 
 ---
@@ -47,18 +45,25 @@ careflow/
    ```bash
    cp .env.example .env.local
    ```
-   Populate `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` from your Supabase project settings.
+   Local development automatically uses Node's built-in `node:sqlite` (`DatabaseSync`) with zero external database setup required, and automatically runs all D1 schema bootstrap statements on first request.
 3. **Start the development server**
    ```bash
-   pnpm dev
+   npm run dev
    ```
-   Open `http://localhost:3000` to view the CareFlow application or inspect `http://localhost:3000/api/health`.
+   Open `http://localhost:3000` to view the CustomCare application or inspect `http://localhost:3000/api/health`.
+4. **Run automated test suites & typecheck**
+   ```bash
+   npm test
+   npm run lint
+   ```
 
 ---
 
 ## Documentation
 
+- [Comprehensive Platform Audit & Roadmap](./docs/PLATFORM_AUDIT_AND_ROADMAP.md)
+- [Commercial & Technical Readiness Handbook](./docs/COMMERCIAL_AND_TECHNICAL_HANDBOOK.md)
 - [Architecture Overview](./docs/ARCHITECTURE.md)
-- [Database & Row Level Security](./docs/DATABASE.md)
+- [Database & Tenant Isolation](./docs/DATABASE.md)
 - [REST API Specification](./docs/API.md)
 - [Development & Deployment Guide](./docs/DEVELOPMENT.md)

@@ -329,13 +329,18 @@ test('8. UltimateTechApp is not pre-seeded and registers through normal registra
 test('9. Central Platform Admin link and privileges are strictly restricted to registered platform super admin accounts', async () => {
   const { workspaceRepo } = await createTestService();
 
-  // 1. Registered super admin accounts
-  assert.equal(isRegisteredPlatformSuperAdminEmail('oluwafemiadekanmi76@gmail.com'), true);
+  // 1. Registered super admin role account & environment-configured super admins
   assert.equal(isRegisteredPlatformSuperAdminEmail('admin@getcustomcare.xyz'), true);
-  assert.equal(isRegisteredPlatformSuperAdminEmail('  OLUWAFEMIADEKANMI76@GMAIL.COM  '), true);
+  assert.equal(isRegisteredPlatformSuperAdminEmail('  ADMIN@GETCUSTOMCARE.XYZ  '), true);
+  assert.equal(
+    isRegisteredPlatformSuperAdminEmail('ops-root@getcustomcare.xyz', {
+      CAREFLOW_SUPER_ADMIN_EMAILS: 'ops-root@getcustomcare.xyz, security-root@getcustomcare.xyz',
+    }),
+    true
+  );
 
-  // 2. Removed and non-super-admin accounts are rejected
-  assert.equal(isRegisteredPlatformSuperAdminEmail('asuracorps@gmail.com'), false);
+  // 2. Non-super-admin accounts are rejected
+  assert.equal(isRegisteredPlatformSuperAdminEmail('agent@northstar.example'), false);
   assert.equal(isRegisteredPlatformSuperAdminEmail('normaluser@business.example'), false);
   assert.equal(isRegisteredPlatformSuperAdminEmail('admin@anyothercompany.com'), false);
   assert.equal(isRegisteredPlatformSuperAdminEmail(''), false);
@@ -358,10 +363,10 @@ test('9. Central Platform Admin link and privileges are strictly restricted to r
   );
   assert.equal(isSuperAdminNormal, false);
 
-  // 4. Authenticate registered super-admin account
+  // 4. Authenticate registered super-admin role account
   const isSuperAdminRegistered = await workspaceRepo.isUserPlatformAdmin(
     'dummy_super_id',
-    'oluwafemiadekanmi76@gmail.com'
+    'admin@getcustomcare.xyz'
   );
   assert.equal(isSuperAdminRegistered, true);
 });

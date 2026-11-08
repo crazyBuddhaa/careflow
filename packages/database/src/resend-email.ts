@@ -828,7 +828,7 @@ export function getCustomCareEmailTemplateGallery(
   const cfg = resolveResendConfig(undefined, envSource);
   const baseUrl = cfg.appBaseUrl || 'https://getcustomcare.xyz';
   const fromAddr = cfg.fromAddress || 'support@getcustomcare.xyz';
-  const sampleRecipient = 'oluwafemiadekanmi76@gmail.com';
+  const sampleRecipient = 'admin@getcustomcare.xyz';
   const nowUtc = new Date().toUTCString();
 
   const buildItem = (
